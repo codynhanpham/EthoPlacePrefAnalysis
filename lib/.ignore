@@ -1,0 +1,6 @@
+# Values are relative paths to this current folder (wildcards are NOT supported)
+# This file contains paths to subfolders that will be ignored when loading libraries
+# Note that you cannot ignore singular files as MATLAB will import the whole folder
+
+.template
+.templates

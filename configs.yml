@@ -1,0 +1,10 @@
+preferences:
+
+defaults:
+  stimuli_directory: "../Stimuli/playlists"
+  master_metadata_table: "../Place Preferences - Master Metadata.xlsx"
+  ethovision_data_root: "../ETHOVISION"
+
+project_settings:
+  EthoVision:
+    CameraImgWidthFOV_cm: 58.5
