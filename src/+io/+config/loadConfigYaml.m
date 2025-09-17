@@ -1,5 +1,5 @@
 function configs = loadConfigYaml(configFile)
-    %%LOADCONFIGYAML - Load configuration from a YAML file.
+    %%LOADCONFIGYAML Load configuration from a YAML file.
     %
     %   This function returns a struct containing configuration parameters
     %   loaded from a specified YAML file.

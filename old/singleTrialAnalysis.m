@@ -8,28 +8,27 @@ function output = singleTrialAnalysis(ethovisionXlsx, stimuliDir, masterMetadata
     %       masterMetadataTableXlsx - The master metadata table loaded from an Excel file
     %
     %   Name-Value Pair Arguments:
-    %       - 'NiDaqAudioPlayerBin' (optional, but recommended): Path to the `nidaq_audioplayer` binary (same as one used for stimuli playback) for extracting embedded timestamps.
-    %           + On Windows, the default is to search in `%LOCALAPPDATA%/NI-DAQmxAudioPlayer/` (default NSIS installer location)
-    %           + On Linux, the default is to search in `~/.local/share/NI-DAQmxAudioPlayer/`
-    %           + If not found, an error will be thrown.
+    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
     %
     %   Outputs:
     %       output - A struct containing the analysis results:
     %           + animalMetadata - Metadata about the animal (age, sex, strain, genotype, etc.) for grouping
     %           + matchedStimFrameFreq - Frequency of matched stimulus frames (the "preferred" stimuli)
+    %
+    %   See also: io.config.loadConfigYaml, io.ethovision.alignEthovisionRawToStim, io.metadata.loadMasterMetadata, io.stimuli.extractMetadata
 
     arguments
         ethovisionXlsx {mustBeFile}
         stimuliDir {mustBeFolder}
         masterMetadataTableXlsx {mustBeFile}
 
-        kvargs.NiDaqAudioPlayerBin {validator.mustBeFileOrEmpty} = ''
+        kvargs.Config (1,1) struct = struct()
     end
 
 
     [header, datatable, units, stimulusFrameRange, animalMetadata] = alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
         MasterMetadataTable=masterMetadataTableXlsx, ...
-        NiDaqAudioPlayerBin=kvargs.NiDaqAudioPlayerBin ...
+        Config=kvargs.Config ...
     );
 
     % Count the frequency of animalMatchedStim (Animal position is in the "active" speaker/stim zone)

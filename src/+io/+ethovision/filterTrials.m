@@ -10,6 +10,8 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
     %       trialsData - A struct array containing the filtered trials with 2 fields:
     %                'media' - path to the media file (in Media Files subfolder)
     %                'data'  - path to the data file (in Export Files subfolder)
+    %                'trialNumeric' - l
+    % ast numeric part of the trial name
 
     arguments
         projectFolder {validator.isEthovisionProjectFolder}
@@ -30,13 +32,22 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
     [~, dataFileBaseNames, ~] = cellfun(@fileparts, dataFileNames, 'UniformOutput', false);
 
     % For each media file, check for a matching data file whose name ends with the base name
-    trials = struct('media', {}, 'data', {});
+    trials = struct('media', {}, 'data', {}, 'trialNumeric', []);
 
     for i = 1:numel(mediaFileBaseNames)
         matchingDataFiles = dataFileBaseNames(endsWith(dataFileBaseNames, mediaFileBaseNames{i}));
         if ~isempty(matchingDataFiles)
+            % Split whitespace, trim and parse the last numeric part of the media file base name
+            nameParts = strsplit(strtrim(mediaFileBaseNames{i}));
+            lastPart = nameParts{end};
+            lastPart = strtrim(lastPart);
+            trialNum = str2double(lastPart);
+            if isnan(trialNum)
+                trialNum = [];
+            end
             trials(end+1) = struct('media', fullfile(mediaFolder, mediaFileNames{i}), ...
-                'data', fullfile(exportFolder, [matchingDataFiles{1}, '.xlsx'])); %#ok<AGROW>
+                'data', fullfile(exportFolder, [matchingDataFiles{1}, '.xlsx']), ...
+                'trialNumeric', trialNum); %#ok<AGROW>
         end
     end
     

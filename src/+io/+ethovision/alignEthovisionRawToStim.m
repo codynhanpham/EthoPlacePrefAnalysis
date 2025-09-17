@@ -8,11 +8,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
     %       stimuliDir     - The directory containing original stimuli `.flac` files with embedded timestamps
     %
     %   Name-Value Pair Arguments:
-    %       - 'NiDaqAudioPlayerBin' (optional, but recommended): Path to the `nidaq_audioplayer` binary (same as one used for stimuli playback) for extracting embedded timestamps.
-    %           + On Windows, the default is to search in `%LOCALAPPDATA%/NI-DAQmxAudioPlayer/` (default NSIS installer location)
-    %           + On Linux, the default is to search in `~/.local/share/NI-DAQmxAudioPlayer/`
-    %           + If not found, an error will be thrown.
-    %
+    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
     %       - 'ExpectedNumVariables' (optional): The number of data columns in the table to expect in EthoVision exported XLSX file. Default max is 50, with empty columns removed.
     %
     %       - 'StimulusProtocol' (optional if `MasterMetadataTable` exists): The name of the stimuli file played during this trial, including the `.flac` extension. This file must exists in `stimuliDir`. If `MasterMetadataTable` is provided, this value will take precedence.
@@ -32,26 +28,17 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
     %       stimulusFrameRange - The frame range for the stimulus as [startFrame, endFrame], inclusive
     %       animalMetadata - A struct containing metadata about the animal (sex, genotype, strain, age)
     %
-    %   See also: loadEthovisionXlsx, loadMetadataTable
+    %   See also: io.config.loadConfigYaml, io.ethovision.loadEthovisionXlsx, io.metadata.loadMasterMetadata, io.stimuli.extractMetadata
 
     arguments
         ethovisionXlsx {mustBeFile}
         stimuliDir {mustBeFolder}
-        kvargs.NiDaqAudioPlayerBin {validator.mustBeFileOrEmpty} = ''
+        kvargs.Config (1,1) struct = struct()
         kvargs.ExpectedNumVariables {mustBeNumeric} = 50
         kvargs.StimulusProtocol {mustBeTextScalar} = ''
         kvargs.StimStartFrame {mustBePositiveIntOrEmpty} = []
         kvargs.SpeakerFlipped {mustBeNumericLogicalOrEmpty} = []
-        kvargs.MasterMetadataTable {validator.mustBeFileOrEmpty} = ''
-    end
-
-    % Cache binary path to avoid repeated filesystem searches
-    persistent cachedNiDaqAudioPlayerBinaryPath;
-    if isempty(kvargs.NiDaqAudioPlayerBin)
-        if isempty(cachedNiDaqAudioPlayerBinaryPath)
-            cachedNiDaqAudioPlayerBinaryPath = findNiDaqAudioPlayerBin();
-        end
-        kvargs.NiDaqAudioPlayerBin = cachedNiDaqAudioPlayerBinaryPath;
+        kvargs.MasterMetadataTable {validator.mustBeFileTableOrEmpty} = ''
     end
 
     if isempty(kvargs.MasterMetadataTable) && ~all(~cellfun(@isempty, {kvargs.StimulusProtocol, kvargs.StimStartFrame, kvargs.SpeakerFlipped}))
@@ -59,17 +46,18 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
     end
 
     masterMetadata = table();
-    if ~isempty(kvargs.MasterMetadataTable)
-        masterMetadata = loadMasterMetadata(kvargs.MasterMetadataTable);
+    if istable(kvargs.MasterMetadataTable)
+        masterMetadata = kvargs.MasterMetadataTable;
+    elseif ~isempty(kvargs.MasterMetadataTable)
+        masterMetadata = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
     end
 
     % Load EthoVision data
-    [header, datatable, units] = loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables);
-    
-    % Extract trial info more efficiently
+    [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables);
+
     trialName = header("Trial name");
     trialParts = split(trialName, ' ');
-    trialNumber = str2double(trialParts{end});
+    trialNumber = str2double(strtrim(trialParts{end}));
     experimentName = header("Experiment");
 
     % Extract metadata parameters if available from the matching row in master metadata
@@ -122,13 +110,8 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
     stimFile = fullfile(stimFiles(1).folder, stimFiles(1).name);
 
     % Extract metadata from stimulus file
-    command = sprintf('"%s" metadata -i "%s"', kvargs.NiDaqAudioPlayerBin, stimFile);
-    [status,cmdout] = system(command);
-    if status ~= 0
-        error('Error running command: %s\nOutput: %s', command, cmdout);
-    end
+    metadata = io.stimuli.extractMetadata(stimFile, "Config", kvargs.Config);
 
-    metadata = jsondecode(cmdout);
     requiredFields = {'chapters', 'duration'};
     if ~isstruct(metadata) || ~all(isfield(metadata, requiredFields))
         missing = setdiff(requiredFields, fieldnames(metadata));
@@ -349,36 +332,4 @@ function mustBeNumericLogicalOrEmpty(value)
         return;
     end
     mustBeNumericOrLogical(value);
-end
-
-function [output] = findNiDaqAudioPlayerBin()
-    if ispc
-        localAppDataPath = getenv('LOCALAPPDATA');
-        if ~isfolder(fullfile(localAppDataPath, 'NI-DAQmxAudioPlayer'))
-            error('Could not find NI-DAQmxAudioPlayer directory in %%LOCALAPPDATA%%. Please specify the path to the `nidaq_audioplayer` binary using the "NiDaqAudioPlayerBin" argument.');
-        end
-        nidaqAudioPlayerBin = fullfile(localAppDataPath, 'NI-DAQmxAudioPlayer', 'nidaq_audioplayer.exe');
-        if isfile(nidaqAudioPlayerBin)
-            output = nidaqAudioPlayerBin;
-        else
-            error('Could not find nidaq_audioplayer.exe in %%LOCALAPPDATA%%/NI-DAQmxAudioPlayer/. Please specify the path to the `nidaq_audioplayer` binary using the "NiDaqAudioPlayerBin" argument.');
-        end
-    end
-
-    if isunix && ~ismac
-        homeDir = getenv('HOME');
-        if ~isfolder(fullfile(homeDir, '.local', 'share', 'NI-DAQmxAudioPlayer'))
-            error('Could not find NI-DAQmxAudioPlayer directory in ~/.local/share/. Please specify the path to the `nidaq_audioplayer` binary using the "NiDaqAudioPlayerBin" argument.');
-        end
-        nidaqAudioPlayerBin = fullfile(homeDir, '.local', 'share', 'NI-DAQmxAudioPlayer', 'nidaq_audioplayer');
-        if isfile(nidaqAudioPlayerBin)
-            output = nidaqAudioPlayerBin;
-        else
-            error('Could not find nidaq_audioplayer in ~/.local/share/NI-DAQmxAudioPlayer/. Please specify the path to the `nidaq_audioplayer` binary using the "NiDaqAudioPlayerBin" argument.');
-        end
-    end
-
-    if ismac
-        error('MacOS is not currently supported for finding the `nidaq_audioplayer` binary. Please specify the path to the binary using the "NiDaqAudioPlayerBin" argument.');
-    end
 end

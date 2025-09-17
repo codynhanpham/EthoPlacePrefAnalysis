@@ -97,6 +97,10 @@ videoAxes.Interruptible='on';
 videoAxes.HitTest='off';
 videoAxes.PickableParts="none";
 
+% Center the axes content and remove any default margins
+videoAxes.Position = [0 0 1 1]; % Fill the entire grid cell
+videoAxes.OuterPosition = [0 0 1 1]; % Remove outer margins
+
 frameLabel = uilabel(mainGrid, 'Text', 'Frame: 1');
 frameLabel.Layout.Row = 2;
 frameLabel.Layout.Column = 1;

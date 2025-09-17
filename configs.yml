@@ -4,6 +4,9 @@ defaults:
   stimuli_directory: "../Stimuli/playlists"
   master_metadata_table: "../Place Preferences - Master Metadata.xlsx"
   ethovision_data_root: "../ETHOVISION"
+  
+  nidaq_audioplayer_bin: "%LOCALAPPDATA%/NI-DAQmxAudioPlayer/nidaq_audioplayer.exe"
+  audio_metadata_extract_bin: "./src/+io/+stimuli/metadata_extract.exe"
 
 project_settings:
   EthoVision:
