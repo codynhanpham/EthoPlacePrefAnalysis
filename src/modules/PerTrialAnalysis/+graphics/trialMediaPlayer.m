@@ -206,7 +206,7 @@ function displayFrameWithTrack(frameNum)
         hold(appData.videoAxes, 'on');
 
         % Draw the trail of the last N frames
-        trackHistoryLength = 50;
+        trackHistoryLength = 125;
         startIdx = max(1, frameNum - trackHistoryLength);
         endIdx = min(frameNum, size(appData.trackData, 1));
 

@@ -7,11 +7,10 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
     %
     %   Outputs:
     %       trialNames - A cell array of strings containing the names of the filtered trials (base names without extensions) in 'Media Files'
-    %       trialsData - A struct array containing the filtered trials with 2 fields:
+    %       trialInfo - A struct array containing the filtered trials with 2 fields:
     %                'media' - path to the media file (in Media Files subfolder)
     %                'data'  - path to the data file (in Export Files subfolder)
-    %                'trialNumeric' - l
-    % ast numeric part of the trial name
+    %                'trialNumeric' - last numeric part of the trial name
 
     arguments
         projectFolder {validator.isEthovisionProjectFolder}

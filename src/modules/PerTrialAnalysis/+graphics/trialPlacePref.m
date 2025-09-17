@@ -90,7 +90,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     % h = imagesc(a, xedges, yedges, d);
     alphadata = zeros(size(d));
     alphadata(d > 0.001) = 1;
-    alphadata(d > 0.001 & d <= 0.01*max(d(:))) = 0.25;
+    alphadata(d > 0.001 & d <= 0.005*max(d(:))) = 0.2;
+    alphadata(d > 0.005*max(d(:)) & d <= 0.01*max(d(:))) = 0.35;
     alphadata(d > 0.01*max(d(:)) & d <= 0.05*max(d(:))) = 0.5;
     alphadata(d > 0.05*max(d(:)) & d <= 0.18*max(d(:))) = 0.65;
     alphadata(d > 0.18*max(d(:)) & d <= 0.25*max(d(:))) = 0.75;
@@ -99,7 +100,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     alphadata(d > 0.75*max(d(:))) = 1;
 
     % Smooth the alpha data a bit
-    alphadata = imgaussfilt(alphadata, 3);
+    alphadata = imgaussfilt(alphadata, 2);
 
     % Use image coordinates for imagesc to match imshow
     imagesc(a, xedges, yedges, d, 'AlphaData', alphadata);
