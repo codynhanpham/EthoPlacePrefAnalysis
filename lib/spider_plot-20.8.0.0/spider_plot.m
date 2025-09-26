@@ -1339,7 +1339,8 @@ for ii = 1:num_data_groups
 
         case 'interp'
             % Fill area within polygon
-            c_data = reshape(fill_cdata, [], 1);
+            c_data = fill_cdata;
+            % c_data = reshape(c_data, 1, []);
             h = patch(ax, x_points, y_points, c_data,...
                 'EdgeColor', 'none',...
                 'FaceAlpha', fill_transparency(ii));

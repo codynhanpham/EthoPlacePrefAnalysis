@@ -37,8 +37,8 @@ function filterProjectFolder(comp)
         comp.DropdownItems{i,2} = struct('dir', evProjectFolders(i), 'type', 'single');
     end
 
-    % Add a (Batch All) option with dir = evProjectFolders, type = 'batch' and place it at the top
-    comp.DropdownItems = [ {'(Batch All)', struct('dir', evProjectFolders, 'type', 'batch')}; comp.DropdownItems ];
+    % Add a (Population) option with dir = evProjectFolders, type = 'population' and place it at the top
+    comp.DropdownItems = [ {'(Population)', struct('dir', evProjectFolders, 'type', 'population')}; comp.DropdownItems ];
 
     if isempty(comp.SelectedContent)
         comp.setSelection(2); % Select the first EthoVision project folder by default
