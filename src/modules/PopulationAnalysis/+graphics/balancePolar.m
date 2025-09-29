@@ -1,19 +1,18 @@
-function balancePolar(ax, metadataTable, groupVars)
-    %%BALANCEPOLAR Generate a radar/spider plot to visualize balance of counts across categories.
+function balancePolar(ax, metadataTable)
+    %%BALANCEPOLAR Generate a radar/spider plot to visualize balance of N counts across categories.
+    %   This function, unless updated in the source code, groups the data by {'ANIMAL_STRAIN', 'ANIMAL_SEX', 'ANIMAL_GENOTYPE'}
     %
-    %   balancePolar(ax, metadataTable, groupVars)
+    %   balancePolar(ax, metadataTable)
     %
     %   Inputs:
     %       ax - Axes handle where the polar plot will be drawn.
     %       metadataTable - Metadata table loaded with io.metadata.loadMasterMetadata
-    %       groupVars - Cell array of variable names in metadataTable to group by.
     %
     %   See also: io.metadata.loadMasterMetadata
 
     arguments
         ax (1,1) matlab.graphics.axis.Axes
         metadataTable table
-        groupVars {mustBeText}
     end
 
     [isValidTable, missingHeaders] = io.metadata.isMasterMetadataTable(metadataTable);
@@ -21,19 +20,47 @@ function balancePolar(ax, metadataTable, groupVars)
         error('The provided metadataTable is missing required headers: %s', strjoin(missingHeaders, ', '));
     end
 
+
+    groupVars = {'ANIMAL_STRAIN', 'ANIMAL_SEX', 'ANIMAL_GENOTYPE'};
+    genotypePosition = find(ismember(groupVars, 'ANIMAL_GENOTYPE'), 1);
+
+    possibleGenotypeCombos = io.metadata.genotypeCombo(); %% PLEASE double check this function, then update the source code below if you change `groupVars` content or order
+    comboVarsOrder = {'Strain', 'Sex', 'Genotype'}; % Make sure this matches groupVars order
+
+
+    % Remove duplicates based on ['CAGE_CODE' and 'ANIMAL_ID']
+    % (since we want to count unique animals, not # of trials or measurements)
+    metadataTable = unique(metadataTable(:, [{'CAGE_CODE'}, {'ANIMAL_ID'}, groupVars(:)']));
+
     % Group the metadata by the specified variables
     groupedTable = population.metadata.groupby(metadataTable, groupVars, 'IncludeEmptyGroups', true);
 
-    categories = cell(height(groupedTable), 1);
-    for i = 1:height(groupedTable)
-        categories{i} = char(strjoin(string(groupedTable{i, groupVars}), ' - '));
-    end
+    categories = join(string(groupedTable{:, groupVars}), ' - ', 2);
+    catcomptemp = string(groupedTable{:, groupVars});
+    catcomptemp(:, genotypePosition) = strrep(lower(catcomptemp(:, genotypePosition)), 'ko', 'hom');
+    catcomptemp = lower(join(catcomptemp, ' - ', 2));
 
-    % Add a new column for the combined category labels Before GroupCount
-    groupedTable = addvars(groupedTable, categories, 'Before', 'GroupCount', 'NewVariableNames', 'Category');
+    groupedTable = addvars(groupedTable, categories, catcomptemp, 'Before', 'GroupCount', 'NewVariableNames', {'Category', 'catcomp'});
     groupedTable.Category = categorical(groupedTable.Category);
-
+    groupedTable.catcomp = categorical(groupedTable.catcomp);
     
+    % Compare genotype of "KO" and "Hom" as equivalent
+    pgVars = possibleGenotypeCombos.Properties.VariableNames;
+    % Reorder possibleGenotypeCombos to match comboVarsOrder
+    [~, sortIdx] = ismember(comboVarsOrder, pgVars);
+    possibleGenotypeCombos = possibleGenotypeCombos(:, sortIdx);
+    possibleGenotypeCombos(:, genotypePosition) = strrep(lower(cellstr(possibleGenotypeCombos{:, genotypePosition})), 'ko', 'hom');
+    possibleGenotypeCombos.catcomp = categorical(lower(join(string(possibleGenotypeCombos{:, :}), ' - ', 2)));
+
+    [isPossible, ~] = ismember(groupedTable.catcomp, possibleGenotypeCombos.catcomp);
+    if any(~isPossible) && any(groupedTable.GroupCount(~isPossible) > 0)
+        badones = groupedTable.Category(~isPossible & groupedTable.GroupCount > 0);
+        warning('Some impossible Sex-Strain-Genotype groups were found: %s', strjoin(string(badones), ', '));
+    end
+    groupedTable = groupedTable(isPossible, :);
+
+    groupedTable.catcomp = [];
+
     groupCountMax = max(groupedTable.GroupCount);
 
     radarLimits = [zeros(1, height(groupedTable)); repmat(groupCountMax, 1, height(groupedTable))];

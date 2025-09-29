@@ -80,8 +80,6 @@ function plotBatchResults(resultsTable)
     end
 
 
-    assignin('base', 'resultsTable2', resultsTable);
-
     %% Speaker Prefs
     speakerPosStatsBySubjectCat = groupsummary(resultsTable, "Genotype Group All", ["mean","std"], ["Matched Left Speaker", "Matched Right Speaker"]);
     groups = string(speakerPosStatsBySubjectCat.("Genotype Group All")');
@@ -98,7 +96,6 @@ function plotBatchResults(resultsTable)
     plotGroupedBarFigure(meanData, stdData, groups, "Animal - Physical Speaker/Side Preferences", ["Left Speaker", "Right Speaker"]);
 
     speakerPosStatsBySubjectCat = groupsummary(resultsTable, "Sex", ["mean","std"], ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
-    assignin('base', 'speakerPosStatsBySubjectCat', speakerPosStatsBySubjectCat);
     groups = string(speakerPosStatsBySubjectCat.("Sex")');
     groupN = string(speakerPosStatsBySubjectCat.("GroupCount")');
     meanLeft = speakerPosStatsBySubjectCat.("mean_Norm Matched Left Speaker")';

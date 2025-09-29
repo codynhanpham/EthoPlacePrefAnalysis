@@ -3,7 +3,12 @@ function filterProjectFolder(comp)
     %   Provide this function handle and its {2:end} arguments to FolderSelectorWithDropdown.DropdownItemsFilterFcn
     %   {@filterProjectFolder}
 
-    if nargin < 1
+    arguments
+        comp (1,1) FolderSelectorWithDropdown
+    end
+
+    if isempty(comp.SelectedParent) || ~isfolder(comp.SelectedParent)
+        comp.DropdownItems = cell(0,2);
         return
     end
     

@@ -1,0 +1,79 @@
+# Follow this format to add new strains/genotypes:
+# --------------------------------------------------------------
+# - strain: STRAIN_NAME
+#   combo:
+#     female:
+#       - GENOTYPE_1
+#       - GENOTYPE_2
+#       - ...
+#     male:
+#       - GENOTYPE_1
+#       - GENOTYPE_2
+#       - ...
+# --------------------------------------------------------------
+
+# Each strain must have both male and female in combo
+# If such combo does not exist, simply leave the content inside male/female empty:
+# --------------------------------------------------------------
+# - strain: STRAIN_NAME
+#   combo:
+#     female:
+#     male:
+#       - GENOTYPE_1
+#       - GENOTYPE_2
+# --------------------------------------------------------------
+
+# Possible genotypes are (case-insensitive): 
+#   - WT
+#   - Het
+#   - KO (or, Hom)
+
+
+- strain: C57BL6J
+  combo:
+    female:
+      - WT
+    male:
+      - WT
+
+- strain: CBA/J
+  combo:
+    female:
+      - WT
+    male:
+      - WT
+
+- strain: CBA/CaJ
+  combo:
+    female:
+      - WT
+    male:
+      - WT
+
+- strain: Shank3B
+  combo:
+    female:
+      - WT
+      - Het
+      - KO
+    male:
+      - WT
+      - Het
+      - KO
+
+- strain: Cntnap2
+  combo:
+    female:
+      - KO
+    male:
+      - KO
+
+- strain: Mecp2
+  combo:
+    female:
+      - WT
+      - Het
+      # - KO # Only if breeding as Het x KO
+    male:
+      - WT
+      - KO # Hemizygous

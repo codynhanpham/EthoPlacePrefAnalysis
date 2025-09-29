@@ -4,7 +4,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     %   Inputs:
     %       ethovisionXlsx - The EthoVision data loaded from an Excel file
     %       stimuliDir     - The directory containing original stimuli `.flac` files with embedded timestamps
-    %       masterMetadataTableXlsx - The master metadata table loaded from an Excel file
+    %       masterMetadataTable - The master metadata table loaded from an Excel file
     %
     %   Name-Value Pair Arguments:
     %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
@@ -127,9 +127,6 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     yticklabels = unique(round(yticks * pixelsize / 5) * 5); % Round to nearest 5 cm
     set(a, 'YTickLabel', yticklabels);
     set(a, 'TickDir', 'both', 'TickLength', [0.005, 0.005]);
-
-
-    assignin('base', 'stimPeriodTable', stimPeriodTable);
 
 
     %% BAR CHART

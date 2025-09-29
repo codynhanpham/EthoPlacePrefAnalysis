@@ -105,7 +105,6 @@ function slowBatchTrialsAnalysis(parentDir, masterMetadataPath, stimPlaylistsDir
     end
 
     resultsTable = convertvars(resultsTable, "Genotype Group", "categorical");
-    assignin('base', 'resultsTable', resultsTable);
 
     close(f);
 

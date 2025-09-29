@@ -71,7 +71,9 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
             sex = char(masterMetadata{trialRowIdx, 'ANIMAL_SEX'});
             genotype = char(masterMetadata{trialRowIdx, 'ANIMAL_GENOTYPE'});
             strain = char(masterMetadata{trialRowIdx, 'ANIMAL_STRAIN'});
-            age = str2double(char(masterMetadata{trialRowIdx, 'ANIMAL_P_AGE'}));
+            age = masterMetadata{trialRowIdx, 'ANIMAL_P_AGE'};
+            cagecode = char(masterMetadata{trialRowIdx, 'CAGE_CODE'});
+            id = char(masterMetadata{trialRowIdx, 'ANIMAL_ID'});
 
             if isempty(kvargs.StimulusProtocol)
                 kvargs.StimulusProtocol = char(masterMetadata{trialRowIdx, 'STIMULUS_PROTOCOL'});
@@ -91,7 +93,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
             end
         end
     end
-    animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age);
+    animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age, 'cagecode', cagecode, 'id', id);
 
     if isempty(kvargs.StimulusProtocol)
         error('StimulusProtocol must be specified either directly with StimulusProtocol named-argument or through a non-empty column ''STIMULUS_PROTOCOL'' in MasterMetadataTable.');
