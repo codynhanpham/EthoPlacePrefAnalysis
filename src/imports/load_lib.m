@@ -11,7 +11,13 @@ libDirs = dir(libParentDir);
 libDirs = libDirs(~ismember({libDirs.name}, {'.', '..'}));
 libDirs = libDirs(arrayfun(@(x) x.isdir, libDirs));
 
-ignorePatterns = readlines(fullfile(libParentDir, '.ignore'));
+% Read ignore patterns from .ignore file
+ignorefile = fullfile(libParentDir, '.ignore');
+if ~isfile(ignorefile)
+    ignorePatterns = {};
+else
+    ignorePatterns = readlines(ignorefile);
+end
 
 % Trim whitespace, remove empty lines, and remove comments
 ignorePatterns = strtrim(ignorePatterns);
