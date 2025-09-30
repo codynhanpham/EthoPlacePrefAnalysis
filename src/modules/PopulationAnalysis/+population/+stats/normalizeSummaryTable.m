@@ -25,9 +25,75 @@ function normalizedTable = normalizeSummaryTable(summaryTable)
         error('The provided summaryTable is missing required columns: { ''%s'' }', strjoin(missing, ''', '''));
     end
 
+
+    %% Create a normalized data columns (for each stim) that divides by total frame in "All Left Speaker" or "All Right Speaker"
+    % Norm Matched Speakers
+    normMatchedLeft = zeros(height(summaryTable), 1);
+    normMatchedRight = zeros(height(summaryTable), 1);
+
+    for i = 1:height(summaryTable)
+        normMatchedLeft(i) = summaryTable{i, "Matched Left Speaker"} / summaryTable{i, "All Left Speaker"};
+        normMatchedRight(i) = summaryTable{i, "Matched Right Speaker"} / summaryTable{i, "All Right Speaker"};
+    end
+    summaryTable = addvars(summaryTable, normMatchedLeft, normMatchedRight, 'NewVariableNames', ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
+
+
+    % For each row, use the value in "Matched Left Speaker" and find the other column that has the same value, Normalize that column by / "All Left Speaker"
+    % Same for "Matched Right Speaker"
+    for i = 1:height(summaryTable)
+        matchedLeftValue = summaryTable{i, "Matched Left Speaker"};
+        matchedRightValue = summaryTable{i, "Matched Right Speaker"};
+
+        % Find the column name that has the same value as matchedLeftValue
+        leftColName = "";
+        rightColName = "";
+        for j = 1:width(summaryTable)
+            if isnumeric(summaryTable{i, j}) && summaryTable{i, j} == matchedLeftValue && summaryTable.Properties.VariableNames{j} ~= "Matched Left Speaker"
+                leftColName = summaryTable.Properties.VariableNames{j};
+            end
+            if isnumeric(summaryTable{i, j}) && summaryTable{i, j} == matchedRightValue && summaryTable.Properties.VariableNames{j} ~= "Matched Right Speaker"
+                rightColName = summaryTable.Properties.VariableNames{j};
+            end
+        end
+
+        if ~isempty(leftColName) && leftColName ~= "All Left Speaker"
+            normColName = strcat("Norm ", leftColName);
+            if ~ismember(normColName, summaryTable.Properties.VariableNames)
+                summaryTable = addvars(summaryTable, zeros(height(summaryTable), 1), 'NewVariableNames', normColName);
+            end
+            summaryTable{i, normColName} = matchedLeftValue / summaryTable{i, "All Left Speaker"};
+        end
+
+        if ~isempty(rightColName) && rightColName ~= "All Right Speaker"
+            normColName = strcat("Norm ", rightColName);
+            if ~ismember(normColName, summaryTable.Properties.VariableNames)
+                summaryTable = addvars(summaryTable, zeros(height(summaryTable), 1), 'NewVariableNames', normColName);
+            end
+            summaryTable{i, normColName} = matchedRightValue / summaryTable{i, "All Right Speaker"};
+        end
+    end
+
+
+
     newCol = strcat(cellstr(summaryTable.("Animal UID")), " > ", cellstr(summaryTable.("Stimulus Task")));
     summaryTable = addvars(summaryTable, categorical(newCol), 'After', 'Stimulus Task', 'NewVariableNames', 'Animal UID by Stim Combo');
 
     groupedTable = population.metadata.groupby(summaryTable, {'Animal UID by Stim Combo', 'Strain', 'Sex', 'Genotype', 'Stimulus Task'}, 'IncludeEmptyGroups', false);
-    assignin('base', 'groupedTable', groupedTable);
+
+
+    % Keep only the required columns and columns that starts with "Norm "
+    requiredColumns = {'Strain', 'Sex', 'Genotype', 'Age', 'Stimulus Task', 'Animal UID by Stim Combo'};
+    normColumns = startsWith(groupedTable.Properties.VariableNames, "Norm ");
+    normColumns = find(normColumns);
+    [normColNames, sortIdx] = sort(groupedTable.Properties.VariableNames(normColumns));
+    normColumns = normColumns(sortIdx);
+    groupedTable = groupedTable(:, [requiredColumns, groupedTable.Properties.VariableNames(normColumns)]);
+
+    % Take the mean of the numeric columns (that starts with "Norm ")
+    for i = 1:length(normColNames)
+        colName = normColNames{i};
+        groupedTable.(colName) = cellfun(@(x) mean(x, "all", "omitnan"), groupedTable.(colName), 'UniformOutput', true);
+    end
+
+    normalizedTable = groupedTable;
 end
