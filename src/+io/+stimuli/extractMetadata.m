@@ -57,9 +57,9 @@ function metadata = extractMetadata(stimulusFile, kvargs)
         nibin = char(nibin);
         warning("on", "io:stimuli:findNiDaqAudioPlayerBin:DefaultInstallationNotFound");
 
-        if ~isempty(metbin)
+        if ~isempty(metbin) && isfile(metbin)
             binaryPath = metbin;
-        elseif ~isempty(nibin)
+        elseif ~isempty(nibin) && isfile(nibin)
             binaryPath = nibin;
         end
     end

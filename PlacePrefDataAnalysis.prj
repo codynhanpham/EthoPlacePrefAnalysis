@@ -1,5 +1,5 @@
 <deployment-project plugin="plugin.ezdeploy" plugin-version="1.0">
-  <configuration build-checksum="3922641936" file="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis\PlacePrefDataAnalysis.prj" location="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis" name="PlacePrefDataAnalysis" preferred-package-location="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis\build\PlacePrefDataAnalysis\for_redistribution" preferred-package-type="package.type.exe" target="target.ezdeploy.standalone" target-name="Application Compiler">
+  <configuration build-checksum="770383604" file="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis\PlacePrefDataAnalysis.prj" location="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis" name="PlacePrefDataAnalysis" preferred-package-location="D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\EthoPlacePrefAnalysis\build\PlacePrefDataAnalysis\for_redistribution" preferred-package-type="package.type.exe" target="target.ezdeploy.standalone" target-name="Application Compiler">
     <param.appname>PlacePrefDataAnalysis</param.appname>
     <param.icon>${PROJECT_ROOT}\PlacePrefDataAnalysis_resources\icon.ico</param.icon>
     <param.icons>
@@ -26,7 +26,7 @@
     <param.output>${PROJECT_ROOT}\build\PlacePrefDataAnalysis\for_redistribution</param.output>
     <param.logdir>${PROJECT_ROOT}\build\PlacePrefDataAnalysis</param.logdir>
     <param.enable.clean.build>false</param.enable.clean.build>
-    <param.user.defined.mcr.options />
+    <param.user.defined.mcr.options>-l</param.user.defined.mcr.options>
     <param.target.type>subtarget.standalone</param.target.type>
     <param.support.packages />
     <param.web.mcr>false</param.web.mcr>

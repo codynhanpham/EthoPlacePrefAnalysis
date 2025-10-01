@@ -16,7 +16,7 @@ function [output] = findAudioMetadataExtractorBin(configs)
     end
 
     persistent cachedAudioMetadataExtractorBinaryPath;
-    if ~isempty(cachedAudioMetadataExtractorBinaryPath)
+    if ~isempty(cachedAudioMetadataExtractorBinaryPath) && isfile(cachedAudioMetadataExtractorBinaryPath)
         output = cachedAudioMetadataExtractorBinaryPath;
         return
     end
@@ -62,6 +62,20 @@ function [output] = findAudioMetadataExtractorBin(configs)
         cachedAudioMetadataExtractorBinaryPath = metadataExtractBin;
         return
     else
+        % Try to check if the pre-bundled binary is included in the installation
+        % TO DEV: this binary is small, so to reduce user friction, we can just include it in the repo, right next to this file; just make sure to update it when the binary changes
+        thisfiledir = fileparts(mfilename('fullpath'));
+        if ispc
+            metadataExtractBin = fullfile(thisfiledir, 'metadata_extract.exe');
+        else
+            metadataExtractBin = fullfile(thisfiledir, 'metadata_extract');
+        end
+        if isfile(metadataExtractBin)
+            output = metadataExtractBin;
+            cachedAudioMetadataExtractorBinaryPath = metadataExtractBin;
+            return
+        end
+
         warning("io:stimuli:findAudioMetadataExtractorBin:DefaultInstallationNotFound", "Could not find %s in %%LOCALAPPDATA%%/NI-DAQmxAudioPlayer/. For custom installation paths, please set the '%s' key in configs.yml.", metadataExtractBin, strjoin(fromConfigKey, '.'));
         output = '';
         return

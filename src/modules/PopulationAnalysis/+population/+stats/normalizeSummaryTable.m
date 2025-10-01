@@ -71,6 +71,8 @@ function normalizedTable = normalizeSummaryTable(summaryTable)
             end
             summaryTable{i, normColName} = matchedRightValue / summaryTable{i, "All Right Speaker"};
         end
+        % At this point, summaryTable Normalized value represents the percentage of time spent in the stimulus zone when the stimulus is "active"
+        % Note that with this, the range for each normalized stim is [0-1] and is independent of other stimuli (the stims are played sequentially, not simultaneously)
     end
 
 

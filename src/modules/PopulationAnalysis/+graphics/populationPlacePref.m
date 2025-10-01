@@ -56,20 +56,20 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
     sumTL = tiledlayout(summaryTab, nrow, ncol, 'TileSpacing', 'Compact', 'Padding', 'Compact');
 
     ax = nexttile(sumTL, 1, [1 1]);
-    [meanData, stdData, groups] = getGroupedData(normalizedPopulationData, "All", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
-    plotGroupedBar(ax, meanData, stdData, groups, "Animal - Physical Speaker/Side Preferences", ["Left Speaker", "Right Speaker"]);
+    [meanData, stdData, groups, stats] = getGroupedData(normalizedPopulationData, "All", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
+    plotGroupedBar(ax, meanData, stdData, groups, stats, "Animal - Physical Speaker/Side Preferences", ["Left Speaker", "Right Speaker"]);
 
     ax = nexttile(sumTL, ncol * 1 + 1, [1 1]);
-    [meanData, stdData, groups] = getGroupedData(normalizedPopulationData, "Sex", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
-    plotGroupedBar(ax, meanData, stdData, groups, "Animal - Physical Speaker/Side Preferences by Sex", ["Left Speaker", "Right Speaker"]);
+    [meanData, stdData, groups, stats] = getGroupedData(normalizedPopulationData, "Sex", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
+    plotGroupedBar(ax, meanData, stdData, groups, stats, "Animal - Physical Speaker/Side Preferences by Sex", ["Left Speaker", "Right Speaker"]);
 
     ax = nexttile(sumTL, 2, [1 2]);
-    [meanData, stdData, groups] = getGroupedData(normalizedPopulationData, "Strain", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
-    plotGroupedBar(ax, meanData, stdData, groups, "Animal - Physical Speaker/Side Preferences by Strain", ["Left Speaker", "Right Speaker"]);
+    [meanData, stdData, groups, stats] = getGroupedData(normalizedPopulationData, "Strain", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
+    plotGroupedBar(ax, meanData, stdData, groups, stats, "Animal - Physical Speaker/Side Preferences by Strain", ["Left Speaker", "Right Speaker"]);
 
     ax = nexttile(sumTL, ncol * 1 + 2, [1 2]);
-    [meanData, stdData, groups] = getGroupedData(normalizedPopulationData, "Genotype", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
-    plotGroupedBar(ax, meanData, stdData, groups, "Animal - Physical Speaker/Side Preferences by Genotype", ["Left Speaker", "Right Speaker"]);
+    [meanData, stdData, groups, stats] = getGroupedData(normalizedPopulationData, "Genotype", ["Norm Matched Left Speaker", "Norm Matched Right Speaker"]);
+    plotGroupedBar(ax, meanData, stdData, groups, stats, "Animal - Physical Speaker/Side Preferences by Genotype", ["Left Speaker", "Right Speaker"]);
 
 
     %% Each Stimulus Task
@@ -91,8 +91,8 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
         thistab = uitab(tgroup, 'Title', stimTaskStrFormatted, 'BackgroundColor', 'w');
 
         ax = axes(thistab); %#ok<LAXES>
-        [meanData, stdData, groups] = getGroupedData(stimdata, "Genotype Group", stimTasksNorm);
-        plotGroupedBar(ax, meanData, stdData, groups, sprintf("%s - Place Preferences", stimTaskStrFormatted), stimTasks);
+        [meanData, stdData, groups, stats] = getGroupedData(stimdata, "Genotype Group", stimTasksNorm);
+        plotGroupedBar(ax, meanData, stdData, groups, stats, sprintf("%s - Place Preferences", stimTaskStrFormatted), stimTasks);
     end
 
 
@@ -131,22 +131,30 @@ function mustBeOneOfAOrEmpty(x, classNames)
 end
 
 
-function [meanData, stdData, groups] = getGroupedData(datatable, groupByVar, dependentVars)
+function [meanData, stdData, groups, stats] = getGroupedData(datatable, groupByVar, dependentVars)
     % Get the mean and std of dependentVars grouped by groupByVar
-    stats = groupsummary(datatable, groupByVar, ["mean","std"], dependentVars);
-    groupLabels = string(stats.(groupByVar)');
-    groupN = string(stats.("GroupCount")');
-    meanA = stats.("mean_" + dependentVars(1))';
-    meanB = stats.("mean_" + dependentVars(2))';
-    stdA = stats.("std_" + dependentVars(1))';
-    stdB = stats.("std_" + dependentVars(2))';
+    grouped = population.metadata.groupby(datatable, groupByVar, 'IncludeEmptyGroups', false);
+    groupLabels = string(grouped.(groupByVar)');
+    groupN = string(grouped.GroupCount');
+    meanA = cellfun(@mean, grouped.(dependentVars(1)))';
+    meanB = cellfun(@mean, grouped.(dependentVars(2)))';
+    stdA = cellfun(@std, grouped.(dependentVars(1)))';
+    stdB = cellfun(@std, grouped.(dependentVars(2)))';
+
     meanData = [meanA; meanB]; stdData = [stdA; stdB];
     % Join groups + groupN, matching elements
     groups = strcat(groupLabels, " (N = ", groupN, ")");
+
+    [h, p, ci, s] = cellfun(@(x, y) ttest(x, y, "Alpha", 0.05, "Tail", "both"), grouped.(dependentVars(1)), grouped.(dependentVars(2)), 'UniformOutput', false);
+
+    stats.h = cell2mat(h);
+    stats.p = cell2mat(p);
+    stats.ci = cell2mat(cellfun(@(x) x', ci, 'UniformOutput', false));
+    stats.stats = cell2mat(s);
 end
 
 
-function ax = plotGroupedBar(ax, meanData, stdData, groups, titleStr, legendStr)
+function ax = plotGroupedBar(ax, meanData, stdData, groups, stats, titleStr, legendStr)
     % Workaround to make sure bar() group the data correctly when meanData is square
     % Repeat the groups to match the number of columns in meanData
     % Weirdly enough, errorbar() seems to work correctly regardless, so no need to use meanDataT there
@@ -156,26 +164,90 @@ function ax = plotGroupedBar(ax, meanData, stdData, groups, titleStr, legendStr)
     else
         meanDataT = meanData;
     end
-
     
     b = bar(ax, categorical(groups), meanDataT, "Interpreter", "none");
     % Plot error bars
     hold on;
     [ngroups,nbars] = size(meanData');
     x = nan(nbars, ngroups);
+    xgroup = nan(1, ngroups);
     for i = 1:nbars
         x(i,:) = b(i).XEndPoints;
+        xgroup = b(i).XData;
     end
     errorbar(x, meanData, stdData,'k','linestyle','none');
+    
+    % Add text box with p-values above each group
+    % yMax = max(ax.YLim);
+    % for i = 1:ngroups
+    %     pvalue = stats.p(i);
+    %     annotationStr = sprintf('p = %.5f', pvalue);
+    %     annotX = xgroup(i);
+    %     annotY = max(meanData(:,i) + stdData(:,i)) + 0.05 * max(ax.YLim);
+    %     if annotY > yMax
+    %         yMax = annotY + 0.1 * max(ax.YLim);
+    %     end
+
+    %     text(annotX, annotY, annotationStr, 'VerticalAlignment', 'middle', 'HorizontalAlignment', 'center', 'FontSize', 8);
+    % end
+    
+    % Find the max y value of mean + std pair
+    yMax = max(meanData(:) + stdData(:)) + 0.02 * max(ax.YLim);
+    function str = mapPValue2Astk(pvalue, alpha, useSymbol)
+        if nargin < 2
+            alpha = 0.05;
+        end
+        if nargin < 3
+            useSymbol = true;
+        end
+        if isnan(pvalue)
+            str = 'n/a';
+            return;
+        end
+        if pvalue >= alpha
+            str = 'n.s.';
+            return;
+        end
+        
+        if useSymbol
+            % Increase 1 star for each order of magnitude smaller than alpha
+            nStars = 1;
+            while pvalue < alpha / (10^nStars)
+                nStars = nStars + 1;
+            end
+            str = repmat('✱', 1, nStars);
+        else
+            str = sprintf("p = %.5f\n", pvalue);
+        end
+    end
+
+    for i = 1:ngroups
+        pvalue = stats.p(i);
+        annotationStr = mapPValue2Astk(pvalue, 0.05, false);
+        annotX = xgroup(i);
+        weight = 'normal';
+        sz = 9;
+        if ~isnan(stats.h(i)) && stats.h(i)
+            weight = 'bold';
+            sz = 11;
+        end
+        text(annotX, yMax, annotationStr, 'VerticalAlignment', 'baseline', 'HorizontalAlignment', 'center', 'FontSize', sz, 'FontWeight', weight);
+    end
+
     hold off;
+
+    ax.YLim = [min(0, min(ax.YLim)), yMax + 0.05 * abs(yMax)];
 
     ax.YLabel.String = "% of Time Spent in Zone when Zone is Active";
     ax.TickLabelInterpreter = "none";
     ax.XLabel.Interpreter = "none";
     ax.Title.String = titleStr;
+    ax.Box = "on";
+    ax.YGrid = "on";
+    ax.GridLineStyle = '--';
+    ax.TickDir = "none";
     legend(ax, legendStr, "Location", "northwest");
 end
-
 
 
 function exportVar(hObject, eventData, variable, variableName, defaultFileName, title, mainapphandle)

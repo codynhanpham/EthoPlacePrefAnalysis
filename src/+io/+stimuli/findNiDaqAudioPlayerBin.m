@@ -16,7 +16,7 @@ function [output] = findNiDaqAudioPlayerBin(configs)
     end
 
     persistent cachedNiDaqAudioPlayerBinaryPath;
-    if ~isempty(cachedNiDaqAudioPlayerBinaryPath)
+    if ~isempty(cachedNiDaqAudioPlayerBinaryPath) && isfile(cachedNiDaqAudioPlayerBinaryPath)
         output = cachedNiDaqAudioPlayerBinaryPath;
         return
     end
@@ -55,7 +55,6 @@ function [output] = findNiDaqAudioPlayerBin(configs)
     else
         error('Unsupported platform');
     end
-    
     
     if isfile(nidaq_audioplayer_bin)
         output = nidaq_audioplayer_bin;

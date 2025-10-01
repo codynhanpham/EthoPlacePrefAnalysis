@@ -20,4 +20,15 @@ function [output] = canonicalize(input, root)
     else
         output = fullfile(root, pth);
     end
+
+    if isfile(output)
+        % For files, we can use Java to fully resolve the path
+        jFile=java.io.File(char(output));
+        output=jFile.getCanonicalPath;
+    elseif isfolder(output)
+        % For folders, this trick seems to work
+        output = cd(cd(output));
+    end
+
+    output = char(output);
 end
