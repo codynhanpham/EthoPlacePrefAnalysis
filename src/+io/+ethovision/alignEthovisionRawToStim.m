@@ -1,4 +1,4 @@
-function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, kvargs)
+function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, kvargs)
     %ALIGN_ETHOVISION_RAW_TO_STIM Wrapper around `loadEthovisionXlsx` to add matching stimuli event columns
     %   This function wraps `loadEthovisionXlsx` while taking in additional arguments
     %   to load and add the corresponding stimulus events to a new column in the datatable returned by `loadEthovisionXlsx`.
@@ -44,6 +44,22 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
     if isempty(kvargs.MasterMetadataTable) && ~all(~cellfun(@isempty, {kvargs.StimulusProtocol, kvargs.StimStartFrame, kvargs.SpeakerFlipped}))
         error('If MasterMetadataTable is not provided, all of StimulusProtocol, StimStartFrame, and SpeakerFlipped must be specified.');
     end
+
+    ethovisionXlsxHash = DataHash(ethovisionXlsx, 'SHA-256', 'file');
+    [filedir, filename] = fileparts(ethovisionXlsx);
+    alignedFile = fullfile(filedir, sprintf("%s - %s.mat", filename, string(ethovisionXlsxHash)));
+    if isfile(alignedFile)
+        % Load existing aligned file
+        s = load(alignedFile, 'header', 'datatable', 'units', 'stimulusFrameRange', 'animalMetadata', 'stimuli');
+        header = s.header;
+        datatable = s.datatable;
+        units = s.units;
+        stimulusFrameRange = s.stimulusFrameRange;
+        animalMetadata = s.animalMetadata;
+        stimuli = s.stimuli;
+        return;
+    end
+
 
     masterMetadata = table();
     if istable(kvargs.MasterMetadataTable)
@@ -110,9 +126,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
         error('No stimulus files found matching pattern %s.', dirglobpattern);
     end
     stimFile = fullfile(stimFiles(1).folder, stimFiles(1).name);
+    stimuli = char(stimFiles(1).name);
 
     % Extract metadata from stimulus file
     metadata = io.stimuli.extractMetadata(stimFile, "Config", kvargs.Config);
+    stimFileHash = DataHash(stimFile, 'SHA-256', 'file'); % io.stimuli.extractMetadata should have verified file exists
 
     requiredFields = {'chapters', 'duration'};
     if ~isstruct(metadata) || ~all(isfield(metadata, requiredFields))
@@ -318,6 +336,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata] = alignE
         'NewVariableNames', {'Chapter Original', 'Speaker Channels Flipped', 'Stim Speaker Corrected', 'Animal Is Same Zone As Stim', 'Animal Matched Stim Name', 'Matched Speaker Position'});
 
     stimulusFrameRange = [kvargs.StimStartFrame, stimEndFrame-1];
+
+    s = struct('header', header, 'datatable', datatable, 'units', units, ...
+        'stimulusFrameRange', stimulusFrameRange, 'animalMetadata', animalMetadata, ...
+        'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', char(stimuli));
+    save(alignedFile, '-struct', 's');
 end
 
 % Helper functions (same as before)
