@@ -48,6 +48,29 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
     h = screen(4) * 0.65; py = (screen(4) - h) / 2;
     f = figure('Position', [px, py, w, h], 'Color', 'w', 'Name', 'Population Place Preferences', 'NumberTitle', 'off', 'ToolBar', 'none', 'MenuBar', 'figure');
 
+    % Add export options before rendering plots
+    hFileMenu = findall(f, 'tag', 'figMenuFile');
+    hMruMenu = uimenu('Label', 'Export Data...', 'Parent', hFileMenu);
+    hAllMenuItems = allchild(hFileMenu);
+    hExportSetupMenu = findall(hFileMenu, 'Tag', 'figMenuFileExportSetup');
+    if isempty(hExportSetupMenu)
+        insertPos = 0;
+    else
+        insertPos = find(hAllMenuItems == hExportSetupMenu) - 1;
+    end
+    set(hFileMenu, 'Children',fliplr([hAllMenuItems(1:insertPos); hMruMenu; hAllMenuItems(insertPos+1:end)]));
+
+    if isempty(kvargs.MainApp) || ~isvalid(kvargs.MainApp) || ~isfolder(kvargs.MainApp.lastDirPath)
+        kvargs.MainApp.lastDirPath = pwd; % treat this as a struct
+    end
+
+    if ~isempty(populationSummaryData)
+        uimenu(hMruMenu, 'Label', 'Population Summary Data', 'Callback', {@exportVar, populationSummaryData, 'PopulationSummaryData', 'PopulationSummaryData.mat', 'Export Population Summary Data as...', kvargs.MainApp});
+    end
+    uimenu(hMruMenu, 'Label', 'Normalized Place Preferences Data', 'Callback', {@exportVar, normalizedPopulationData, 'NormalizedPopulationData', 'NormalizedPopulationData.mat', 'Export Normalized Population Data as...', kvargs.MainApp});
+
+
+    % Plotting
     tgroup = uitabgroup(f, 'Position', [0 0 1 1]);
 
     %% Summary Tab: Group by All, Sex, Strain, and Genotype simply showing Speaker Side Preferences
@@ -96,25 +119,6 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
     end
 
 
-    hFileMenu = findall(f, 'tag', 'figMenuFile');
-    hMruMenu = uimenu('Label', 'Export Data...', 'Parent', hFileMenu);
-    hAllMenuItems = allchild(hFileMenu);
-    hExportSetupMenu = findall(hFileMenu, 'Tag', 'figMenuFileExportSetup');
-    if isempty(hExportSetupMenu)
-        insertPos = 0;
-    else
-        insertPos = find(hAllMenuItems == hExportSetupMenu) - 1;
-    end
-    set(hFileMenu, 'Children',fliplr([hAllMenuItems(1:insertPos); hMruMenu; hAllMenuItems(insertPos+1:end)]));
-
-    if isempty(kvargs.MainApp) || ~isvalid(kvargs.MainApp) || ~isfolder(kvargs.MainApp.lastDirPath)
-        kvargs.MainApp.lastDirPath = pwd; % treat this as a struct
-    end
-
-    if ~isempty(populationSummaryData)
-        uimenu(hMruMenu, 'Label', 'Population Summary Data', 'Callback', {@exportVar, populationSummaryData, 'PopulationSummaryData', 'PopulationSummaryData.mat', 'Export Population Summary Data as...', kvargs.MainApp});
-    end
-    uimenu(hMruMenu, 'Label', 'Normalized Place Preferences Data', 'Callback', {@exportVar, normalizedPopulationData, 'NormalizedPopulationData', 'NormalizedPopulationData.mat', 'Export Normalized Population Data as...', kvargs.MainApp});
 end
 
 

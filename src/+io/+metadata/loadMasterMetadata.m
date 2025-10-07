@@ -18,9 +18,20 @@ function [masterMetadata] = loadMasterMetadata(filePath, kwargs)
         kwargs.SheetName {mustBeTextScalar} = 'Master Metadata'
     end
 
+    persistent MetaFilePathHash;
+    persistent CachedMasterMetadata;
+    currentHash = DataHash(filePath, 'SHA-256', 'file');
+    if ~isempty(MetaFilePathHash) && strcmp(currentHash, MetaFilePathHash)
+        masterMetadata = CachedMasterMetadata;
+        return;
+    end
+
     masterMetadata = readtable( ...
         filePath, ...
         Sheet=kwargs.SheetName ...
     );
     masterMetadata = rmmissing(masterMetadata, MinNumMissing=width(masterMetadata));
+
+    MetaFilePathHash = currentHash;
+    CachedMasterMetadata = masterMetadata;
 end

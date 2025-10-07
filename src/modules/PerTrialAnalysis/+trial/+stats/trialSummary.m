@@ -33,23 +33,43 @@ function summary = trialSummary(ethovisionXlsx, stimuliDir, masterMetadataTable,
         Config=kvargs.Config ...
     );
 
+    stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
+
+    allstims = stimPeriodTable{:,'Chapter Original'};
+    allstims = unique(allstims(~cellfun(@anymissing, allstims)));
+    allstims = allstims(~endsWith(allstims, 'ISI'));
+    outrointro = {'Outro', 'Intro'};
+    allstims = allstims(~startsWith(allstims, outrointro) & ~endsWith(allstims, outrointro));
+
     % Animal position is in the "active" speaker/stim zone
-    animalMatchedStim = datatable{:,'Animal Matched Stim Name'};
+    animalMatchedStim = stimPeriodTable{:,'Animal Matched Stim Name'};
     cats = categories(categorical(animalMatchedStim));
     animalMatchedStimCounts = countcats(categorical(animalMatchedStim));
     animalMatchedStimFrameFreq = dictionary(string(cats), animalMatchedStimCounts);
+    missingStims = setdiff(allstims, keys(animalMatchedStimFrameFreq));
+    for i = 1:length(missingStims)
+        animalMatchedStimFrameFreq(missingStims{i}) = 0;
+    end
 
     % Left/Right speaker position of the matched stimulus frames
-    stimspeakerMatched = datatable{:,'Matched Speaker Position'};
+    stimspeakerMatched = stimPeriodTable{:,'Matched Speaker Position'};
     speakerCats = categories(categorical(stimspeakerMatched));
     speakerCounts = countcats(categorical(stimspeakerMatched));
     stimspeakerMatchedFrameFreq = dictionary(string(speakerCats), speakerCounts);
+    missingSpeakers = setdiff(["Left Speaker", "Right Speaker"], keys(stimspeakerMatchedFrameFreq));
+    for i = 1:length(missingSpeakers)
+        stimspeakerMatchedFrameFreq(missingSpeakers{i}) = 0;
+    end
 
     % Count the frequency of stim speaker positions extended (available/original, no match by animal position)
-    stimspeakerExtended = datatable{:,'Stim Speaker Corrected'};
+    stimspeakerExtended = stimPeriodTable{:,'Stim Speaker Corrected'};
     speakerCatsExtended = categories(categorical(stimspeakerExtended));
     speakerCountsExtended = countcats(categorical(stimspeakerExtended));
     stimspeakerOriginalFrameFreq = dictionary(string(speakerCatsExtended), speakerCountsExtended);
+    missingSpeakersExtended = setdiff(["Left Speaker", "Right Speaker"], keys(stimspeakerOriginalFrameFreq));
+    for i = 1:length(missingSpeakersExtended)
+        stimspeakerOriginalFrameFreq(missingSpeakersExtended{i}) = 0;
+    end
 
     summary = struct(...
         'animalMetadata', animalMetadata, ...

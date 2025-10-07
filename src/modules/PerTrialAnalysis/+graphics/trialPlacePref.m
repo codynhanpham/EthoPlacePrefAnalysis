@@ -131,23 +131,43 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
     %% BAR CHART
 
+    allstims = stimPeriodTable{:,'Chapter Original'};
+    allstims = unique(allstims(~cellfun(@anymissing, allstims)));
+    allstims = allstims(~endsWith(allstims, 'ISI'));
+    outrointro = {'Outro', 'Intro'};
+    allstims = allstims(~startsWith(allstims, outrointro) & ~endsWith(allstims, outrointro));
+
     % Count the frequency of animalMatchedStim (Animal position is in the "active" speaker/stim zone)
     animalMatchedStim = stimPeriodTable{:,'Animal Matched Stim Name'};
     cats = categories(categorical(animalMatchedStim));
     animalMatchedStimCounts = countcats(categorical(animalMatchedStim));
     matchedStimFrameFreq = dictionary(string(cats), animalMatchedStimCounts);
+    missingStims = setdiff(allstims, keys(matchedStimFrameFreq));
+    for i = 1:length(missingStims)
+        matchedStimFrameFreq(missingStims{i}) = 0;
+    end
 
     % Count the frequency of speaker positions matched (actual)
     speakerPos = stimPeriodTable{:,'Matched Speaker Position'};
     speakerCats = categories(categorical(speakerPos));
     speakerCounts = countcats(categorical(speakerPos));
     matchedSpeakerPosFreq = dictionary(string(speakerCats), speakerCounts);
+    % Should includes both "Left Speaker" and "Right Speaker", make sure to fill missing with 0 when not present
+    missingSpeakers = setdiff(["Left Speaker", "Right Speaker"], keys(matchedSpeakerPosFreq));
+    for i = 1:length(missingSpeakers)
+        matchedSpeakerPosFreq(missingSpeakers{i}) = 0;
+    end
 
     % Count the frequency of stim speaker positions extended (available/original, no match by animal position)
     speakerPosExtended = stimPeriodTable{:,'Stim Speaker Corrected'};
     speakerCatsExtended = categories(categorical(speakerPosExtended));
     speakerCountsExtended = countcats(categorical(speakerPosExtended));
     matchedSpeakerPosExtendedFreq = dictionary(string(speakerCatsExtended), speakerCountsExtended);
+    % Should includes both "Left Speaker" and "Right Speaker", make sure to fill missing with 0 when not present
+    missingSpeakersExtended = setdiff(["Left Speaker", "Right Speaker"], keys(matchedSpeakerPosExtendedFreq));
+    for i = 1:length(missingSpeakersExtended)
+        matchedSpeakerPosExtendedFreq(missingSpeakersExtended{i}) = 0;
+    end
 
     % For each key in matchedStimFrameFreq, find the key in matchedSpeakerPosFreq that has the same value, log the key with that value for normalization
     stim2speakerMap = configureDictionary("string", "string");

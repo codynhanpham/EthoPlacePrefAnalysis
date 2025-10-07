@@ -4,7 +4,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %   to load and add the corresponding stimulus events to a new column in the datatable returned by `loadEthovisionXlsx`.
     %
     %   Inputs:
-    %       ethovisionXlsx - The EthoVision data loaded from an Excel file
+    %       ethovisionXlsx - Path to the EthoVision exported XLSX file. In general, location of this file should follow the default EthoVision project structure.
     %       stimuliDir     - The directory containing original stimuli `.flac` files with embedded timestamps
     %
     %   Name-Value Pair Arguments:
@@ -19,6 +19,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %           + 'ETHOVISION_TRIAL': The trial number, should be in the file name of `ethovisionXlsx`, and match the numeric part of `Trial name` header.
     %           + 'STIMULUS_PROTOCOL': Value to be used for `StimulusProtocol`.
     %           + 'STIM_START_FRAME': Value to be used for `StimStartFrame`.
+    %           + 'HABITUATION_DURATION_SEC': Default used when `STIM_START_FRAME` is missing or NaN, default to 0 if this is also missing or NaN. This value is multiplied by the average frame rate in 'Trial time' column of `ethovisionXlsx`, then +1, to estimate the stimulus start frame.
     %           + 'SPEAKER_FLIPPED': Value to be used for `SpeakerFlipped`.
     %
     %   Outputs:
@@ -45,7 +46,36 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         error('If MasterMetadataTable is not provided, all of StimulusProtocol, StimStartFrame, and SpeakerFlipped must be specified.');
     end
 
+    % % IMPORTANT: Log the version of the script whenever any changes that affect the outputs are made
+    % % Increment the version number following semantic versioning rules, then write a comment with some notes on what changed
+    % % Code optimizations that do not affect outputs do not require a version bump
+    % % Changing the version number here will force re-alignment and re-saving of aligned files
+    % SCRIPT_VERSION = '0.0.0'; % Nothing, just as your template
+    % SCRIPT_VERSION = '0.0.1'; % Nothing, just as your template
+    % % Comment out previous versions, move above this line (do not delete, keep for reference)
+    % % and add the new version with notes here
+    SCRIPT_VERSION = '1.0.0'; % The initial version of this script
+
+
+    % Hash and check for existing aligned file to speed up repeated loading
+    % The output should be identical if the same inputs are provided (here, assume the stimulus file itself does not change)
     ethovisionXlsxHash = DataHash(ethovisionXlsx, 'SHA-256', 'file');
+    manualparams = {kvargs.StimulusProtocol, kvargs.StimStartFrame, kvargs.SpeakerFlipped};
+    manualparamsHash = DataHash(manualparams, 'SHA-256');
+    configHash = DataHash(kvargs.Config, 'SHA-256');
+    masterMetadataHash = '';
+    masterMetadata = table();
+    if istable(kvargs.MasterMetadataTable)
+        masterMetadata = kvargs.MasterMetadataTable;
+    elseif ~isempty(kvargs.MasterMetadataTable)
+        masterMetadata = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
+    end
+    if ~isempty(kvargs.MasterMetadataTable) && istable(kvargs.MasterMetadataTable)
+        masterMetadataHash = DataHash(masterMetadata, 'SHA-256');
+    end
+    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(masterMetadataHash), char(SCRIPT_VERSION)];
+    ethovisionXlsxHash = DataHash(composite, 'SHA-256');
+
     [filedir, filename] = fileparts(ethovisionXlsx);
     alignedFile = fullfile(filedir, sprintf("%s - %s.mat", filename, string(ethovisionXlsxHash)));
     if isfile(alignedFile)
@@ -58,15 +88,18 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         animalMetadata = s.animalMetadata;
         stimuli = s.stimuli;
         return;
+    else
+        % Check if any other aligned files with different hash exist, warn and remove them
+        otherAlignedFiles = dir(fullfile(filedir, sprintf("%s - *.mat", filename)));
+        if ~isempty(otherAlignedFiles)
+            for i = 1:length(otherAlignedFiles)
+                otherFilePath = fullfile(otherAlignedFiles(i).folder, otherAlignedFiles(i).name);
+                warning('Removing old aligned file "%s" since inputs have changed.', otherFilePath);
+                delete(otherFilePath);
+            end
+        end
     end
 
-
-    masterMetadata = table();
-    if istable(kvargs.MasterMetadataTable)
-        masterMetadata = kvargs.MasterMetadataTable;
-    elseif ~isempty(kvargs.MasterMetadataTable)
-        masterMetadata = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
-    end
 
     % Load EthoVision data
     [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables);
@@ -100,6 +133,19 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                     stimStartVal = str2double(string(stimStartVal));
                 end
                 kvargs.StimStartFrame = stimStartVal;
+                
+                if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
+                    habitdur = masterMetadata{trialRowIdx, 'HABITUATION_DURATION_SEC'};
+                    if ~isnumeric(habitdur)
+                        habitdur = str2double(string(habitdur));
+                    end
+                    if isempty(habitdur) || isnan(habitdur)
+                        habitdur = 0; % Default to start of trial
+                    end
+                    fps = 1 / mean(diff(datatable{:, 'Trial time'}), 'omitnan');
+                    kvargs.StimStartFrame = habitdur * fps + 1;
+                end
+                
                 if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
                     kvargs.StimStartFrame = 1;
                 end
