@@ -39,12 +39,6 @@ function [output] = findNiDaqAudioPlayerBin(configs)
 
 
     localappdatapath = utils.path.localappdata();
-
-    if ~isfolder(fullfile(localappdatapath, 'NI-DAQmxAudioPlayer'))
-        warning("io:stimuli:findNiDaqAudioPlayerBin:DefaultInstallationNotFound", "Could not find NI-DAQmxAudioPlayer/ directory in %%LOCALAPPDATA%%. For custom installation paths, please set the '%s' key in configs.yml.", strjoin(fromConfigKey, '.'));
-        output = '';
-        return
-    end
     
     if ispc
         nidaq_audioplayer_bin = fullfile(localappdatapath, 'NI-DAQmxAudioPlayer', 'nidaq_audioplayer.exe');

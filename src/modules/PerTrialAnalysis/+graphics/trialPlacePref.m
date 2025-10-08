@@ -42,8 +42,16 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
 
     ethovisionParentDir = fileparts(fileparts(ethovisionXlsx));
-    videoFilePathParts = strsplit(header("Video file"), filesep);
-    videoFileShortPath = strjoin(videoFilePathParts(end-1:end), filesep);
+    % check for :\ in video file path to pick correct filesep for splitting
+    if contains(header("Video file"), ':\') % Windows path
+        fsep = '\';
+    else
+        fsep = '/'; % Unix path
+    end
+    videoFilePathParts = strsplit(header("Video file"), fsep);
+    videoFileShortPath = strjoin(videoFilePathParts(end-1:end), fsep);
+    % replace fsep is short path with filesep for current OS
+    videoFileShortPath = strrep(videoFileShortPath, fsep, filesep);
     videoFilePath = fullfile(ethovisionParentDir, videoFileShortPath);
 
     if ~isfile(videoFilePath)

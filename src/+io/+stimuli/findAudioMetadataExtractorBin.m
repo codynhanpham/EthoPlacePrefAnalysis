@@ -40,12 +40,6 @@ function [output] = findAudioMetadataExtractorBin(configs)
 
     localappdatapath = utils.path.localappdata();
 
-    if ~isfolder(fullfile(localappdatapath, 'NI-DAQmxAudioPlayer'))
-        warning("io:stimuli:findAudioMetadataExtractorBin:DefaultInstallationNotFound", "Could not find NI-DAQmxAudioPlayer/ directory in %%LOCALAPPDATA%%. For custom installation paths, please set the '%s' key in configs.yml.", strjoin(fromConfigKey, '.'));
-        output = '';
-        return
-    end
-
     if ispc
         metadataExtractBin = fullfile(localappdatapath, 'NI-DAQmxAudioPlayer', 'metadata_extract.exe');
     elseif ismac

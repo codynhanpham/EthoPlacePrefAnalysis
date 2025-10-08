@@ -13,8 +13,27 @@ function [output] = canonicalize(input, root)
         root {mustBeTextScalar} = pwd
     end
 
-    [~, pth] = system(sprintf("echo %s", input));
-    pth = strtrim(pth);
+    if isfolder(input)
+        pth = cd(cd(input));
+        output = char(pth);
+        return;
+    end
+
+    if ~ispc
+        % Log the base output of system commands (occured on some Linux installations)
+        [~, basesystemoutput] = system('echo');
+        basesystemoutput = strtrim(basesystemoutput);
+        [~, pth] = system(sprintf("echo %s", input));
+        pth = strtrim(pth);
+        if startsWith(pth, basesystemoutput)
+            pth = strtrim(extractAfter(pth, strlength(basesystemoutput)));
+        end
+        pth = strtrim(pth);
+    else
+        [~, pth] = system(sprintf("echo %s", input));
+        pth = strtrim(pth);
+    end
+    
     if utils.path.isAbsolute(pth)
         output = pth;
     else

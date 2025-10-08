@@ -71,14 +71,28 @@ function metadata = extractMetadata(stimulusFile, kvargs)
     commandNi = sprintf('"%s" metadata -i "%s"', binaryPath, stimulusFile);
     commandMet = sprintf('"%s" -i "%s"', binaryPath, stimulusFile);
 
+    % Log the base output of system commands (occured on some Linux installations)
+    [~, basesystemoutput] = system('echo');
+    basesystemoutput = strtrim(basesystemoutput);
+
     % Try running the commands and capturing the output, metadata_extract preferred
     [status, cmdout] = system(commandMet);
+    command = commandMet;
     if status ~= 0
         [status, cmdout] = system(commandNi);
+        command = commandNi;
     end
     if status ~= 0
         error("io:stimuli:extractMetadata:CommandFailed", "Failed to run the metadata extraction command. Please ensure the binary is functional.");
     end
+
+    cmdout = strtrim(cmdout);
+
+    % remove base system output if present at the start of cmdout
+    if startsWith(cmdout, basesystemoutput)
+        cmdout = strtrim(extractAfter(cmdout, strlength(basesystemoutput)));
+    end
+    cmdout = strtrim(cmdout);
 
     % Parse the output
     try
