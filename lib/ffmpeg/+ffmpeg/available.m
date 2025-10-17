@@ -12,12 +12,18 @@ function [bool, bin] = available()
     [status, ~] = system('ffmpeg -version');
     if status == 0
         bool = true;
+        % Log the base output of system commands (some can inject leading warning/error messages before actual command output)
+        [~, basesystemoutput] = system('echo');
+        basesystemoutput = strtrim(basesystemoutput);
         if ispc
             [~, bin] = system('where ffmpeg');
             bin = strtrim(bin);
         else
             [~, bin] = system('which ffmpeg');
             bin = strtrim(bin);
+        end
+        if startsWith(bin, basesystemoutput)
+            bin = strtrim(extractAfter(bin, strlength(basesystemoutput)));
         end
         return
     end
