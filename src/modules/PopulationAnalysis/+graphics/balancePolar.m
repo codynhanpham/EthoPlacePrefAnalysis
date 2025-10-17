@@ -145,8 +145,8 @@ function balancePolar(ax, metadataTable)
     
     % Dummy markers for legend
     legendLabels = {'Female', 'Male'};
-    legenddummy{2} = scatter(ax, NaN, NaN, 55, 'o', 'MarkerFaceColor', 'none', 'MarkerEdgeColor', 'k', 'LineWidth', 1.5, 'Tag', 'FemaleLegend'); % Female
-    legenddummy{1} = scatter(ax, NaN, NaN, 55, 'o', 'MarkerFaceColor', 'k', 'MarkerEdgeColor', 'k', 'LineWidth', 0.5, 'Tag', 'MaleLegend'); % Male
+    legenddummy{1} = scatter(ax, NaN, NaN, 55, 'o', 'MarkerFaceColor', 'none', 'MarkerEdgeColor', 'k', 'LineWidth', 1.5, 'Tag', 'FemaleLegend'); % Female
+    legenddummy{2} = scatter(ax, NaN, NaN, 55, 'o', 'MarkerFaceColor', 'k', 'MarkerEdgeColor', 'k', 'LineWidth', 0.5, 'Tag', 'MaleLegend'); % Male
 
     genotypes = unique(groupedTable.ANIMAL_GENOTYPE, 'stable');
     for i = 1:length(genotypes)
