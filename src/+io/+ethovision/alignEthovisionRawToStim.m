@@ -143,7 +143,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                         habitdur = 0; % Default to start of trial
                     end
                     fps = 1 / mean(diff(datatable{:, 'Trial time'}), 'omitnan');
-                    kvargs.StimStartFrame = habitdur * fps + 1;
+                    kvargs.StimStartFrame = round(habitdur * fps + 1);
                 end
                 
                 if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
