@@ -43,10 +43,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         kvargs.SpeakerFlipped {mustBeNumericLogicalOrEmpty} = []
         kvargs.MasterMetadataTable {validator.mustBeFileTableOrEmpty} = ''
     end
-
     if isempty(kvargs.MasterMetadataTable) && ~all(~cellfun(@isempty, {kvargs.StimulusProtocol, kvargs.StimStartFrame, kvargs.SpeakerFlipped}))
         error('If MasterMetadataTable is not provided, all of StimulusProtocol, StimStartFrame, and SpeakerFlipped must be specified.');
     end
+
+
 
     % % IMPORTANT: Log the version of the script whenever any changes that affect the outputs are made
     % % Increment the version number following semantic versioning rules, then write a comment with some notes on what changed
@@ -54,9 +55,13 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % % Changing the version number here will force re-alignment and re-saving of aligned files
     % SCRIPT_VERSION = '0.0.0'; % Nothing, just as your template
     % SCRIPT_VERSION = '0.0.1'; % Nothing, just as your template
+    % SCRIPT_VERSION = '1.0.0'; % The initial version of this script, uses the full metadata table as hash for results caching
+    % SCRIPT_VERSION = '1.1.0'; % Load xlsx header to extract the exact metadata row + actual stimuli file to use as hash components for results caching
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.0.0'; % The initial version of this script
+    SCRIPT_VERSION = '1.1.1'; % Also store script version and the full metadata row in saved aligned file for future reference
+
+
 
 
     % Hash and check for existing aligned file to speed up repeated loading
@@ -65,17 +70,48 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     manualparams = {kvargs.StimulusProtocol, kvargs.StimStartFrame, kvargs.SpeakerFlipped};
     manualparamsHash = DataHash(manualparams, 'SHA-256');
     configHash = DataHash(kvargs.Config, 'SHA-256');
-    masterMetadataHash = '';
     masterMetadata = table();
     if istable(kvargs.MasterMetadataTable)
         masterMetadata = kvargs.MasterMetadataTable;
     elseif ~isempty(kvargs.MasterMetadataTable)
         masterMetadata = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
     end
-    if ~isempty(kvargs.MasterMetadataTable) && istable(kvargs.MasterMetadataTable)
-        masterMetadataHash = DataHash(masterMetadata, 'SHA-256');
+    
+    metadataRow = table();
+
+    [header, ~, ~] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName, HeaderOnly=true);
+    trialName = header("Trial name");
+    trialParts = split(trialName, ' ');
+    trialNumber = str2double(strtrim(trialParts{end}));
+    experimentName = header("Experiment");
+    arenaName = header("Arena name"); % just to make sure the arena name is exactly as how EthoVision exported it
+
+    if istable(masterMetadata) && ~isempty(masterMetadata)
+        trialMask = (masterMetadata.ETHOVISION_TRIAL == trialNumber) & ...
+            (masterMetadata.ETHOVISION_FILE == experimentName) & ...
+            (masterMetadata.ETHOVISION_ARENA == arenaName);
+        trialRowIdx = find(trialMask, 1);
+        metadataRow = masterMetadata(trialRowIdx, :);
+
+        if isempty(kvargs.StimulusProtocol)
+            kvargs.StimulusProtocol = char(metadataRow.('STIMULUS_PROTOCOL'));
+        end
     end
-    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(masterMetadataHash), char(SCRIPT_VERSION)];
+    if isempty(kvargs.StimulusProtocol)
+        error('StimulusProtocol must be specified either directly with StimulusProtocol named-argument or through a non-empty column ''STIMULUS_PROTOCOL'' in MasterMetadataTable.');
+    end
+    % Find stimulus file
+    dirglobpattern = sprintf("%s/**/%s", string(stimuliDir), string(kvargs.StimulusProtocol));
+    stimFiles = dir(dirglobpattern);
+    if isempty(stimFiles)
+        error('No stimulus files found matching pattern %s.', dirglobpattern);
+    end
+    stimFile = fullfile(stimFiles(1).folder, stimFiles(1).name);
+    
+    metadatarowHash = DataHash(metadataRow, 'SHA-256');
+    stimFileHash = DataHash(stimFile, 'SHA-256', 'file'); % io.stimuli.extractMetadata should have verified file exists
+
+    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(metadatarowHash), char(stimFileHash), char(SCRIPT_VERSION)];
     ethovisionXlsxHash = DataHash(composite, 'SHA-256');
 
     [filedir, filename] = fileparts(ethovisionXlsx);
@@ -104,89 +140,63 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 
 
     % Load EthoVision data
-    [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName);
-
-    trialName = header("Trial name");
-    trialParts = split(trialName, ' ');
-    trialNumber = str2double(strtrim(trialParts{end}));
-    experimentName = header("Experiment");
-    arenaName = header("Arena name"); % just to make sure the arena name is exactly as how EthoVision exported it
+    [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName, HeaderOnly=false);
 
     % Extract metadata parameters if available from the matching row in master metadata
-    sex = ''; genotype = ''; strain = ''; age = '';
-    if ~isempty(masterMetadata)
-        trialMask = (masterMetadata.ETHOVISION_TRIAL == trialNumber) & ...
-            (masterMetadata.ETHOVISION_FILE == experimentName) & ...
-            (masterMetadata.ETHOVISION_ARENA == arenaName);
-        trialRowIdx = find(trialMask, 1);
+    sex = ''; genotype = ''; strain = ''; age = ''; cagecode = ''; id = '';
+    if ~isempty(metadataRow)
+        sex = char(metadataRow.('ANIMAL_SEX'));
+        genotype = char(metadataRow.('ANIMAL_GENOTYPE'));
+        strain = char(metadataRow.('ANIMAL_STRAIN'));
+        age = metadataRow.('ANIMAL_P_AGE');
+        cagecode = char(metadataRow.('CAGE_CODE'));
+        id = char(metadataRow.('ANIMAL_ID'));
 
-        if ~isempty(trialRowIdx)
-            sex = char(masterMetadata{trialRowIdx, 'ANIMAL_SEX'});
-            genotype = char(masterMetadata{trialRowIdx, 'ANIMAL_GENOTYPE'});
-            strain = char(masterMetadata{trialRowIdx, 'ANIMAL_STRAIN'});
-            age = masterMetadata{trialRowIdx, 'ANIMAL_P_AGE'};
-            cagecode = char(masterMetadata{trialRowIdx, 'CAGE_CODE'});
-            id = char(masterMetadata{trialRowIdx, 'ANIMAL_ID'});
-
-            if isempty(kvargs.StimulusProtocol)
-                kvargs.StimulusProtocol = char(masterMetadata{trialRowIdx, 'STIMULUS_PROTOCOL'});
+        if isempty(kvargs.StimulusProtocol)
+            kvargs.StimulusProtocol = char(metadataRow.('STIMULUS_PROTOCOL'));
+        end
+        if isempty(kvargs.StimStartFrame)
+            stimStartVal = metadataRow.('STIM_START_FRAME');
+            if ~isnumeric(stimStartVal)
+                stimStartVal = str2double(string(stimStartVal));
             end
-            if isempty(kvargs.StimStartFrame)
-                stimStartVal = masterMetadata{trialRowIdx, 'STIM_START_FRAME'};
-                if ~isnumeric(stimStartVal)
-                    stimStartVal = str2double(string(stimStartVal));
+            kvargs.StimStartFrame = stimStartVal;
+            
+            if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
+                habitdur = metadataRow.('HABITUATION_DURATION_SEC');
+                if ~isnumeric(habitdur)
+                    habitdur = str2double(string(habitdur));
                 end
-                kvargs.StimStartFrame = stimStartVal;
-                
-                if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
-                    habitdur = masterMetadata{trialRowIdx, 'HABITUATION_DURATION_SEC'};
-                    if ~isnumeric(habitdur)
-                        habitdur = str2double(string(habitdur));
-                    end
-                    if isempty(habitdur) || isnan(habitdur)
-                        habitdur = 0; % Default to start of trial
-                    end
-                    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
-                    if isfile(mediafile)
-                        v = VideoReader(mediafile);
-                        fps = v.FrameRate;
-                        kvargs.StimStartFrame = habitdur * fps + 1;
-                        clear v;
-                    end
+                if isempty(habitdur) || isnan(habitdur)
+                    habitdur = 0; % Default to start of trial
                 end
-                
-                if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
-                    kvargs.StimStartFrame = 1;
+                mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+                if isfile(mediafile)
+                    v = VideoReader(mediafile);
+                    fps = v.FrameRate;
+                    kvargs.StimStartFrame = habitdur * fps + 1;
+                    clear v;
                 end
-                kvargs.StimStartFrame = round(kvargs.StimStartFrame);
             end
-            if isempty(kvargs.SpeakerFlipped)
-                kvargs.SpeakerFlipped = logical(masterMetadata{trialRowIdx, 'SPEAKER_FLIPPED'});
+            
+            if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
+                kvargs.StimStartFrame = 1;
             end
+            kvargs.StimStartFrame = round(kvargs.StimStartFrame);
+        end
+        if isempty(kvargs.SpeakerFlipped)
+            kvargs.SpeakerFlipped = logical(metadataRow.('SPEAKER_FLIPPED'));
         end
     end
     animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age, 'cagecode', cagecode, 'id', id);
 
-    if isempty(kvargs.StimulusProtocol)
-        error('StimulusProtocol must be specified either directly with StimulusProtocol named-argument or through a non-empty column ''STIMULUS_PROTOCOL'' in MasterMetadataTable.');
-    end
 
     % All of StimulusProtocol, StimStartFrame, and SpeakerFlipped should be non-empty now
     % Do post-processing, more convenient for downstream tasks
     kvargs.SpeakerFlipped = logical(kvargs.SpeakerFlipped);
 
-    % Find stimulus file
-    dirglobpattern = sprintf("%s/**/%s", string(stimuliDir), string(kvargs.StimulusProtocol));
-    stimFiles = dir(dirglobpattern);
-    if isempty(stimFiles)
-        error('No stimulus files found matching pattern %s.', dirglobpattern);
-    end
-    stimFile = fullfile(stimFiles(1).folder, stimFiles(1).name);
-    stimuli = char(stimFiles(1).name);
-
     % Extract metadata from stimulus file
     metadata = io.stimuli.extractMetadata(stimFile, "Config", kvargs.Config);
-    stimFileHash = DataHash(stimFile, 'SHA-256', 'file'); % io.stimuli.extractMetadata should have verified file exists
 
     requiredFields = {'chapters', 'duration'};
     if ~isstruct(metadata) || ~all(isfield(metadata, requiredFields))
@@ -420,10 +430,12 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         'NewVariableNames', {'Chapter Original', 'Speaker Channels Flipped', 'Stim Speaker Corrected', 'Animal Is Same Zone As Stim', 'Animal Matched Stim Name', 'Matched Speaker Position'});
 
     stimulusFrameRange = [kvargs.StimStartFrame, stimEndFrame-1];
+    stimuli = char(stimFiles(1).name);
 
     s = struct('header', header, 'datatable', datatable, 'units', units, ...
+        'metadataRow', metadataRow, ... % This has extra metadata that is not in animalMetadata, but available only when MasterMetadataTable is provided
         'stimulusFrameRange', stimulusFrameRange, 'animalMetadata', animalMetadata, ...
-        'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', char(stimuli));
+        'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', char(stimuli), "ALIGNMENT_SCRIPT_VERSION", SCRIPT_VERSION);
     save(alignedFile, '-struct', 's');
 end
 

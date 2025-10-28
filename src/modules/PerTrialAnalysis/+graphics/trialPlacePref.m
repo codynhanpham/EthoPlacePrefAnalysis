@@ -103,8 +103,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     name = strcat(header("Experiment"), " - ", header("Trial name"));
     
     screensize = get(0, 'ScreenSize');
-    h = 0.75; w = h * 0.578;
-    figPos = [(screensize(3)-screensize(3)*w)/2, (screensize(4)-screensize(4)*h)/2, screensize(3)*w, screensize(4)*h];
+    h = 0.72 * screensize(4); w = h * (vidWidth / (vidHeight + 0.26*vidHeight)); % maintain aspect ratio with some extra height for bar chart
+    figPos = [(screensize(3)-w)/2, (screensize(4)-h)/2, w, h];
     f = figure('Name', sprintf("%s | %s", name, sprintf("%s - %s - %s", animalMetadata.sex, animalMetadata.strain, animalMetadata.genotype)), 'NumberTitle', 'off', 'Position', figPos, 'ToolBar', 'none');
     t = tiledlayout(f, 4,1, "TileSpacing", "compact", "Padding", "compact");
     
