@@ -55,10 +55,18 @@ function updateBatchDataTree(appTreeRootNode, batchData)
         if isempty(expNode)
             % Add new experiment node
             expNode = uitreenode(appTreeRootNode, 'Text', exp, 'NodeData', expPath);
-            updateTrialsForExperiment(expNode, expPath);
+            hasValidTrials = updateTrialsForExperiment(expNode, expPath);
+            % Remove experiment node if it has no valid trials
+            if ~hasValidTrials
+                delete(expNode);
+            end
         else
             % Update existing experiment node's trials
-            updateTrialsForExperiment(expNode, expPath);
+            hasValidTrials = updateTrialsForExperiment(expNode, expPath);
+            % Remove experiment node if it has no valid trials
+            if ~hasValidTrials
+                delete(expNode);
+            end
         end
     end
 
@@ -82,15 +90,31 @@ function node = findNodeByText(nodes, text)
     end
 end
 
-function updateTrialsForExperiment(expNode, expPath)
+function hasValidTrials = updateTrialsForExperiment(expNode, expPath)
     %%UPDATETRIALSFOREXPERIMENT Update trials for a specific experiment node
+    %   Returns true if the experiment has valid trials, false otherwise
     
     try
         [newTrialNames, newTrialInfo] = io.ethovision.filterTrials(expPath);
+        % Filter out trials that are multi-arena exports
+        singleArenaIdx = arrayfun(@(t) isfield(t, 'multipleArena') && ~t.multipleArena, newTrialInfo);
+        newTrialNames = newTrialNames(singleArenaIdx);
+        newTrialInfo = newTrialInfo(singleArenaIdx);
+        
+        % Check if any valid trials remain after filtering
+        if isempty(newTrialNames)
+            % Remove all existing trial nodes and return false
+            currentTrialNodes = expNode.Children;
+            delete(currentTrialNodes);
+            hasValidTrials = false;
+            return;
+        end
+        
     catch
         % If filterTrials fails, remove all trials for this experiment
         currentTrialNodes = expNode.Children;
         delete(currentTrialNodes);
+        hasValidTrials = false;
         return;
     end
     
@@ -112,6 +136,7 @@ function updateTrialsForExperiment(expNode, expPath)
             delete(nodeToRemove);
         end
     end
+
     
     % Find trials to add
     trialsToAdd = setdiff(newTrialNames, currentTrialNames);
@@ -142,4 +167,7 @@ function updateTrialsForExperiment(expNode, expPath)
             end
         end
     end
+    
+    % If we reach here, there are valid trials
+    hasValidTrials = true;
 end

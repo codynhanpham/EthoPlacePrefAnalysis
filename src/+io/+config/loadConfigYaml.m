@@ -28,4 +28,20 @@ function configs = loadConfigYaml(configFile)
     else
         configs.CONFIG_ROOT = pwd;
     end
+
+
+    fromConfigKey = {'project_settings', 'EthoVision', 'arena'};
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        % If arena is specified, make sure each arena has the required fields: name, zone
+        requiredFields = {'name', 'zone'};
+        result = cellfun(@(x) all(isfield(x, requiredFields)), configs.project_settings.EthoVision.arena);
+        if ~all(result)
+            error('Each arena in configuration must have the required fields: %s', strjoin(requiredFields, ', '));
+        end
+        % Each zone must have left and right fields
+        result = cellfun(@(x) all(isfield(x.zone, {'left', 'right'})), configs.project_settings.EthoVision.arena);
+        if ~all(result)
+            error('Each arena.zone in configuration must have the required fields: left, right');
+        end
+    end
 end

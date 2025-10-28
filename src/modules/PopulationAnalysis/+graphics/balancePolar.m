@@ -177,5 +177,5 @@ function balancePolar(ax, metadataTable)
 
     legend(ax, [legenddummy{:}], legendLabels, 'Location', 'northeastoutside', 'FontSize', 11);
 
-
+    assignin("base", "groupedTable", groupedTable);
 end

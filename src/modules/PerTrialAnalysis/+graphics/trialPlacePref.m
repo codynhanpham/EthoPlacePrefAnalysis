@@ -22,16 +22,20 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     end
 
     configs = kvargs.Config;
-    fromConfigKey = {'project_settings', 'EthoVision', 'CameraImgWidthFOV_cm'};
+    fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
     ImgWidthFOV_cm = 58.5; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
+        if iscell(ImgWidthFOV_cm)
+            ImgWidthFOV_cm = cell2mat(ImgWidthFOV_cm);
+        end
     end
 
-    fromConfigKey = {'project_settings', 'EthoVision', 'CameraCenterOffset_cm'};
-    CenterOffset_cm = [0,0]; % default value for compat with older code
+    fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_center_offset_px'};
+    CenterOffset_px = [0,0]; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
-        CenterOffset_cm = getfield(configs, fromConfigKey{:});
+        CenterOffset_px = getfield(configs, fromConfigKey{:});
+        CenterOffset_px = cell2mat(CenterOffset_px);
     end
 
     [header, datatable, units, stimulusFrameRange, animalMetadata] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
@@ -39,20 +43,36 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         Config=kvargs.Config ...
     );
 
-    stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
-
-    ethovisionParentDir = fileparts(fileparts(ethovisionXlsx));
-    % check for :\ in video file path to pick correct filesep for splitting
-    if contains(header("Video file"), ':\') % Windows path
-        fsep = '\';
-    else
-        fsep = '/'; % Unix path
+    arenaName = header("Arena name");
+    % Check for configs overrides for this arena
+    arenaConfigPath = {'project_settings', 'EthoVision', 'arena'};
+    if validator.nestedStructFieldExists(configs, arenaConfigPath)
+        arenaConfigs = getfield(configs, arenaConfigPath{:});
+        if iscell(arenaConfigs)
+            namesinconfig = cellfun(@(x) x.name, arenaConfigs, 'UniformOutput', false);
+        else
+            namesinconfig = arenaConfigs.name;
+        end
+        namesinconfig = string(namesinconfig);
+        if ismember(arenaName, namesinconfig)
+            arenaIdx = find(strcmp(namesinconfig, arenaName), 1);
+            if iscell(arenaConfigs)
+                arenaConfig = arenaConfigs{arenaIdx};
+            else
+                arenaConfig = arenaConfigs(arenaIdx);
+            end
+            if isfield(arenaConfig, 'camera_imgwidth_fov_cm')
+                ImgWidthFOV_cm = arenaConfig.camera_imgwidth_fov_cm;
+            end
+            if isfield(arenaConfig, 'camera_center_offset_px')
+                CenterOffset_px = arenaConfig.camera_center_offset_px;
+                CenterOffset_px = cell2mat(CenterOffset_px);
+            end
+        end
     end
-    videoFilePathParts = strsplit(header("Video file"), fsep);
-    videoFileShortPath = strjoin(videoFilePathParts(end-1:end), fsep);
-    % replace fsep is short path with filesep for current OS
-    videoFileShortPath = strrep(videoFileShortPath, fsep, filesep);
-    videoFilePath = fullfile(ethovisionParentDir, videoFileShortPath);
+
+    stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
+    videoFilePath = io.ethovision.mediaPathFromXlsx(ethovisionXlsx);
 
     if ~isfile(videoFilePath)
         error("Video file not found: %s.\nMake sure your folder structure is exactly how EthoVision exported it, with an 'Export Files' folder and a 'Media Files' folder.", videoFilePath);
@@ -66,8 +86,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     pixelsize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
     centerPos = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
-    centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + CenterOffset_cm(1);
-    centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + CenterOffset_cm(2);
+    centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+    centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
     % Scale the center pos to pixels
     centerPos = centerPos / pixelsize;
     
@@ -95,7 +115,6 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     hold on;
     % Turn axis back on to show ticks and labels
     axis(a, 'on');
-    % h = imagesc(a, xedges, yedges, d);
     alphadata = zeros(size(d));
     alphadata(d > 0.001) = 1;
     alphadata(d > 0.001 & d <= 0.005*max(d(:))) = 0.2;
@@ -114,7 +133,6 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     imagesc(a, xedges, yedges, d, 'AlphaData', alphadata);
     % Also plot a red dot at the center position of the first frame
     plot(a, centerPos(1,1), centerPos(1,2), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
-    hold off;
     axis(a, 'equal');
     colormap(a, jet);
     cb = colorbar;
@@ -122,6 +140,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     title(sprintf("%s\n%s", name, sprintf("%s - %s - %s", animalMetadata.sex, animalMetadata.strain, animalMetadata.genotype)), "Interpreter", "none");
     xlabel("X Position (cm)");
     ylabel("Y Position (cm)");
+    hold off;
 
     % Change ticks to be every 5 cm
     stepsize = 5 / pixelsize;
@@ -135,6 +154,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     yticklabels = unique(round(yticks * pixelsize / 5) * 5); % Round to nearest 5 cm
     set(a, 'YTickLabel', yticklabels);
     set(a, 'TickDir', 'both', 'TickLength', [0.005, 0.005]);
+    set(a, 'XLim', [0, vidWidth], 'YLim', [0, vidHeight]);
 
 
     %% BAR CHART

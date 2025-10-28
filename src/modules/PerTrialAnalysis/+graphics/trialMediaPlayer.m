@@ -7,13 +7,12 @@ function fig = trialMediaPlayer(kvargs)
 %   When EthovisionXlsx is provided, the function will overlay animal tracking
 %   data on the video frames. The coordinate conversion follows the same logic
 %   as trialHeatmap.m, converting Ethovision coordinates to pixel coordinates
-%   using ImgWidthFOV_cm and CenterOffset_cm parameters.
+%   using ImgWidthFOV_cm and CenterOffset_px parameters.
 
 arguments
     kvargs.VideoFile {mustBeFile}
     kvargs.EthovisionXlsx {mustBeFile}
-    kvargs.ImgWidthFOV_cm (1,1) double {mustBePositive} = 58.5
-    kvargs.CenterOffset_cm (1,2) double = [0,0]
+    kvargs.Config struct = struct();
 end
 
 
@@ -29,23 +28,76 @@ end
 
 % Try to load tracking data if EthovisionXlsx is provided
 trackData = [];
+trackDataTime = [];
 pixelSize = [];
 if isfield(kvargs, 'EthovisionXlsx') && ~isempty(kvargs.EthovisionXlsx) && isfile(kvargs.EthovisionXlsx)
     try
-        [~, datatable, ~] = io.ethovision.loadEthovisionXlsx(kvargs.EthovisionXlsx);
+        ImgWidthFOV_cm = 58.5; % default value for compat with older code
+        CenterOffset_px = [0,0]; % default value for compat with older code
+        if isfield(kvargs, 'Config')
+            configs = kvargs.Config;
+            fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
+            if validator.nestedStructFieldExists(configs, fromConfigKey)
+                ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
+                if iscell(ImgWidthFOV_cm)
+                    ImgWidthFOV_cm = cell2mat(ImgWidthFOV_cm);
+                end
+            end
+
+            fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_center_offset_px'};
+            if validator.nestedStructFieldExists(configs, fromConfigKey)
+                CenterOffset_px = getfield(configs, fromConfigKey{:});
+                CenterOffset_px = cell2mat(CenterOffset_px);
+            end
+        end
+
+        [header, datatable, ~] = io.ethovision.loadEthovisionXlsx(kvargs.EthovisionXlsx);
+        arenaName = header("Arena name");
+        % Check for configs overrides for this arena
+        arenaConfigPath = {'project_settings', 'EthoVision', 'arena'};
+        if validator.nestedStructFieldExists(configs, arenaConfigPath)
+            arenaConfigs = getfield(configs, arenaConfigPath{:});
+            if iscell(arenaConfigs)
+                namesinconfig = cellfun(@(x) x.name, arenaConfigs, 'UniformOutput', false);
+            else
+                namesinconfig = arenaConfigs.name;
+            end
+            namesinconfig = string(namesinconfig);
+            if ismember(arenaName, namesinconfig)
+                arenaIdx = find(strcmp(namesinconfig, arenaName), 1);
+                if iscell(arenaConfigs)
+                    arenaConfig = arenaConfigs{arenaIdx};
+                else
+                    arenaConfig = arenaConfigs(arenaIdx);
+                end
+                if isfield(arenaConfig, 'camera_imgwidth_fov_cm')
+                    ImgWidthFOV_cm = arenaConfig.camera_imgwidth_fov_cm;
+                end
+                if isfield(arenaConfig, 'camera_center_offset_px')
+                    CenterOffset_px = arenaConfig.camera_center_offset_px;
+                    CenterOffset_px = cell2mat(CenterOffset_px);
+                end
+            end
+        end
 
         % Calculate pixel size based on field of view
         vidObj_temp = VideoReader(fullPath);
         vidWidth = vidObj_temp.Width;
         vidHeight = vidObj_temp.Height;
-        pixelSize = kvargs.ImgWidthFOV_cm / vidWidth; % cm/pixel
+        pixelSize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
         xCenter = datatable{:, 'X center'};
         yCenter = datatable{:, 'Y center'};
+        if iscell(xCenter)
+            xCenter = cellfun(@str2double, xCenter);
+        end
+        if iscell(yCenter)
+            yCenter = cellfun(@str2double, yCenter);
+        end
 
         % Convert from Ethovision coordinates to pixel coordinates
-        xPixel = xCenter + (vidWidth/2 * pixelSize) + kvargs.CenterOffset_cm(1);
-        yPixel = yCenter + (vidHeight/2 * pixelSize) + kvargs.CenterOffset_cm(2);
+        xPixel = xCenter + (vidWidth/2 * pixelSize) + (CenterOffset_px(1) * pixelSize);
+        yPixel = yCenter + (vidHeight/2 * pixelSize) + (CenterOffset_px(2) * pixelSize);
 
         % Scale to pixel coordinates
         xPixel = xPixel / pixelSize;
@@ -54,6 +106,7 @@ if isfield(kvargs, 'EthovisionXlsx') && ~isempty(kvargs.EthovisionXlsx) && isfil
 
         % Store track data aligned with frame numbers
         trackData = [xPixel, yPixel];
+        trackDataTime = datatable{:, 'Trial time'};
     catch ME
         warning('EthoPlacePreference:LoadError', 'Failed to load Ethovision data: %s', ME.message);
         trackData = [];
@@ -136,7 +189,7 @@ nextButton.Layout.Column = 3;
 
 appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabel, ...
     'videoAxes', videoAxes, 'isPlaying', false, 'currentFrame', 1, 'timer', [], ...
-    'trackData', trackData, 'pixelSize', pixelSize, 'lastFrameTime', tic, ...
+    'trackData', trackData, 'trackDataTime', trackDataTime, 'pixelSize', pixelSize, 'lastFrameTime', tic, ...
     'showTracking', true, 'fastMode', false, 'showFps', false, ...
     'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic);
 
@@ -197,7 +250,18 @@ function updateFpsDisplay()
     end
 end
 
-function displayFrameWithTrack(frameNum)
+function displayFrameWithTrack(frameNum, realFrameTime)
+    %%DISPLAYFRAMEWITHTRACK - Display a video frame with optional tracking overlay
+    % Inputs:
+    %   frameNum - Video frame number to display (real frame)
+    %   realFrameTime - Real time of the frame in seconds
+    %
+    %   realFrameTime is required when video frame rate differs (even slightly) with EthoVision tracking rate
+    %   since EthoVision will tracks and interpolate positions at a fixed time interval, while video frames may not align perfectly.
+    if nargin < 2
+        realFrameTime = [];
+    end
+
     frame = read(appData.videoObj, frameNum);
     imshow(frame, 'Parent', appData.videoAxes);
 
@@ -207,8 +271,13 @@ function displayFrameWithTrack(frameNum)
 
         % Draw the trail of the last N frames
         trackHistoryLength = 125;
-        startIdx = max(1, frameNum - trackHistoryLength);
-        endIdx = min(frameNum, size(appData.trackData, 1));
+        trackFrame = frameNum;
+        if ~isempty(realFrameTime)
+            % Find the closest value (s) in the trackDataTime
+            [~, trackFrame] = min(abs(appData.trackDataTime - realFrameTime));
+        end
+        startIdx = max(1, trackFrame - trackHistoryLength);
+        endIdx = min(trackFrame, size(appData.trackData, 1));
 
         if endIdx > startIdx
             xTrack = appData.trackData(startIdx:endIdx, 1);
@@ -267,10 +336,10 @@ function displayFrameWithTrack(frameNum)
                 end
 
                 % Plot current position as a circle if within bounds
-                if frameNum <= size(appData.trackData, 1) && ...
-                        ~isnan(appData.trackData(frameNum, 1)) && ~isnan(appData.trackData(frameNum, 2))
-                    currentX = appData.trackData(frameNum, 1);
-                    currentY = appData.trackData(frameNum, 2);
+                if trackFrame <= size(appData.trackData, 1) && ...
+                        ~isnan(appData.trackData(trackFrame, 1)) && ~isnan(appData.trackData(trackFrame, 2))
+                    currentX = appData.trackData(trackFrame, 1);
+                    currentY = appData.trackData(trackFrame, 2);
 
                     % Check if position is within video bounds
                     if currentX > 0 && currentX <= size(frame, 2) && ...
@@ -336,8 +405,11 @@ function updateFrame()
         (mod(appData.currentFrame, max(1, floor(elapsedTime / targetFrameTime))) == 0);
 
     if shouldRender
+        currentRealFrame = appData.currentFrame;
+        videoFps = appData.videoObj.FrameRate;
+        realFrameTime = currentRealFrame / videoFps;
         % Display the frame with tracking overlay
-        displayFrameWithTrack(appData.currentFrame);
+        displayFrameWithTrack(appData.currentFrame, realFrameTime);
 
         % Update the UI elements
         appData.slider.Value = appData.currentFrame;
@@ -358,7 +430,10 @@ function pauseAndJump(newValue)
     playButton.Text = 'Play';
 
     appData.currentFrame = round(newValue);
-    displayFrameWithTrack(appData.currentFrame);
+    currentRealFrame = appData.currentFrame;
+    videoFps = appData.videoObj.FrameRate;
+    realFrameTime = currentRealFrame / videoFps;
+    displayFrameWithTrack(appData.currentFrame, realFrameTime);
 
     appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
 end
@@ -366,11 +441,17 @@ end
 function slider_callback(newValue)
     % Final callback after the user lets go of the slider
     appData.currentFrame = round(newValue);
-    displayFrameWithTrack(appData.currentFrame);
+    currentRealFrame = appData.currentFrame;
+    videoFps = appData.videoObj.FrameRate;
+    realFrameTime = currentRealFrame / videoFps;
+    displayFrameWithTrack(appData.currentFrame, realFrameTime);
 
     appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
 end
 function keyPressCallback(~, event)
+    currentRealFrame = appData.currentFrame;
+    videoFps = appData.videoObj.FrameRate;
+    realFrameTime = currentRealFrame / videoFps;
     switch event.Key
         case 'rightarrow'
             nextFrame();
@@ -380,7 +461,7 @@ function keyPressCallback(~, event)
             % Toggle tracking display for performance
             if ~isempty(appData.trackData)
                 appData.showTracking = ~appData.showTracking;
-                displayFrameWithTrack(appData.currentFrame);
+                displayFrameWithTrack(appData.currentFrame, realFrameTime);
                 if appData.showTracking
                     fprintf('Tracking overlay: ON\n');
                 else
@@ -391,7 +472,7 @@ function keyPressCallback(~, event)
             % Toggle fast mode for tracking rendering
             if ~isempty(appData.trackData) && appData.showTracking
                 appData.fastMode = ~appData.fastMode;
-                displayFrameWithTrack(appData.currentFrame);
+                displayFrameWithTrack(appData.currentFrame, realFrameTime);
                 if appData.fastMode
                     fprintf('Fast mode: ON (simplified trail rendering)\n');
                 else
@@ -425,7 +506,10 @@ function nextFrame()
         stop(appData.timer);
         playButton.Text = 'Play';
         appData.currentFrame = appData.currentFrame + 1;
-        displayFrameWithTrack(appData.currentFrame);
+        currentRealFrame = appData.currentFrame;
+        videoFps = appData.videoObj.FrameRate;
+        realFrameTime = currentRealFrame / videoFps;
+        displayFrameWithTrack(appData.currentFrame, realFrameTime);
         appData.slider.Value = appData.currentFrame;
         appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
     end
@@ -438,7 +522,10 @@ function prevFrame()
         stop(appData.timer);
         playButton.Text = 'Play';
         appData.currentFrame = appData.currentFrame - 1;
-        displayFrameWithTrack(appData.currentFrame);
+        currentRealFrame = appData.currentFrame;
+        videoFps = appData.videoObj.FrameRate;
+        realFrameTime = currentRealFrame / videoFps;
+        displayFrameWithTrack(appData.currentFrame, realFrameTime);
         appData.slider.Value = appData.currentFrame;
         appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
     end

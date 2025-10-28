@@ -10,4 +10,34 @@ defaults:
 
 project_settings:
   EthoVision:
-    CameraImgWidthFOV_cm: 58.5
+    # Default settings applied to all sub-categories unless overridden 
+    default_camera_imgwidth_fov_cm: 58.5
+    default_camera_center_offset_px: [0, 0]
+    default_zone_match_method: "startsWith"  # one of these: "exact", "startsWith", "endsWith", "contains"
+
+    arena:
+      # When using multiple arenas or different arena configs exist, specify them here
+      # Just make sure the names match those used in EthoVision
+      - name: "Arena 1"
+        camera_imgwidth_fov_cm: 58.5
+        camera_center_offset_px: [0, 0]
+        zone:
+          left: Left
+          right: Right
+        zone_match_method: "startsWith"
+
+      - name: "Lily Booth"
+        camera_imgwidth_fov_cm: 77.4
+        camera_center_offset_px: [960, 0]
+        zone:
+          left: Left 1
+          right: Right 1
+        zone_match_method: "exact"
+      
+      - name: "Rain Booth"
+        camera_imgwidth_fov_cm: 77.4
+        camera_center_offset_px: [-960, 0]
+        zone:
+          left: Left 2
+          right: Right 2
+        zone_match_method: "exact"

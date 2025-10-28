@@ -8,7 +8,8 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %       stimuliDir     - The directory containing original stimuli `.flac` files with embedded timestamps
     %
     %   Name-Value Pair Arguments:
-    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
+    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml()
+    %       - 'ArenaName': The name of the arena to load data for. If not specified, data for the first arena found will be loaded.
     %       - 'ExpectedNumVariables' (optional): The number of data columns in the table to expect in EthoVision exported XLSX file. Default max is 50, with empty columns removed.
     %
     %       - 'StimulusProtocol' (optional if `MasterMetadataTable` exists): The name of the stimuli file played during this trial, including the `.flac` extension. This file must exists in `stimuliDir`. If `MasterMetadataTable` is provided, this value will take precedence.
@@ -35,6 +36,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         ethovisionXlsx {mustBeFile}
         stimuliDir {mustBeFolder}
         kvargs.Config (1,1) struct = struct()
+        kvargs.ArenaName {validator.mustBeTextScalarOrEmpty} = ''
         kvargs.ExpectedNumVariables {mustBeNumeric} = 50
         kvargs.StimulusProtocol {mustBeTextScalar} = ''
         kvargs.StimStartFrame {mustBePositiveIntOrEmpty} = []
@@ -102,18 +104,20 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 
 
     % Load EthoVision data
-    [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables);
+    [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName);
 
     trialName = header("Trial name");
     trialParts = split(trialName, ' ');
     trialNumber = str2double(strtrim(trialParts{end}));
     experimentName = header("Experiment");
+    arenaName = header("Arena name"); % just to make sure the arena name is exactly as how EthoVision exported it
 
     % Extract metadata parameters if available from the matching row in master metadata
     sex = ''; genotype = ''; strain = ''; age = '';
     if ~isempty(masterMetadata)
         trialMask = (masterMetadata.ETHOVISION_TRIAL == trialNumber) & ...
-            (masterMetadata.ETHOVISION_FILE == experimentName);
+            (masterMetadata.ETHOVISION_FILE == experimentName) & ...
+            (masterMetadata.ETHOVISION_ARENA == arenaName);
         trialRowIdx = find(trialMask, 1);
 
         if ~isempty(trialRowIdx)
@@ -142,13 +146,19 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                     if isempty(habitdur) || isnan(habitdur)
                         habitdur = 0; % Default to start of trial
                     end
-                    fps = 1 / mean(diff(datatable{:, 'Trial time'}), 'omitnan');
-                    kvargs.StimStartFrame = round(habitdur * fps + 1);
+                    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+                    if isfile(mediafile)
+                        v = VideoReader(mediafile);
+                        fps = v.FrameRate;
+                        kvargs.StimStartFrame = habitdur * fps + 1;
+                        clear v;
+                    end
                 end
                 
                 if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
                     kvargs.StimStartFrame = 1;
                 end
+                kvargs.StimStartFrame = round(kvargs.StimStartFrame);
             end
             if isempty(kvargs.SpeakerFlipped)
                 kvargs.SpeakerFlipped = logical(masterMetadata{trialRowIdx, 'SPEAKER_FLIPPED'});
@@ -190,7 +200,6 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     chapters = metadata.chapters; % Nx1 struct array with fields: timestamp, title, description, startsample
 
     numRows = size(datatable, 1);
-    
     % Calculate stimulus timing
     timeAtStimStart = datatable{kvargs.StimStartFrame, 'Trial time'};
     stimEndTime = ceil(timeAtStimStart) + metadata.duration;
@@ -241,11 +250,40 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                 
                 chapterOriginal(validStimIndices) = string(assignedTitles);
 
-                % Find zone columns - InLeft ==true when the datatable header that starts with "In zone(Left"==true
-                inLeftMask = startsWith(datatable.Properties.VariableNames, "In zone(Left");
-                inLeftIdx = find(inLeftMask, 1);
-                inRightMask = startsWith(datatable.Properties.VariableNames, "In zone(Right");
-                inRightIdx = find(inRightMask, 1);
+                leftTerm = "Left"; % Default search term for left zone column
+                rightTerm = "Right"; % Default search term for right zone column
+                zoneMatchMethod = "startsWith"; % Default matching method
+                
+                zonematchconfigkey = {'project_settings', 'EthoVision', 'default_zone_match_method'};
+                if validator.nestedStructFieldExists(kvargs.Config, zonematchconfigkey)
+                    zoneMatchMethod = getfield(kvargs.Config, zonematchconfigkey{:});
+                end
+                % Check if this arenaName is specified in the config
+                arenaConfigKey = {'project_settings', 'EthoVision', 'arena'};
+                if validator.nestedStructFieldExists(kvargs.Config, arenaConfigKey)
+                    arenas = getfield(kvargs.Config, arenaConfigKey{:});
+                    arenaIdx = find(cellfun(@(x) strcmp(x.name, arenaName), arenas), 1);
+                    if ~isempty(arenaIdx)
+                        % arena.zone should always exists and have left and right fields as per config validation in loadConfigYaml()
+                        leftTerm = arenas{arenaIdx}.zone.left;
+                        rightTerm = arenas{arenaIdx}.zone.right;
+                        if isfield(arenas{arenaIdx}, 'zone_match_method')
+                            zoneMatchMethod = arenas{arenaIdx}.zone_match_method;
+                        end
+                    end
+                end
+
+                % All potential "In zone(...)" columns
+                inzones = datatable.Properties.VariableNames(startsWith(datatable.Properties.VariableNames, "In zone("));
+                % Find columns matching left and right zone names based on config
+                datazonenames = cellfun(@(x) parseInZoneText(x), inzones, 'UniformOutput', false);
+                inLeftIdx = find(cellfun(@(x) matchedZoneName(x, leftTerm, zoneMatchMethod), datazonenames), 1);
+                inLeftText = inzones{inLeftIdx};
+                inLeftIdx = find(strcmp(datatable.Properties.VariableNames, inLeftText), 1);
+                inRightIdx = find(cellfun(@(x) matchedZoneName(x, rightTerm, zoneMatchMethod), datazonenames), 1);
+                inRightText = inzones{inRightIdx};
+                inRightIdx = find(strcmp(datatable.Properties.VariableNames, inRightText), 1);
+
 
                 if ~isempty(inLeftIdx) && ~isempty(inRightIdx)
                     % Get zone data for the valid stimulus frames
@@ -403,4 +441,35 @@ function mustBeNumericLogicalOrEmpty(value)
         return;
     end
     mustBeNumericOrLogical(value);
+end
+
+
+function [zoneName, option] = parseInZoneText(text)
+    % Parse text in format: "In zone(<ZoneName> / <Option>)"
+    pattern = 'In zone\(([^'']+)\s*/\s*(.+)\)';
+    tokens = regexp(text, pattern, 'tokens', 'once');
+    
+    if ~isempty(tokens)
+        zoneName = strtrim(string(tokens{1}));
+        option = strtrim(string(tokens{2}));
+    else
+        zoneName = "";
+        option = "";
+        warning('Text does not match expected format: %s', text);
+    end
+end
+
+function bool = matchedZoneName(input, matchedTo, method)
+    switch method
+        case "exact"
+            bool = strcmp(input, matchedTo);
+        case "startsWith"
+            bool = startsWith(input, matchedTo);
+        case "endsWith"
+            bool = endsWith(input, matchedTo);
+        case "contains"
+            bool = contains(input, matchedTo);
+        otherwise
+            error('Unknown zone match method: %s', method);
+    end
 end
