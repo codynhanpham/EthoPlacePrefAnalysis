@@ -154,11 +154,14 @@ videoAxes.PickableParts="none";
 videoAxes.Position = [0 0 1 1]; % Fill the entire grid cell
 videoAxes.OuterPosition = [0 0 1 1]; % Remove outer margins
 
-frameLabel = uilabel(mainGrid, 'Text', 'Frame: 1');
+frameLabel = uieditfield(mainGrid, 'numeric', 'Value', 1);
 frameLabel.Layout.Row = 2;
 frameLabel.Layout.Column = 1;
-frameLabel.FontWeight = 'bold';
 frameLabel.HorizontalAlignment = 'center';
+frameLabel.Limits = [1 totalFrames];
+frameLabel.RoundFractionalValues = 'on';
+frameLabel.ValueDisplayFormat = 'Frame: %d';
+frameLabel.ValueChangedFcn = @(src, event) jumpToFrame(round(event.Value));
 
 playButton = uibutton(mainGrid, 'Text', 'Play', 'ButtonPushedFcn', @(btn, event) togglePlayback);
 playButton.Layout.Row = 3;
@@ -413,7 +416,7 @@ function updateFrame()
 
         % Update the UI elements
         appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
+        appData.frameLabel.Value = appData.currentFrame;
 
         appData.lastFrameTime = tic;
         drawnow;
@@ -435,7 +438,7 @@ function pauseAndJump(newValue)
     realFrameTime = currentRealFrame / videoFps;
     displayFrameWithTrack(appData.currentFrame, realFrameTime);
 
-    appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
+    appData.frameLabel.Value = appData.currentFrame;
 end
 
 function slider_callback(newValue)
@@ -446,8 +449,30 @@ function slider_callback(newValue)
     realFrameTime = currentRealFrame / videoFps;
     displayFrameWithTrack(appData.currentFrame, realFrameTime);
 
-    appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
+    appData.frameLabel.Value = appData.currentFrame;
 end
+
+function jumpToFrame(frameNum)
+    % Jump to a specific frame when the user enters a frame number
+    frameNum = max(1, min(frameNum, totalFrames)); % Clamp to valid range
+    
+    % Pause playback if currently playing
+    if appData.isPlaying
+        appData.isPlaying = false;
+        stop(appData.timer);
+        playButton.Text = 'Play';
+    end
+    
+    appData.currentFrame = frameNum;
+    currentRealFrame = appData.currentFrame;
+    videoFps = appData.videoObj.FrameRate;
+    realFrameTime = currentRealFrame / videoFps;
+    displayFrameWithTrack(appData.currentFrame, realFrameTime);
+    
+    appData.slider.Value = appData.currentFrame;
+    appData.frameLabel.Value = appData.currentFrame;
+end
+
 function keyPressCallback(~, event)
     currentRealFrame = appData.currentFrame;
     videoFps = appData.videoObj.FrameRate;
@@ -511,7 +536,7 @@ function nextFrame()
         realFrameTime = currentRealFrame / videoFps;
         displayFrameWithTrack(appData.currentFrame, realFrameTime);
         appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
+        appData.frameLabel.Value = appData.currentFrame;
     end
 end
 function prevFrame()
@@ -527,7 +552,7 @@ function prevFrame()
         realFrameTime = currentRealFrame / videoFps;
         displayFrameWithTrack(appData.currentFrame, realFrameTime);
         appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Text = ['Frame: ' num2str(appData.currentFrame)];
+        appData.frameLabel.Value = appData.currentFrame;
     end
 end
 

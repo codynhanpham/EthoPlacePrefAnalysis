@@ -1,2 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Info/>
+<Info>
+    <Category UUID="Deployment_Category_1236e8a8-1b5a-497b-a841-f78e796b57e8">
+        <Label UUID="Deployment_AdditionalFiles_1236e8a8-1b5a-497b-a841-f78e796b57e8"/>
+    </Category>
+</Info>
