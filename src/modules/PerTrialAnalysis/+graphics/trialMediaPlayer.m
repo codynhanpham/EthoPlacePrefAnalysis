@@ -107,6 +107,7 @@ if isfield(kvargs, 'EthovisionXlsx') && ~isempty(kvargs.EthovisionXlsx) && isfil
         % Store track data aligned with frame numbers
         trackData = [xPixel, yPixel];
         trackDataTime = datatable{:, 'Trial time'};
+        clear vidObj_temp;
     catch ME
         warning('EthoPlacePreference:LoadError', 'Failed to load Ethovision data: %s', ME.message);
         trackData = [];
@@ -118,13 +119,19 @@ try
     videoObj = VideoReader(fullPath);
     frameRate = videoObj.FrameRate;
     totalFrames = videoObj.NumFrames;
+    vidWidth = videoObj.Width;
+    vidHeight = videoObj.Height;
 catch
     uialert(uifigure, 'Error: Could not read the video file. Please check the file format and permissions.', 'Error');
     return;
 end
 
-screensize = get(0, 'ScreenSize');
-figPos = [(screensize(3)-screensize(3)*0.6)/2, (screensize(4)-screensize(4)*0.7)/2, screensize(3)*0.6, screensize(4)*0.7];
+[screensize, videoaspect] = deal(get(0, 'ScreenSize'), vidWidth / vidHeight);
+extendHeight = 118; % controller offset
+[figW, figH] = ui.dynamicFigureSize(videoaspect, extendHeight);
+
+% Center the figure on the primary screen
+figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
 [folder, name, ~] = fileparts(fullPath);
 [~, folder] = fileparts(fileparts(folder));
 fig = uifigure('Name', sprintf("%s - %s", folder, name), 'Position', figPos, ...
@@ -134,7 +141,9 @@ mainGrid = uigridlayout(fig, [4 1]);
 % Main video, frame label, play button, slider+nav buttons
 mainGrid.RowHeight = {'1x', "fit", 32, 42};
 mainGrid.ColumnWidth = {'1x'};
-mainGrid.Padding = [10 10 10 10];
+mainGrid.Padding = [5 5 5 5];
+mainGrid.RowSpacing = 5;
+mainGrid.ColumnSpacing = 5;
 
 videoAxes = uiaxes(mainGrid);
 videoAxes.Layout.Row = 1;
@@ -143,16 +152,10 @@ videoAxes.Interactions = [];
 videoAxes.Visible = 'off';
 videoAxes.Toolbar.Visible = 'Off';
 disableDefaultInteractivity(videoAxes);
-videoAxes.DataAspectRatioMode = 'manual';
-videoAxes.PlotBoxAspectRatioMode = 'manual';
 videoAxes.BusyAction='cancel';
 videoAxes.Interruptible='on';
 videoAxes.HitTest='off';
 videoAxes.PickableParts="none";
-
-% Center the axes content and remove any default margins
-videoAxes.Position = [0 0 1 1]; % Fill the entire grid cell
-videoAxes.OuterPosition = [0 0 1 1]; % Remove outer margins
 
 frameLabel = uieditfield(mainGrid, 'numeric', 'Value', 1);
 frameLabel.Layout.Row = 2;
@@ -169,10 +172,10 @@ playButton.Layout.Column = 1;
 controlsGrid = uigridlayout(mainGrid, [1 3]);
 controlsGrid.Layout.Row = 4;
 controlsGrid.Layout.Column = 1;
-controlsGrid.ColumnWidth = {'fit', '1x', 'fit'};
+controlsGrid.ColumnWidth = {35, '1x', 35};
 controlsGrid.ColumnSpacing = 4;
 controlsGrid.Padding = [0 0 0 0];
-prevButton = uibutton(controlsGrid, 'Text', '<', 'ButtonPushedFcn', @(btn, event) prevFrame);
+prevButton = uibutton(controlsGrid, 'Text', '<', 'FontSize', 18, 'ButtonPushedFcn', @(btn, event) prevFrame);
 prevButton.Layout.Row = 1;
 prevButton.Layout.Column = 1;
 
@@ -185,7 +188,7 @@ slider.MajorTicksMode = 'auto';
 slider.MinorTicksMode = 'manual';
 slider.MinorTicks = [];
 
-nextButton = uibutton(controlsGrid, 'Text', '>', 'ButtonPushedFcn', @(btn, event) nextFrame);
+nextButton = uibutton(controlsGrid, 'Text', '>', 'FontSize', 18, 'ButtonPushedFcn', @(btn, event) nextFrame);
 nextButton.Layout.Row = 1;
 nextButton.Layout.Column = 3;
 
@@ -194,7 +197,8 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'videoAxes', videoAxes, 'isPlaying', false, 'currentFrame', 1, 'timer', [], ...
     'trackData', trackData, 'trackDataTime', trackDataTime, 'pixelSize', pixelSize, 'lastFrameTime', tic, ...
     'showTracking', true, 'fastMode', false, 'showFps', false, ...
-    'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic);
+    'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic, ...
+    'imgHandle', []);
 
 
 % Set up a keyboard listener on the figure
@@ -266,7 +270,51 @@ function displayFrameWithTrack(frameNum, realFrameTime)
     end
 
     frame = read(appData.videoObj, frameNum);
-    imshow(frame, 'Parent', appData.videoAxes);
+
+    % Create a persistent image object that fills the axes and simply update
+    % its CData each frame. This avoids imshow's axis resets and margins.
+    if isempty(appData.imgHandle) || ~isvalid(appData.imgHandle)
+        imgH = image(appData.videoAxes, frame);
+        appData.imgHandle = imgH;
+
+        vidH = size(frame, 1);
+        vidW = size(frame, 2);
+        
+        axis(appData.videoAxes, 'off');
+        set(appData.videoAxes, ...
+            'XLim', [0.5, vidW + 0.5], ...
+            'YLim', [0.5, vidH + 0.5], ...
+            'YDir', 'reverse', ...
+            'DataAspectRatio', [1 1 1], ...  % Equal aspect ratio - no distortion
+            'PlotBoxAspectRatioMode', 'auto', ...
+            'PositionConstraint', 'outerposition', ...  % Center within grid slot
+            'XTick', [], 'YTick', [], ... 
+            'XTickLabel', {}, 'YTickLabel', {}, ...
+            'Box', 'off');
+        
+        axis(appData.videoAxes, 'tight');
+        
+        % Let layout manager handle positioning to center the content
+        drawnow;
+    else
+        % Update the image content
+        set(appData.imgHandle, 'CData', frame);
+    end
+
+    % Clear previous overlay graphics but keep the base image and FPS text (if any)
+    try
+        kids = appData.videoAxes.Children;
+        keep = appData.imgHandle;
+        if ~isempty(appData.fpsTextHandle) && isvalid(appData.fpsTextHandle)
+            keep = [keep; appData.fpsTextHandle];
+        end
+        toDelete = setdiff(kids, keep);
+        if ~isempty(toDelete)
+            delete(toDelete);
+        end
+    catch
+        % Safe-guard: ignore deletion errors
+    end
 
     % Draw tracking data if available and enabled
     if ~isempty(appData.trackData) && frameNum <= size(appData.trackData, 1) && appData.showTracking
