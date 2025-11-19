@@ -66,7 +66,7 @@ function [status, cmdout] = vertSplit(input, outputTop, outputBottom, kvargs)
         stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
     end
 
-    [status] = utils.executeSystemCommandRealTime(cmd, stdoutCallback);
+    [status] = ffmpeg.utils.executeSystemCommandRealTime(cmd, stdoutCallback);
     
 
     if status ~= 0

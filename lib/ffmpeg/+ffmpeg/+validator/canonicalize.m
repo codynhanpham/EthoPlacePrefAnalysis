@@ -6,7 +6,7 @@ function [output] = canonicalize(input, root)
     %       input - The input path string (can be relative or absolute)
     %       root - (optional) The root directory to resolve relative paths against. Defaults to pwd.
     %
-    %   output = utils.path.canonicalize(fullfile(pwd, '..', 'somefile.txt'))
+    %   output = ffmpeg.utils.path.canonicalize(fullfile(pwd, '..', 'somefile.txt'))
 
     arguments
         input {mustBeTextScalar}
