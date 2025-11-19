@@ -99,12 +99,12 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
         rightTerm = "Right"; % Default search term for right zone column
         zoneMatchMethod = "startsWith"; % Default matching method
         
-        zonematchconfigkey = {'project_settings', 'EthoVision', 'default_zone_match_method'};
+        zonematchconfigkey = {'tracking_providers', 'EthoVision', 'default_zone_match_method'};
         if validator.nestedStructFieldExists(configs, zonematchconfigkey)
             zoneMatchMethod = getfield(configs, zonematchconfigkey{:});
         end
         % Check if this arenaName is specified in the config
-        arenaConfigKey = {'project_settings', 'EthoVision', 'arena'};
+        arenaConfigKey = {'tracking_providers', 'EthoVision', 'arena'};
         if validator.nestedStructFieldExists(configs, arenaConfigKey)
             arenas = getfield(configs, arenaConfigKey{:});
             arenaIdx = find(cellfun(@(x) strcmp(x.name, arenaName), arenas), 1);
@@ -180,13 +180,19 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
     updateProgressDialog(kvargs.ProgressDialogHandle, 'Splitting media file for each arena using FFmpeg...', preprocessProgress + thisprogresstotal + 0.15);
     leftArenaMediaName = sprintf("%s @ %s%s", mediaName, arenaNames{1}, mediaExt);
     rightArenaMediaName = sprintf("%s @ %s%s", mediaName, arenaNames{2}, mediaExt);
-    [status, cmdout] = ffmpeg.horzSplit(mediaPathOG, fullfile(mediaFolder, leftArenaMediaName), fullfile(mediaFolder, rightArenaMediaName), 'Echo', false);
+
+    function ffmpegProgressUpdate(line)
+        updateProgressDialog(kvargs.ProgressDialogHandle, sprintf('FFmpeg:\n%s', line), preprocessProgress, 'Indeterminate', true);
+    end
+    callbackFcn = @(line) ffmpegProgressUpdate(line);
+
+    [status, cmdout] = ffmpeg.horzSplit(mediaPathOG, fullfile(mediaFolder, leftArenaMediaName), fullfile(mediaFolder, rightArenaMediaName), 'UpdateCallbackFcn', callbackFcn);
     if status ~= 0
         error('io:ethovision:multipleArena:preprocess:FFMPEGFAILED', 'FFMPEG failed to split the media file into two arenas. FFMPEG output: %s', cmdout);
     end
     updates.media.processed = {fullfile(mediaFolder, leftArenaMediaName), fullfile(mediaFolder, rightArenaMediaName)};
     
-    updateProgressDialog(kvargs.ProgressDialogHandle, 'Backing up original media file...', 0.98);
+    updateProgressDialog(kvargs.ProgressDialogHandle, 'Backing up original media file...', 0.98, 'Indeterminate', false);
     % Move the original media to its ./raw/ subfolder
     rawMediaFolder = fullfile(mediaFolder, 'raw');
     if ~isfolder(rawMediaFolder)

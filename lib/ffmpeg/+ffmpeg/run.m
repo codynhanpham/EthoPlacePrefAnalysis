@@ -9,6 +9,7 @@ function [status, cmdout] = run(args, kvargs)
     %
     % Name-Value Pair Arguments:
     %   'Echo' (logical): whether to echo ffmpeg command output to command window (default: false)
+    %   'UpdateCallbackFcn' (function handle): callback function to run when progress updates occur (default: none)
     %
     % Output:
     %   status - status of the ffmpeg command (0 if successful)
@@ -22,6 +23,7 @@ function [status, cmdout] = run(args, kvargs)
     arguments
         args {mustBeText}
         kvargs.Echo (1,1) logical = false
+        kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin)[]
     end
 
     [s,bin] = ffmpeg.available();
@@ -32,14 +34,29 @@ function [status, cmdout] = run(args, kvargs)
     args = string(args);
     cmd = sprintf('"%s" -y %s', bin, args);
 
-    if kvargs.Echo
-        fprintf("\n$ %s\n", cmd);
-        [status, cmdout] = system(cmd, "-echo");
-    else
-        [status, cmdout] = system(cmd);
-    end
-    if status ~= 0
-        error('Error running ffmpeg command: %s', cmdout);
+    cmdout = '';
+    
+    function ffmpegProgressUpdate(line, echo)
+        if echo
+            fprintf('[%s] %s\n', string(datetime('now'), 'HH:mm:ss'), line);
+        end
+        
+        % Append line to cmdout with newline
+        cmdout = [cmdout, line, newline];
+        
+        kvargs.UpdateCallbackFcn(line);
     end
 
+    if kvargs.Echo
+        stdoutCallback = @(line) ffmpegProgressUpdate(line, true);
+    else
+        stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
+    end
+
+    [status] = utils.executeSystemCommandRealTime(cmd, stdoutCallback);
+    
+
+    if status ~= 0
+        error('ffmpeg:horzSplit:ExecutionFailed', 'FFmpeg horzSplit execution failed with exit code %d', status);
+    end
 end

@@ -22,7 +22,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     end
 
     configs = kvargs.Config;
-    fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
+    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
     ImgWidthFOV_cm = 58.5; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
@@ -31,7 +31,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         end
     end
 
-    fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_center_offset_px'};
+    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_center_offset_px'};
     CenterOffset_px = [0,0]; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         CenterOffset_px = getfield(configs, fromConfigKey{:});
@@ -45,7 +45,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
     arenaName = header("Arena name");
     % Check for configs overrides for this arena
-    arenaConfigPath = {'project_settings', 'EthoVision', 'arena'};
+    arenaConfigPath = {'tracking_providers', 'EthoVision', 'arena'};
     if validator.nestedStructFieldExists(configs, arenaConfigPath)
         arenaConfigs = getfield(configs, arenaConfigPath{:});
         if iscell(arenaConfigs)

@@ -1,0 +1,5 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "lib/umap-rs/private/umap-rs/Cargo.toml",
+  ]
+}

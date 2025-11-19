@@ -34,7 +34,7 @@ function [output] = canonicalize(input, root)
         pth = strtrim(pth);
     end
     
-    if validator.isAbsolute(pth)
+    if ffmpeg.validator.isAbsolute(pth)
         output = pth;
     else
         output = fullfile(root, pth);

@@ -4,15 +4,15 @@ function fig = trialMediaPlayer(kvargs)
 % Keyboard controls: Arrow keys (frame navigation), Space (play/pause), T (toggle tracking), F (fast mode), R (toggle FPS).
 %
 % Optional tracking overlay:
-%   When EthovisionXlsx is provided, the function will overlay animal tracking
+%   When TrackingDataFile is provided, the function will overlay animal tracking
 %   data on the video frames. The coordinate conversion follows the same logic
 %   as trialHeatmap.m, converting Ethovision coordinates to pixel coordinates
 %   using ImgWidthFOV_cm and CenterOffset_px parameters.
 
 arguments
     kvargs.VideoFile {mustBeFile}
-    kvargs.EthovisionXlsx {mustBeFile}
-    kvargs.Config struct = struct();
+    kvargs.TrackingDataFile {mustBeFile}
+    kvargs.TrackingProvider {validator.mustBeTrackingProviderOrEmpty} = []
 end
 
 
@@ -26,91 +26,63 @@ else
     fullPath = fullfile(pathName, fileName);
 end
 
-% Try to load tracking data if EthovisionXlsx is provided
+% Try to load tracking data if TrackingDataFile is provided
 trackData = [];
 trackDataTime = [];
 pixelSize = [];
-if isfield(kvargs, 'EthovisionXlsx') && ~isempty(kvargs.EthovisionXlsx) && isfile(kvargs.EthovisionXlsx)
+bpColors = [];
+bodypartNames = strings(0);
+centerPointBodyPartIndex = [];
+if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && isfile(kvargs.TrackingDataFile) && ~isempty(kvargs.TrackingProvider)
     try
-        ImgWidthFOV_cm = 58.5; % default value for compat with older code
-        CenterOffset_px = [0,0]; % default value for compat with older code
-        if isfield(kvargs, 'Config')
-            configs = kvargs.Config;
-            fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
-            if validator.nestedStructFieldExists(configs, fromConfigKey)
-                ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
-                if iscell(ImgWidthFOV_cm)
-                    ImgWidthFOV_cm = cell2mat(ImgWidthFOV_cm);
-                end
-            end
+        [timestampSec, coords, metadata] = kvargs.TrackingProvider.loadTrackingCoordsPixels(kvargs.TrackingDataFile);
+        % Assign outputs
+        trackData = coords; % Nx2xM
+        trackDataTime = timestampSec;
 
-            fromConfigKey = {'project_settings', 'EthoVision', 'default_camera_center_offset_px'};
-            if validator.nestedStructFieldExists(configs, fromConfigKey)
-                CenterOffset_px = getfield(configs, fromConfigKey{:});
-                CenterOffset_px = cell2mat(CenterOffset_px);
-            end
-        end
-
-        [header, datatable, ~] = io.ethovision.loadEthovisionXlsx(kvargs.EthovisionXlsx);
-        arenaName = header("Arena name");
-        % Check for configs overrides for this arena
-        arenaConfigPath = {'project_settings', 'EthoVision', 'arena'};
-        if validator.nestedStructFieldExists(configs, arenaConfigPath)
-            arenaConfigs = getfield(configs, arenaConfigPath{:});
-            if iscell(arenaConfigs)
-                namesinconfig = cellfun(@(x) x.name, arenaConfigs, 'UniformOutput', false);
-            else
-                namesinconfig = arenaConfigs.name;
-            end
-            namesinconfig = string(namesinconfig);
-            if ismember(arenaName, namesinconfig)
-                arenaIdx = find(strcmp(namesinconfig, arenaName), 1);
-                if iscell(arenaConfigs)
-                    arenaConfig = arenaConfigs{arenaIdx};
+        % Bodypart names and center detection
+        if isfield(metadata, 'bodyparts') && ~isempty(metadata.bodyparts)
+            try
+                bodypartNames = string(metadata.bodyparts);
+            catch
+                % Fallback to strings if conversion fails
+                if iscell(metadata.bodyparts)
+                    bodypartNames = string(metadata.bodyparts);
                 else
-                    arenaConfig = arenaConfigs(arenaIdx);
+                    bodypartNames = string({metadata.bodyparts});
                 end
-                if isfield(arenaConfig, 'camera_imgwidth_fov_cm')
-                    ImgWidthFOV_cm = arenaConfig.camera_imgwidth_fov_cm;
-                end
-                if isfield(arenaConfig, 'camera_center_offset_px')
-                    CenterOffset_px = arenaConfig.camera_center_offset_px;
-                    CenterOffset_px = cell2mat(CenterOffset_px);
+            end
+            % The first bodypart which contains 'center' in its name (case-insensitive) is considered the center point
+            centerPointBodyPartIndex = find(contains(lower(bodypartNames), 'center'), 1, 'first');
+        end
+
+        if isfield(metadata, 'px2cmFactor') && ~isnan(metadata.px2cmFactor)
+            pixelSize = metadata.px2cmFactor; % cm/pixel
+        end
+
+        % Colors per bodypart
+        if isfield(metadata, 'colors') && ~isempty(metadata.colors)
+            bpColors = metadata.colors;
+        end
+
+        % Ensure we have a color for each bodypart; generate fallback if needed
+        if ~isempty(trackData)
+            numParts = size(trackData, 3);
+            if isempty(bpColors) || size(bpColors, 1) ~= numParts
+                % Fallback to distinct colors if not provided or mismatched
+                try
+                    bpColors = lines(numParts);
+                catch
+                    % Minimal fallback if lines() unavailable
+                    bpColors = hsv(numParts);
                 end
             end
         end
 
-        % Calculate pixel size based on field of view
-        vidObj_temp = VideoReader(fullPath);
-        vidWidth = vidObj_temp.Width;
-        vidHeight = vidObj_temp.Height;
-        pixelSize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
-        xCenter = datatable{:, 'X center'};
-        yCenter = datatable{:, 'Y center'};
-        if iscell(xCenter)
-            xCenter = cellfun(@str2double, xCenter);
-        end
-        if iscell(yCenter)
-            yCenter = cellfun(@str2double, yCenter);
-        end
-
-        % Convert from Ethovision coordinates to pixel coordinates
-        xPixel = xCenter + (vidWidth/2 * pixelSize) + (CenterOffset_px(1) * pixelSize);
-        yPixel = yCenter + (vidHeight/2 * pixelSize) + (CenterOffset_px(2) * pixelSize);
-
-        % Scale to pixel coordinates
-        xPixel = xPixel / pixelSize;
-        yPixel = yPixel / pixelSize;
-        yPixel = vidHeight - yPixel; % Flip Y coordinates for image coordinate system
-
-        % Store track data aligned with frame numbers
-        trackData = [xPixel, yPixel];
-        trackDataTime = datatable{:, 'Trial time'};
-        clear vidObj_temp;
     catch ME
-        warning('EthoPlacePreference:LoadError', 'Failed to load Ethovision data: %s', ME.message);
-        trackData = [];
+        warning('graphics:trialMediaPlayer:TrackingLoadFailed', ...
+            'Could not load tracking data:\n%s', getReport(ME));
     end
 end
 
@@ -198,7 +170,7 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'trackData', trackData, 'trackDataTime', trackDataTime, 'pixelSize', pixelSize, 'lastFrameTime', tic, ...
     'showTracking', true, 'fastMode', false, 'showFps', false, ...
     'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic, ...
-    'imgHandle', []);
+    'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex);
 
 
 % Set up a keyboard listener on the figure
@@ -320,86 +292,110 @@ function displayFrameWithTrack(frameNum, realFrameTime)
     if ~isempty(appData.trackData) && frameNum <= size(appData.trackData, 1) && appData.showTracking
         hold(appData.videoAxes, 'on');
 
-        % Draw the trail of the last N frames
-        trackHistoryLength = 125;
+        % Determine the current tracking frame index based on real time if provided
         trackFrame = frameNum;
-        if ~isempty(realFrameTime)
+        if ~isempty(realFrameTime) && ~isempty(appData.trackDataTime)
             % Find the closest value (s) in the trackDataTime
             [~, trackFrame] = min(abs(appData.trackDataTime - realFrameTime));
         end
-        startIdx = max(1, trackFrame - trackHistoryLength);
-        endIdx = min(trackFrame, size(appData.trackData, 1));
 
-        if endIdx > startIdx
-            xTrack = appData.trackData(startIdx:endIdx, 1);
-            yTrack = appData.trackData(startIdx:endIdx, 2);
+        % Draw the trail of the last N frames using the center bodypart (if present)
+        trackHistoryLength = 125;
+        if ~isempty(appData.centerPointBodyPartIndex) && ~isnan(appData.centerPointBodyPartIndex)
+            centerIdx = appData.centerPointBodyPartIndex;
+            startIdx = max(1, trackFrame - trackHistoryLength);
+            endIdx = min(trackFrame, size(appData.trackData, 1));
 
-            % Remove NaN values but keep track of original indices for color mapping
-            validIdx = ~isnan(xTrack) & ~isnan(yTrack);
+            if endIdx > startIdx
+                xTrack = appData.trackData(startIdx:endIdx, 1, centerIdx);
+                yTrack = appData.trackData(startIdx:endIdx, 2, centerIdx);
+                xTrack = xTrack(:);
+                yTrack = yTrack(:);
 
-            if any(validIdx)
-                xValid = xTrack(validIdx);
-                yValid = yTrack(validIdx);
+                % Remove NaN values but keep track of original indices for color mapping
+                validIdx = ~isnan(xTrack) & ~isnan(yTrack);
 
-                numPoints = length(xValid);
-                if numPoints > 1
-                    % Create matrices for all line segments
-                    x_segments = [xValid(1:end-1), xValid(2:end)]';
-                    y_segments = [yValid(1:end-1), yValid(2:end)]';
+                if any(validIdx)
+                    xValid = xTrack(validIdx);
+                    yValid = yTrack(validIdx);
 
-                    % Pre-compute all colors and properties
-                    segmentIndices = (1:numPoints-1) / (numPoints-1); % Normalize to [0,1]
-                    colors = [segmentIndices', zeros(numPoints-1, 1), 1-segmentIndices']; % Blue to red
-                    alphas = 0.3 + 0.7 * segmentIndices'; % Progressive alpha
-                    lineWidths = 1 + 2 * segmentIndices'; % Progressive width
+                    numPoints = length(xValid);
+                    if numPoints > 1
+                        % Create matrices for all line segments
+                        x_segments = [xValid(1:end-1), xValid(2:end)]';
+                        y_segments = [yValid(1:end-1), yValid(2:end)]';
 
-                    x_plot = [x_segments; NaN(1, size(x_segments, 2))];
-                    y_plot = [y_segments; NaN(1, size(y_segments, 2))];
+                        % Pre-compute all colors and properties
+                        segmentIndices = (1:numPoints-1) / (numPoints-1); % Normalize to [0,1]
+                        segColors = [segmentIndices', zeros(numPoints-1, 1), 1-segmentIndices']; % Blue to red
+                        alphas = 0.3 + 0.7 * segmentIndices'; % Progressive alpha
+                        lineWidths = 1 + 2 * segmentIndices'; % Progressive width
 
-                    % Plot segments in batches by line width to reduce plot calls
-                    if appData.fastMode
-                        meanColor = mean(colors, 1);
-                        meanAlpha = mean(alphas);
-                        meanWidth = mean(lineWidths);
-                        line(appData.videoAxes, x_plot(:), y_plot(:), ...
-                            'Color', [meanColor, meanAlpha], 'LineWidth', meanWidth);
-                    else
-                        uniqueWidths = unique(round(lineWidths * 2) / 2);
+                        x_plot = [x_segments; NaN(1, size(x_segments, 2))];
+                        y_plot = [y_segments; NaN(1, size(y_segments, 2))];
 
-                        for w = uniqueWidths'
-                            widthMask = abs(lineWidths - w) < 0.25;
-                            if any(widthMask)
-                                % Get segments for this width
-                                batchX = x_plot(:, widthMask);
-                                batchY = y_plot(:, widthMask);
-                                batchColors = colors(widthMask, :);
-                                batchAlphas = alphas(widthMask);
+                        % Plot segments in batches by line width to reduce plot calls
+                        if appData.fastMode
+                            meanColor = mean(segColors, 1);
+                            meanAlpha = mean(alphas);
+                            meanWidth = mean(lineWidths);
+                            line(appData.videoAxes, x_plot(:), y_plot(:), ...
+                                'Color', [meanColor, meanAlpha], 'LineWidth', meanWidth);
+                        else
+                            uniqueWidths = unique(round(lineWidths * 2) / 2);
 
-                                % Use mean color and alpha for this batch
-                                meanColor = mean(batchColors, 1);
-                                meanAlpha = mean(batchAlphas);
+                            for w = uniqueWidths'
+                                widthMask = abs(lineWidths - w) < 0.25;
+                                if any(widthMask)
+                                    % Get segments for this width
+                                    batchX = x_plot(:, widthMask);
+                                    batchY = y_plot(:, widthMask);
+                                    batchColors = segColors(widthMask, :);
+                                    batchAlphas = alphas(widthMask);
 
-                                line(appData.videoAxes, batchX(:), batchY(:), ...
-                                    'Color', [meanColor, meanAlpha], 'LineWidth', w);
+                                    % Use mean color and alpha for this batch
+                                    meanColor = mean(batchColors, 1);
+                                    meanAlpha = mean(batchAlphas);
+
+                                    line(appData.videoAxes, batchX(:), batchY(:), ...
+                                        'Color', [meanColor, meanAlpha], 'LineWidth', w);
+                                end
                             end
                         end
                     end
                 end
+            end
+        end
 
-                % Plot current position as a circle if within bounds
-                if trackFrame <= size(appData.trackData, 1) && ...
-                        ~isnan(appData.trackData(trackFrame, 1)) && ~isnan(appData.trackData(trackFrame, 2))
-                    currentX = appData.trackData(trackFrame, 1);
-                    currentY = appData.trackData(trackFrame, 2);
+        % Plot current positions for ALL bodyparts using their colors
+        if trackFrame <= size(appData.trackData, 1)
+            try
+                xParts = squeeze(appData.trackData(trackFrame, 1, :));
+                yParts = squeeze(appData.trackData(trackFrame, 2, :));
+            catch
+                xParts = appData.trackData(trackFrame, 1, :);
+                yParts = appData.trackData(trackFrame, 2, :);
+            end
+            xParts = xParts(:);
+            yParts = yParts(:);
 
-                    % Check if position is within video bounds
-                    if currentX > 0 && currentX <= size(frame, 2) && ...
-                            currentY > 0 && currentY <= size(frame, 1)
-                        plot(appData.videoAxes, currentX, currentY, ...
-                            'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'red', ...
-                            'MarkerEdgeColor', 'white', 'LineWidth', 2);
+            % Bounds and NaN checks
+            inBounds = xParts > 0 & xParts <= size(frame, 2) & ...
+                       yParts > 0 & yParts <= size(frame, 1);
+            validMask = ~isnan(xParts) & ~isnan(yParts) & inBounds;
+
+            if any(validMask)
+                ptColors = appData.colors;
+                if size(ptColors, 1) ~= numel(xParts)
+                    % Safeguard: regenerate colors if mismatch
+                    try
+                        ptColors = lines(numel(xParts));
+                    catch
+                        ptColors = hsv(numel(xParts));
                     end
                 end
+                scatter(appData.videoAxes, xParts(validMask), yParts(validMask), 70, ptColors(validMask, :), 'filled', ...
+                    'MarkerEdgeColor', 'w', 'LineWidth', 1.2);
             end
         end
 

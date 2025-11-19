@@ -20,11 +20,12 @@ function [status, cmdout] = horzSplit(input, outputLeft, outputRight, kvargs)
 
     arguments
         input {mustBeFile}
-        outputLeft {validator.mustBeValidFilepath}
-        outputRight {validator.mustBeValidFilepath}
+        outputLeft {ffmpeg.validator.mustBeValidFilepath}
+        outputRight {ffmpeg.validator.mustBeValidFilepath}
 
         kvargs.Overwrite (1,1) logical = false
         kvargs.Echo (1,1) logical = false
+        kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin)[];
     end
 
     if ~kvargs.Overwrite
@@ -44,16 +45,32 @@ function [status, cmdout] = horzSplit(input, outputLeft, outputRight, kvargs)
     outputLeft = string(outputLeft);
     outputRight = string(outputRight);
     
-    args = sprintf("-y -y -hwaccel auto -i ""%s"" -filter_complex ""[0]crop=iw/2:ih:0:0[left];[0]crop=iw/2:ih:ow:0[right]"" -map ""[left]"" ""%s"" -map ""[right]"" ""%s""", input, outputLeft, outputRight);
+    args = sprintf("-y -hwaccel auto -i ""%s"" -filter_complex ""[0]crop=iw/2:ih:0:0[left];[0]crop=iw/2:ih:ow:0[right]"" -map ""[left]"" ""%s"" -map ""[right]"" ""%s""", input, outputLeft, outputRight);
     cmd = sprintf('"%s" %s', bin, args);
 
-    if kvargs.Echo
-        fprintf("\n$ %s\n", cmd);
-        [status, cmdout] = system(cmd, "-echo");
-    else
-        [status, cmdout] = system(cmd);
+    cmdout = '';
+    
+    function ffmpegProgressUpdate(line, echo)
+        if echo
+            fprintf('[%s] %s\n', string(datetime('now'), 'HH:mm:ss'), line);
+        end
+        
+        % Append line to cmdout with newline
+        cmdout = [cmdout, line, newline];
+        
+        kvargs.UpdateCallbackFcn(line);
     end
+
+    if kvargs.Echo
+        stdoutCallback = @(line) ffmpegProgressUpdate(line, true);
+    else
+        stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
+    end
+
+    [status] = utils.executeSystemCommandRealTime(cmd, stdoutCallback);
+    
+
     if status ~= 0
-        error('Error splitting video: %s', cmdout);
+        error('ffmpeg:horzSplit:ExecutionFailed', 'FFmpeg horzSplit execution failed with exit code %d', status);
     end
 end

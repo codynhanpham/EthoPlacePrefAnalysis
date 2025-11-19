@@ -14,7 +14,7 @@ function isValid = isValidFilepath(str)
     isValid = ~isempty(str) && ~isfolder(str);
     if ~isValid, return; end
     [~, name, ~] = fileparts(str);
-    if ~validator.isValidFilename(name), isValid = false; return; end
+    if ~ffmpeg.validator.isValidFilename(name), isValid = false; return; end
 
     % If the string is of length 1, must also not contains a dot or a space
     if class(str) == "string", str = char(str); end

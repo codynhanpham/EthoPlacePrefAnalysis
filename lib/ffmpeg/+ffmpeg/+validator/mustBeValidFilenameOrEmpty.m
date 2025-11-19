@@ -14,7 +14,7 @@ function mustBeValidFilenameOrEmpty(str)
         return
     end
 
-    if ~validator.isValidFilename(str)
+    if ~ffmpeg.validator.isValidFilename(str)
         error('The string must be a valid filename or an empty string')
     end
 end

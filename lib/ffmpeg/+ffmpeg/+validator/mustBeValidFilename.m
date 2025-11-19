@@ -8,7 +8,7 @@ function mustBeValidFilename(str)
     %
     %   See also: mustBeValidFilename, mustBeValidFilenameOrEmpty, mustBeValidFolderPath, mustBeValidFolderPathOrEmpty
     
-    if ~validator.isValidFilename(str)
+    if ~ffmpeg.validator.isValidFilename(str)
         error('Input must be a valid filename (can be created, or currently exist) for the system')
     end
 end

@@ -47,6 +47,8 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
     w = screen(3) * 0.8; px = (screen(3) - w) / 2;
     h = screen(4) * 0.65; py = (screen(4) - h) / 2;
     f = figure('Position', [px, py, w, h], 'Color', 'w', 'Name', 'Population Place Preferences', 'NumberTitle', 'off', 'ToolBar', 'none', 'MenuBar', 'figure');
+    % Plotting
+    tgroup = uitabgroup(f, 'Position', [0 0 1 1], 'Tag', 'PopulationPlacePrefTabGroup');
 
     % Add export options before rendering plots
     hFileMenu = findall(f, 'tag', 'figMenuFile');
@@ -69,9 +71,22 @@ function f = populationPlacePref(normalizedPopulationData, populationSummaryData
     end
     uimenu(hMruMenu, 'Label', 'Normalized Place Preferences Data', 'Callback', {@exportVar, normalizedPopulationData, 'NormalizedPopulationData', 'NormalizedPopulationData.mat', 'Export Normalized Population Data as...', kvargs.MainApp});
 
+    % Add Export Graphics... menu with 2 options: Export Current Tab, Export All Tabs as PDF
+    % Position right after Export Data... menu
+    hFileMenu = findall(f, 'tag', 'figMenuFile');
+    hExportGraphicsMenu = uimenu('Label', 'Export Graphics...', 'Parent', hFileMenu);
+    hAllMenuItems = allchild(hFileMenu);
+    hExportDataMenu = findall(hFileMenu, 'Label', 'Export Data...');
+    if isempty(hExportDataMenu)
+        insertPos = 0;
+    else
+        insertPos = find(hAllMenuItems == hExportDataMenu) - 1;
+    end
+    set(hFileMenu, 'Children',fliplr([hAllMenuItems(1:insertPos); hExportGraphicsMenu; hAllMenuItems(insertPos+1:end)]));
+    uimenu(hExportGraphicsMenu, 'Label', 'Current Tab as...', 'Callback', {@exportTabGraphics, 'Export Current Tab as...', kvargs.MainApp});
+    uimenu(hExportGraphicsMenu, 'Label', 'All Tabs as PDF', 'Callback', {@exportAllGraphicsToPDF, 'PopulationPlacePreferences.pdf', 'Export All Tabs as PDF...', kvargs.MainApp});
 
-    % Plotting
-    tgroup = uitabgroup(f, 'Position', [0 0 1 1]);
+
 
     %% Summary Tab: Group by All, Sex, Strain, and Genotype simply showing Speaker Side Preferences
     summaryTab = uitab(tgroup, 'Title', 'Summary by Speaker/Side Preferences', 'BackgroundColor', 'w');
@@ -149,6 +164,7 @@ function [meanData, stdData, groups, stats] = getGroupedData(datatable, groupByV
     % Join groups + groupN, matching elements
     groups = strcat(groupLabels, " (N = ", groupN, ")");
 
+    % 2-tailed paired t-test between dependentVars for each group
     [h, p, ci, s] = cellfun(@(x, y) ttest(x, y, "Alpha", 0.05, "Tail", "both"), grouped.(dependentVars(1)), grouped.(dependentVars(2)), 'UniformOutput', false);
 
     stats.h = cell2mat(h);
@@ -181,22 +197,9 @@ function ax = plotGroupedBar(ax, meanData, stdData, groups, stats, titleStr, leg
     end
     errorbar(x, meanData, stdData,'k','linestyle','none');
     
-    % Add text box with p-values above each group
-    % yMax = max(ax.YLim);
-    % for i = 1:ngroups
-    %     pvalue = stats.p(i);
-    %     annotationStr = sprintf('p = %.5f', pvalue);
-    %     annotX = xgroup(i);
-    %     annotY = max(meanData(:,i) + stdData(:,i)) + 0.05 * max(ax.YLim);
-    %     if annotY > yMax
-    %         yMax = annotY + 0.1 * max(ax.YLim);
-    %     end
-
-    %     text(annotX, annotY, annotationStr, 'VerticalAlignment', 'middle', 'HorizontalAlignment', 'center', 'FontSize', 8);
-    % end
-    
-    % Find the max y value of mean + std pair
+    % Find the max y value of mean + std pair and add some offset for annotations
     yMax = max(meanData(:) + stdData(:)) + 0.02 * max(ax.YLim);
+    
     function str = mapPValue2Astk(pvalue, alpha, useSymbol)
         if nargin < 2
             alpha = 0.05;
@@ -235,7 +238,7 @@ function ax = plotGroupedBar(ax, meanData, stdData, groups, stats, titleStr, leg
             weight = 'bold';
             sz = 11;
         end
-        text(annotX, yMax, annotationStr, 'VerticalAlignment', 'baseline', 'HorizontalAlignment', 'center', 'FontSize', sz, 'FontWeight', weight);
+        text(annotX, yMax, annotationStr, 'VerticalAlignment', 'top', 'HorizontalAlignment', 'center', 'FontSize', sz, 'FontWeight', weight);
     end
 
     hold off;
@@ -256,8 +259,8 @@ end
 
 function exportVar(hObject, eventData, variable, variableName, defaultFileName, title, mainapphandle)
     arguments
-        hObject
-        eventData
+        hObject %#ok<INUSA>
+        eventData %#ok<INUSA>
         variable
         variableName {mustBeValidVariableName}
         defaultFileName {mustBeTextScalar} = sprintf("%s.mat", variableName)
@@ -281,6 +284,92 @@ function exportVar(hObject, eventData, variable, variableName, defaultFileName, 
     % Save the variable
     fullPath = fullfile(filePath, fileName);
     save(fullPath, '-struct', 's');
+
+    if ~isempty(mainapphandle) && isvalid(mainapphandle)
+        mainapphandle.lastDirPath = filePath;
+    end
+end
+
+
+function exportTabGraphics(hObject, eventData, title, mainapphandle)
+    arguments
+        hObject
+        eventData %#ok<INUSA>
+        title {mustBeTextScalar} = 'Save Figure as...'
+        mainapphandle {mustBeOneOfAOrEmpty(mainapphandle, {'PlacePrefDataGUI_main', 'struct'})} = [];
+    end
+
+    % Get the parent figure of hObject
+    parentFig = ancestor(hObject, 'figure');
+    % Find the tab group with the specified tag
+    tgroup = findall(parentFig, 'Type', 'uitabgroup', 'Tag', 'PopulationPlacePrefTabGroup');
+    if isempty(tgroup)
+        error('Could not find the container tabgroup to export from.'); % Should not happen
+    end
+    tabHandle = tgroup.SelectedTab;
+    ftitle = tabHandle.Title; % Use tab title as default file name
+    ftitle = strrep(ftitle, '/', '_');
+    ftitle = strrep(ftitle, '\', '_');
+    defaultFileName = sprintf('%s.svg', ftitle);
+
+    defaultDir = pwd;
+    if ~isempty(mainapphandle) && isvalid(mainapphandle)
+        defaultDir = mainapphandle.lastDirPath;
+    end
+
+    [fileName, filePath] = uiputfile({'*.svg', 'Scalable Vector Graphics (*.svg)'; '*.png', 'PNG Image (*.png)'; '*.jpg;*.jpeg', 'JPEG Image (*.jpg, *.jpeg)'; '*.tif;*.tiff', 'TIFF Image (*.tif, *.tiff)'; '*.pdf', 'PDF Document (*.pdf)'}, title, fullfile(defaultDir, defaultFileName));
+    if isequal(fileName, 0) || isequal(filePath, 0)
+        return;
+    end
+
+    fullPath = fullfile(filePath, fileName);
+
+    % Export the tab content as an image
+    exportgraphics(tabHandle, fullPath, 'BackgroundColor', 'white', 'Resolution', 300);
+
+    if ~isempty(mainapphandle) && isvalid(mainapphandle)
+        mainapphandle.lastDirPath = filePath;
+    end
+end
+
+function exportAllGraphicsToPDF(hObject, eventData, defaultFileName, title, mainapphandle)
+    arguments
+        hObject
+        eventData %#ok<INUSA>
+        defaultFileName {mustBeTextScalar} = 'PopulationPlacePreference_AllTabs.pdf'
+        title {mustBeTextScalar} = 'Save All Tabs as PDF...'
+        mainapphandle {mustBeOneOfAOrEmpty(mainapphandle, {'PlacePrefDataGUI_main', 'struct'})} = [];
+    end
+    % Get the parent figure of hObject
+    parentFig = ancestor(hObject, 'figure');
+    % Find the tab group with the specified tag
+    tgroupHandle = findall(parentFig, 'Type', 'uitabgroup', 'Tag', 'PopulationPlacePrefTabGroup');
+    if isempty(tgroupHandle)
+        error('Could not find the container tabgroup to export from.'); % Should not happen
+    end
+
+    defaultDir = pwd;
+    if ~isempty(mainapphandle) && isvalid(mainapphandle)
+        defaultDir = mainapphandle.lastDirPath;
+    end
+
+    [fileName, filePath] = uiputfile({'*.pdf', 'PDF Document (*.pdf)'}, title, fullfile(defaultDir, defaultFileName));
+    if isequal(fileName, 0) || isequal(filePath, 0)
+        return;
+    end
+
+    fullPath = fullfile(filePath, fileName);
+
+    % Export each tab content and append to the PDF
+    tabHandles = tgroupHandle.Children;
+    for i = 1:length(tabHandles)
+        tabHandle = tabHandles(i);
+        if i == 1
+            exportgraphics(tabHandle, fullPath, 'BackgroundColor', 'white', 'ContentType', 'vector', 'Resolution', 300);
+        else
+            exportgraphics(tabHandle, fullPath, 'BackgroundColor', 'white', 'ContentType', 'vector', 'Resolution', 300, 'Append', true);
+        end
+    end
 
     if ~isempty(mainapphandle) && isvalid(mainapphandle)
         mainapphandle.lastDirPath = filePath;

@@ -38,7 +38,7 @@ function [bool, bin] = available()
         [status, ~] = system(['"', bin, '" -version']);
         if status == 0
             bool = true;
-            bin = validator.canonicalize(char(bin));
+            bin = utils.canonicalize(char(bin));
             return
         end
     end

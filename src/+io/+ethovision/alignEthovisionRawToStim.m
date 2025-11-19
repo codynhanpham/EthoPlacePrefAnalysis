@@ -264,12 +264,12 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                 rightTerm = "Right"; % Default search term for right zone column
                 zoneMatchMethod = "startsWith"; % Default matching method
                 
-                zonematchconfigkey = {'project_settings', 'EthoVision', 'default_zone_match_method'};
+                zonematchconfigkey = {'tracking_providers', 'EthoVision', 'default_zone_match_method'};
                 if validator.nestedStructFieldExists(kvargs.Config, zonematchconfigkey)
                     zoneMatchMethod = getfield(kvargs.Config, zonematchconfigkey{:});
                 end
                 % Check if this arenaName is specified in the config
-                arenaConfigKey = {'project_settings', 'EthoVision', 'arena'};
+                arenaConfigKey = {'tracking_providers', 'EthoVision', 'arena'};
                 if validator.nestedStructFieldExists(kvargs.Config, arenaConfigKey)
                     arenas = getfield(kvargs.Config, arenaConfigKey{:});
                     arenaIdx = find(cellfun(@(x) strcmp(x.name, arenaName), arenas), 1);

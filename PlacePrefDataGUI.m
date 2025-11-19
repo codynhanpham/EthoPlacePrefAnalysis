@@ -7,5 +7,5 @@ function PlacePrefDataGUI()
 
     % LoadSessionPath should already add /src to the path
     mainFcn = str2func("PlacePrefDataGUI_main");
-    mainFcn(oldPath);
+    mainFcn('', oldPath);
 end
