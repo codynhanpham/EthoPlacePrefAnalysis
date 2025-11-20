@@ -88,7 +88,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     centerPos = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
     centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
     centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
-    % Scale the center pos to pixels
+    % Scale the center pos to cm
     centerPos = centerPos / pixelsize;
     
     % Convert to image coordinates (flip Y-axis to match imshow coordinate system)
@@ -106,10 +106,10 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     h = 0.72 * screensize(4); w = h * (vidWidth / (vidHeight + 0.26*vidHeight)); % maintain aspect ratio with some extra height for bar chart
     figPos = [(screensize(3)-w)/2, (screensize(4)-h)/2, w, h];
     f = figure('Name', sprintf("%s | %s", name, sprintf("%s - %s - %s", animalMetadata.sex, animalMetadata.strain, animalMetadata.genotype)), 'NumberTitle', 'off', 'Position', figPos, 'ToolBar', 'none');
-    t = tiledlayout(f, 4,1, "TileSpacing", "compact", "Padding", "compact");
+    t = tiledlayout(f, 4,3, "TileSpacing", "compact", "Padding", "compact");
     
     %% HEATMAP
-    a = nexttile(t, [3 1]);
+    a = nexttile(t, [3 3]);
     % Plot the first image frame as background
     imshow(stimstartframedata, 'Parent', a);
     hold on;
@@ -268,4 +268,119 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     grid(a, 'on');
 
     legend([b, b_dummy], speakers, 'Location', 'northeast');
+
+
+    %% L/R DISTANCE FROM MIDLINE OVER TIME
+    assignin('base', 'stimPeriodTable', stimPeriodTable);
+    centerPosX = centerPos(:,1); % in pixels, should already be adjusted such that 0,0 is top-left
+    midlineX = vidWidth/2;
+    % If there are override variables, adjust midlineX based on center offset
+    %...
+
+    distFromMidline_cm = (centerPosX - midlineX) * pixelsize; % in cm, negative = left, positive = right
+    trialTime = stimPeriodTable{:,'Trial time'};
+    assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
+
+    a = nexttile(t, [1,2]);
+    l = plot(a, trialTime, distFromMidline_cm, 'k-');
+    plotXLim = a.XLim; plotYLim = a.YLim; % Save this for later: the default limits should fit the data nicely in plot
+    maxY = max(abs(plotYLim));
+    plotYLim = [-maxY, maxY]; % Symmetric y-limits
+    plotYLim = plotYLim * 1.05; % Add 5% padding Y
+    plotXLim = [plotXLim(1), plotXLim(2) + diff(plotXLim) * 0.16]; % Add 16% padding X end for stim labels
+    % If the first stim starts at time > 5% of diff(plotXLim), no need to pad the start, otherwise pad start too
+    firstStimTime = trialTime(1);
+    if firstStimTime <= plotXLim(1) + diff(plotXLim) * 0.05
+        padamount = (plotXLim(1) + diff(plotXLim) * 0.05) - firstStimTime;
+        plotXLim(1) = plotXLim(1) - padamount;
+    end
+
+    hold(a, 'on');
+    line(a, [min(0, plotXLim(1)), max(max(trialTime), plotXLim(2))], [0,0], 'Color', [0.5,0.5,0.5], 'LineStyle', ':', 'LineWidth', 1);
+
+    % Plot the left/right color patched regions: rectangle from xlim(1) to xlim(2), y=0 to ylim(2) in red (right), and y=0 to ylim(1) in blue (left)
+    patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [0, plotYLim(2), plotYLim(2), 0], [1,0,0], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
+    patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [plotYLim(1), 0, 0, plotYLim(1)], [0,0,1], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
+
+    
+    % Add text annotation at start of xlim, indicating left/right
+    textPaddingX = 0.02 * diff(plotXLim);
+    % Rotate 270 degrees to have text vertical along y-axis
+    text(a, plotXLim(1) + textPaddingX, (plotYLim(2) - 0)/2, 'Right', 'Color', 'r', 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'cap', 'Rotation', 90, 'Clipping', 'on');
+    text(a, plotXLim(1) + textPaddingX, (plotYLim(1) + 0)/2, 'Left', 'Color', 'b', 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'cap', 'Rotation', 90, 'Clipping', 'on');
+
+
+    % Add the stimuli as shaded regions behind the line plot, color of [0.5 0.5 0.5] if it contains {'Intro', 'Outro', 'ISI'}, else color based on speaker position as in "Stim Speaker Corrected" (contains 'Left' -> blue, 'Right' -> red)
+    stims = stimPeriodTable{:,'Chapter Original'};
+    ustims = unique(stims(~cellfun(@anymissing, stims)));
+    for i = 1:length(ustims)
+        stimName = ustims{i};
+        stimIdx = find(strcmp(stims, stimName));
+        if isempty(stimIdx)
+            continue;
+        end
+        
+        % Find the start and end blocks of consecutive frames for this stim
+        stimBlocks = NaN(0,2); % each row is [startIdx, endIdx]
+        blockStart = stimIdx(1);
+        for j = 2:length(stimIdx)
+            if stimIdx(j) ~= stimIdx(j-1) + 1
+                % Not consecutive, end the previous block
+                blockEnd = stimIdx(j-1)+1;
+                stimBlocks = [stimBlocks; blockStart, blockEnd]; %#ok<AGROW>
+                blockStart = stimIdx(j);
+            end
+        end
+        % Add the last block
+        stimBlocks = [stimBlocks; blockStart, stimIdx(end)]; %#ok<AGROW>
+
+        if contains(stimName, {'Intro', 'Outro', 'ISI'})
+            stimColor = [0.5, 0.5, 0.5];
+        else
+            % Get the speaker position for this stim from "Stim Speaker Corrected"
+            speakerPosForStim = stimPeriodTable{stimIdx(1), 'Stim Speaker Corrected'};
+            if contains(speakerPosForStim, 'Left')
+                stimColor = [0, 0, 1]; % blue
+            elseif contains(speakerPosForStim, 'Right')
+                stimColor = [1, 0, 0]; % red
+            else
+                stimColor = [0.5, 0.5, 0.5]; % gray for unknown
+            end
+        end
+
+        % Plot each block as a shaded region
+        for j = 1:size(stimBlocks,1)
+            blockStartIdx = stimBlocks(j,1);
+            blockEndIdx = stimBlocks(j,2);
+            xStart = trialTime(blockStartIdx);
+            xEnd = trialTime(blockEndIdx);
+            % Create a patch (rectangle) for the shaded region
+            patchX = [xStart, xEnd, xEnd, xStart];
+            patchY = [plotYLim(1), plotYLim(1), plotYLim(2), plotYLim(2)];
+            patch(a, patchX, patchY, stimColor, 'FaceAlpha', 0.1, 'EdgeColor', 'none');
+        end
+    end
+
+    % Bring line plot to front
+    uistack(l, 'top');
+
+    % Add text at the end of x-axis indicating the stims
+    % text(a, plotXLim(2) - textPaddingX, plotYLim(2) - textPaddingY, 'Right', 'Color', 'r', 'FontWeight', 'bold', 'HorizontalAlignment', 'left', 'VerticalAlignment', 'top');
+    % text(a, plotXLim(2) - textPaddingX, plotYLim(1) + textPaddingY, 'Left', 'Color', 'b', 'FontWeight', 'bold', 'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom');
+    % We know that when making the bar, left speaker stim is first
+    textPaddingY = 0.05 * diff(plotYLim);
+    text(a, plotXLim(2) - textPaddingX, plotYLim(1) + textPaddingY, stimKeys{1}, 'Color', 'b', 'FontWeight', 'bold', 'FontSize', 9, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', 'Clipping', 'on');
+    text(a, plotXLim(2) - textPaddingX, plotYLim(2) - textPaddingY, stimKeys{end}, 'Color', 'r', 'FontWeight', 'bold', 'FontSize', 9, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Clipping', 'on');
+
+    % allow interactive zooming and panning
+    enableDefaultInteractivity(a);
+    title(a, 'Distance from Midline Over Time');
+    xlabel(a, 'Time (s)');
+    ylabel(a, 'Distance from Midline (cm)');
+    % a.Toolbar.Visible = 'on';
+    % a.Interactions = [zoomInteraction regionZoomInteraction rulerPanInteraction];
+    axtoolbar(a, {'export', 'pan', 'zoomin', 'zoomout', 'restoreview'});
+
+    a.XLim = plotXLim; a.YLim = plotYLim; % Restore original limits after enabling interactivity
+    hold(a, 'off');
 end
