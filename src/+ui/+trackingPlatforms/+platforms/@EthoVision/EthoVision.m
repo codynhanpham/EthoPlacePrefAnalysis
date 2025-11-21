@@ -105,9 +105,9 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
 
 
 
-        function mediaPath = mediaPathFromTrackingData(~, trackingDataFilePath, kvargs)
+        function mediaPath = mediaPathFromTrackingData(obj, trackingDataFilePath, kvargs)
             arguments
-                ~
+                obj (1,1) ui.trackingPlatforms.platforms.EthoVision
                 trackingDataFilePath (1,1) string
                 kvargs.Options (1,1) struct = struct();
             end

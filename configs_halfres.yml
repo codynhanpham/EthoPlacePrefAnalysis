@@ -34,7 +34,7 @@ tracking_providers:
 
       - name: "Lily Booth"
         camera_imgwidth_fov_cm: 77.4
-        camera_center_offset_px: [960, 0]
+        camera_center_offset_px: [480, 0]
         midline_xoffset_px: 0
         midline_yoffset_px: 0
         zone:
@@ -44,7 +44,7 @@ tracking_providers:
       
       - name: "Rain Booth"
         camera_imgwidth_fov_cm: 77.4
-        camera_center_offset_px: [-960, 0]
+        camera_center_offset_px: [-480, 0]
         midline_xoffset_px: 0
         midline_yoffset_px: 0
         zone:

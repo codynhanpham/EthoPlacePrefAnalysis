@@ -44,4 +44,5 @@ function configs = loadConfigYaml(configFile)
             error('Each arena.zone in configuration must have the required fields: left, right');
         end
     end
+
 end

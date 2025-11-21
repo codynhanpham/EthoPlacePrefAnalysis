@@ -29,6 +29,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %       units    - The units of the data columns
     %       stimulusFrameRange - The frame range for the stimulus as [startFrame, endFrame], inclusive
     %       animalMetadata - A struct containing metadata about the animal (sex, genotype, strain, age)
+    %       stimuli  - Metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
     %
     %   See also: io.config.loadConfigYaml, io.ethovision.loadEthovisionXlsx, io.metadata.loadMasterMetadata, io.stimuli.extractMetadata
 
@@ -57,9 +58,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % SCRIPT_VERSION = '0.0.1'; % Nothing, just as your template
     % SCRIPT_VERSION = '1.0.0'; % The initial version of this script, uses the full metadata table as hash for results caching
     % SCRIPT_VERSION = '1.1.0'; % Load xlsx header to extract the exact metadata row + actual stimuli file to use as hash components for results caching
+    % SCRIPT_VERSION = '1.1.1'; % Also store script version and the full metadata row in saved aligned file for future reference
+    % SCRIPT_VERSION = '1.2.0'; % Store stimuli metadata extracted from stimulus file in the aligned file output for convenience
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.1.1'; % Also store script version and the full metadata row in saved aligned file for future reference
+    SCRIPT_VERSION = '1.2.1'; % Fix logic for end-of-stimulus frame calculation
 
 
 
@@ -212,9 +215,9 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     numRows = size(datatable, 1);
     % Calculate stimulus timing
     timeAtStimStart = datatable{kvargs.StimStartFrame, 'Trial time'};
-    stimEndTime = ceil(timeAtStimStart) + metadata.duration;
+    stimEndTime = timeAtStimStart + metadata.duration;
     trialTimes = datatable{:, 'Trial time'};
-    stimEndFrame = find(trialTimes > stimEndTime, 1, 'first');
+    stimEndFrame = find(trialTimes >= stimEndTime, 1, 'first');
     if isempty(stimEndFrame)
         stimEndFrame = numRows + 1;
     end
@@ -430,13 +433,17 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         'NewVariableNames', {'Chapter Original', 'Speaker Channels Flipped', 'Stim Speaker Corrected', 'Animal Is Same Zone As Stim', 'Animal Matched Stim Name', 'Matched Speaker Position'});
 
     stimulusFrameRange = [kvargs.StimStartFrame, stimEndFrame-1];
-    stimuli = char(stimFiles(1).name);
-
+    % drop thumbnail from stim metadata since it will take up unnecessary space when saving
+    if isfield(metadata, 'thumbnail')
+        metadata = rmfield(metadata, 'thumbnail');
+    end
+    
     s = struct('header', header, 'datatable', datatable, 'units', units, ...
         'metadataRow', metadataRow, ... % This has extra metadata that is not in animalMetadata, but available only when MasterMetadataTable is provided
         'stimulusFrameRange', stimulusFrameRange, 'animalMetadata', animalMetadata, ...
-        'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', char(stimuli), "ALIGNMENT_SCRIPT_VERSION", SCRIPT_VERSION);
+        'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', metadata, "ALIGNMENT_SCRIPT_VERSION", SCRIPT_VERSION);
     save(alignedFile, '-struct', 's');
+    stimuli = metadata; % for output
 end
 
 % Helper functions (same as before)
