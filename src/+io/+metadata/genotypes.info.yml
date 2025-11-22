@@ -29,7 +29,7 @@
 #   - KO (or, Hom)
 
 
-- strain: C57BL6J
+- strain: C57BL/6J
   combo:
     female:
       - WT

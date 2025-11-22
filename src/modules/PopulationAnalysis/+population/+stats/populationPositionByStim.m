@@ -215,7 +215,7 @@ function standardizedTables = populationPositionByStim(ethovisionTrials, stimuli
 
     %% FIGURE
 
-
+    assignin("base", "standardizedTables", standardizedTables); % for debugging
 
 
 
