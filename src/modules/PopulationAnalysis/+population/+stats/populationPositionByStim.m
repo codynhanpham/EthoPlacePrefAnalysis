@@ -71,14 +71,14 @@ function standardizedTables = populationPositionByStim(ethovisionTrials, stimuli
     for i = 1:ntrials
         if ~isempty(kvargs.UIFigure)
             if loader.CancelRequested
-                warning('Population summary generation canceled while running. Returning partial results.');
+                warning('Population position-by-stim generation canceled while running. Returning partial results.');
                 break;
             end
             loader.Message = sprintf('Processing trial %d of %d...', i, ntrials);
             loader.Value = (i-1 + 0.1) / ntrials;
             drawnow;
         end
-
+        
         [~, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
         colkey = DataHash(centerpointData.data, 'SHA-256');
         
@@ -163,8 +163,7 @@ function standardizedTables = populationPositionByStim(ethovisionTrials, stimuli
             % This should not happen due to argument validation
             error('Invalid SpeakerFlipAxes value: %s. Must be ''x'' or ''y''.', kvargs.SpeakerFlipAxes);
         end
-
-
+        
         % Rename the centerpointData XY columns to include trial key
         centerpointData.data.Properties.VariableNames{'X center'} = sprintf('X center |> %s', colkey);
         centerpointData.data.Properties.VariableNames{'Y center'} = sprintf('Y center |> %s', colkey);

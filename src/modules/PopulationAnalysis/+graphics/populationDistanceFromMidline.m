@@ -1,4 +1,17 @@
-function f = populationDistanceFromMidline(standardizedTables)
+function f = populationDistanceFromMidline(standardizedTables, kvargs)
+    %%POPULATIONDISTANCEFROMMIDLINE Plots the average distance from midline over time for each stimulus set in standardizedTables
+    %
+    %   Inputs:
+    %       standardizedTables - struct array of standardized tables, generated via population.stats.populationPositionByStim()
+    %
+    %   Name-Value Pair Arguments:
+    %       'MainApp' - handle to the main PlacePrefDataGUI_main app (for additional configs + syncing)
+    %
+    %   Outputs:
+    %       f - handle to the generated figure
+    %
+    %   See also: population.stats.populationPositionByStim
+
 
 
     [screensize, videoaspect] = deal(get(0, 'ScreenSize'), 2/1);
@@ -6,19 +19,13 @@ function f = populationDistanceFromMidline(standardizedTables)
 
     % Center the figure on the primary screen
     figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
-    % [folder, name, ~] = fileparts(fullPath);
-    % [~, folder] = fileparts(fileparts(folder));
-    % fig = figure('Name', sprintf("%s - %s", folder, name), 'Position', figPos, ...
-    %     'CloseRequestFcn', @(src, event) closeFigure(src, event));
 
     f = figure('Name', sprintf("Distance from midline"), 'Position', figPos);
-
     t = tiledlayout(f, 2, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
 
     stimsets = {standardizedTables.stimfileName};
 
     for i = 1:length(stimsets)
-        stimset = stimsets{i};
         stimPeriodTable = standardizedTables(i).centerpointData;
         trialTime = stimPeriodTable{:, 'Trial time'};
         distFromMidline_cm = mean(stimPeriodTable.("Distance from Midline"), 2, 'omitnan'); % average across animals
@@ -28,7 +35,6 @@ function f = populationDistanceFromMidline(standardizedTables)
         curve2 = distFromMidline_cm - stdDist;
         x2 = [trialTime', fliplr(trialTime')];
         inBetween = [curve1', fliplr(curve2')];
-
 
 
         a = nexttile(t);
@@ -52,13 +58,6 @@ function f = populationDistanceFromMidline(standardizedTables)
         % Plot the left/right color patched regions: rectangle from xlim(1) to xlim(2), y=0 to ylim(2) in red (right), and y=0 to ylim(1) in blue (left)
         patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [0, plotYLim(2), plotYLim(2), 0], [1,0,0], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
         patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [plotYLim(1), 0, 0, plotYLim(1)], [0,0,1], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
-
-        
-        % Add text annotation at start of xlim, indicating left/right
-        textPaddingX = 0.02 * diff(plotXLim);
-        % % Rotate 270 degrees to have text vertical along y-axis
-        % text(a, plotXLim(1) + textPaddingX, (plotYLim(2) - 0)/2, 'Right', 'Color', 'r', 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'cap', 'Rotation', 90, 'Clipping', 'on');
-        % text(a, plotXLim(1) + textPaddingX, (plotYLim(1) + 0)/2, 'Left', 'Color', 'b', 'FontWeight', 'bold', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'cap', 'Rotation', 90, 'Clipping', 'on');
 
 
         % Add the stimuli as shaded regions behind the line plot, color of [0.5 0.5 0.5] if it contains {'Intro', 'Outro', 'ISI'}, else color based on speaker position as in "Stim Speaker Corrected" (contains 'Left' -> blue, 'Right' -> red)
@@ -88,17 +87,6 @@ function f = populationDistanceFromMidline(standardizedTables)
             if contains(stimName, {'Intro', 'Outro', 'ISI'})
                 stimColor = [0.5, 0.5, 0.5];
             else
-                % Get the speaker position for this stim from "Stim Speaker Corrected"
-                % speakerPosForStim = stimPeriodTable{stimIdx(1), 'Stim Speaker Corrected'};
-                % if contains(speakerPosForStim, 'Left')
-                %     stimColor = [0, 0, 1]; % blue
-                % elseif contains(speakerPosForStim, 'Right')
-                %     stimColor = [1, 0, 0]; % red
-                % else
-                %     stimColor = [0.5, 0.5, 0.5]; % gray for unknown
-                % end
-
-
                 if startsWith(stimName, '[Ch1] ')
                     stimName = extractAfter(stimName, '[Ch1] ');
                 elseif startsWith(stimName, '[Ch2] ')
@@ -113,7 +101,7 @@ function f = populationDistanceFromMidline(standardizedTables)
                     case 2
                         stimColor = [1, 0, 0]; % red
                     otherwise
-                        stimColor = [0.5, 0.5, 0.5]; % gray for unknown
+                        stimColor = [0.5, 0.5, 0.5]; % gray for non-stims (Intro/Outro/ISI)
                 end
             end
 
@@ -123,7 +111,6 @@ function f = populationDistanceFromMidline(standardizedTables)
                 blockEndIdx = stimBlocks(k,2);
                 xStart = trialTime(blockStartIdx);
                 xEnd = trialTime(blockEndIdx);
-                % Create a patch (rectangle) for the shaded region
                 patchX = [xStart, xEnd, xEnd, xStart];
                 patchY = [plotYLim(1), plotYLim(1), plotYLim(2), plotYLim(2)];
                 patch(a, patchX, patchY, stimColor, 'FaceAlpha', 0.1, 'EdgeColor', 'none');
@@ -134,23 +121,21 @@ function f = populationDistanceFromMidline(standardizedTables)
         uistack(l, 'top');
 
         % Add text at the end of x-axis indicating the stims
-        % text(a, plotXLim(2) - textPaddingX, plotYLim(2) - textPaddingY, 'Right', 'Color', 'r', 'FontWeight', 'bold', 'HorizontalAlignment', 'left', 'VerticalAlignment', 'top');
-        % text(a, plotXLim(2) - textPaddingX, plotYLim(1) + textPaddingY, 'Left', 'Color', 'b', 'FontWeight', 'bold', 'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom');
         % We know that when making the bar, left speaker stim is first
+        textPaddingX = 0.02 * diff(plotXLim);
         textPaddingY = 0.05 * diff(plotYLim);
         text(a, plotXLim(2) - textPaddingX, plotYLim(1) + textPaddingY, standardizedTables(i).stimuliSorted(1), 'Color', 'b', 'FontWeight', 'bold', 'FontSize', 9, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', 'Clipping', 'on');
         text(a, plotXLim(2) - textPaddingX, plotYLim(2) - textPaddingY, standardizedTables(i).stimuliSorted(2), 'Color', 'r', 'FontWeight', 'bold', 'FontSize', 9, 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Clipping', 'on');
-
-        % allow interactive zooming and panning
-        enableDefaultInteractivity(a);
+        
         title(a, 'Distance from Midline Over Time');
         xlabel(a, 'Time (s)');
         ylabel(a, 'Distance from Midline (cm)');
-        % a.Toolbar.Visible = 'on';
-        % a.Interactions = [zoomInteraction regionZoomInteraction rulerPanInteraction];
+
+        % allow interactive zooming and panning
+        enableDefaultInteractivity(a);
         axtoolbar(a, {'export', 'pan', 'zoomin', 'zoomout', 'restoreview'});
 
-        a.XLim = plotXLim; a.YLim = plotYLim; % Restore original limits after enabling interactivity
+        a.XLim = plotXLim; a.YLim = plotYLim; % Restore original limits
         hold(a, 'off');
 
 
