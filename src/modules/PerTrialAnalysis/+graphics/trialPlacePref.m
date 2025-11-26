@@ -101,7 +101,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     d = log10(d + 1); % log transform for better visualization of low-occupancy areas
 
     name = strcat(header("Experiment"), " - ", header("Trial name"));
-    
+    name = strcat(name, " @ ", string(arenaName));
+
     screensize = get(0, 'ScreenSize');
     h = 0.72 * screensize(4); w = h * (vidWidth / (vidHeight + 0.26*vidHeight)); % maintain aspect ratio with some extra height for bar chart
     figPos = [(screensize(3)-w)/2, (screensize(4)-h)/2, w, h];
