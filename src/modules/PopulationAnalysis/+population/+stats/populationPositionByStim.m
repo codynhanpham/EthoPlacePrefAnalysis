@@ -79,9 +79,11 @@ function standardizedTables = populationPositionByStim(ethovisionTrials, stimuli
             drawnow;
         end
         
-        [~, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
+        [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
         colkey = DataHash(centerpointData.data, 'SHA-256');
         
+        % TODO: Do something with the summary output (animal metadata, so maybe log it as a field in standardizedTables later?)
+
         colDefault = 'X center |> ';
         % Truncate colkey to namelengthmax - length(colDefault)
         colkey = colkey(1:min(length(colkey), namelengthmax - length(colDefault) - 1));
