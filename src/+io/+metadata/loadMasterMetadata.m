@@ -32,6 +32,11 @@ function [masterMetadata] = loadMasterMetadata(filePath, kwargs)
     );
     masterMetadata = rmmissing(masterMetadata, MinNumMissing=width(masterMetadata));
 
+    [bool, missingHeaders] = io.metadata.isMasterMetadataTable(masterMetadata);
+    if ~bool
+        error('The provided file does not contain a valid master metadata table. Missing headers: {'' %s ''}', strjoin(missingHeaders, ''', '''));
+    end
+
     MetaFilePathHash = currentHash;
     CachedMasterMetadata = masterMetadata;
 end

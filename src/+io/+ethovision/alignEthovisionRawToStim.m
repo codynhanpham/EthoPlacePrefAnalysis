@@ -28,7 +28,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %       datatable - The aligned data table
     %       units    - The units of the data columns
     %       stimulusFrameRange - The frame range for the stimulus as [startFrame, endFrame], inclusive
-    %       animalMetadata - A struct containing metadata about the animal (sex, genotype, strain, age)
+    %       animalMetadata - A struct containing metadata about the animal (sex, strain, genotype, age, dob, cagecode, id, source)
     %       stimuli  - Metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
     %
     %   See also: io.config.loadConfigYaml, io.ethovision.loadEthovisionXlsx, io.metadata.loadMasterMetadata, io.stimuli.extractMetadata
@@ -60,9 +60,10 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % SCRIPT_VERSION = '1.1.0'; % Load xlsx header to extract the exact metadata row + actual stimuli file to use as hash components for results caching
     % SCRIPT_VERSION = '1.1.1'; % Also store script version and the full metadata row in saved aligned file for future reference
     % SCRIPT_VERSION = '1.2.0'; % Store stimuli metadata extracted from stimulus file in the aligned file output for convenience
+    % SCRIPT_VERSION = '1.2.1'; % Fix logic for end-of-stimulus frame calculation
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.2.1'; % Fix logic for end-of-stimulus frame calculation
+    SCRIPT_VERSION = '1.2.2'; % Also save dob and source cage code in animalMetadata output struct
 
 
 
@@ -75,6 +76,10 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     configHash = DataHash(kvargs.Config, 'SHA-256');
     masterMetadata = table();
     if istable(kvargs.MasterMetadataTable)
+        [bool, missingHeaders] = io.metadata.isMasterMetadataTable(kvargs.MasterMetadataTable);
+        if ~bool
+            error('The provided MasterMetadataTable does not contain a valid master metadata table. Missing headers: {'' %s ''}', strjoin(missingHeaders, ''', '''));
+        end
         masterMetadata = kvargs.MasterMetadataTable;
     elseif ~isempty(kvargs.MasterMetadataTable)
         masterMetadata = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
@@ -146,14 +151,16 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName, HeaderOnly=false);
 
     % Extract metadata parameters if available from the matching row in master metadata
-    sex = ''; genotype = ''; strain = ''; age = ''; cagecode = ''; id = '';
+    sex = ''; genotype = ''; strain = ''; age = ''; dob = NaT; cagecode = ''; id = ''; source = '';
     if ~isempty(metadataRow)
         sex = char(metadataRow.('ANIMAL_SEX'));
         genotype = char(metadataRow.('ANIMAL_GENOTYPE'));
         strain = char(metadataRow.('ANIMAL_STRAIN'));
         age = metadataRow.('ANIMAL_P_AGE');
+        dob = metadataRow.('ANIMAL_DOB');
         cagecode = char(metadataRow.('CAGE_CODE'));
         id = char(metadataRow.('ANIMAL_ID'));
+        source = char(metadataRow.('SOURCE_CODE'));
 
         if isempty(kvargs.StimulusProtocol)
             kvargs.StimulusProtocol = char(metadataRow.('STIMULUS_PROTOCOL'));
@@ -191,7 +198,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
             kvargs.SpeakerFlipped = logical(metadataRow.('SPEAKER_FLIPPED'));
         end
     end
-    animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age, 'cagecode', cagecode, 'id', id);
+    animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age, 'dob', dob, 'cagecode', cagecode, 'id', id, 'source', source);
 
 
     % All of StimulusProtocol, StimStartFrame, and SpeakerFlipped should be non-empty now

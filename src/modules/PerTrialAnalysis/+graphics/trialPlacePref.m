@@ -97,7 +97,22 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     [N,xedges,yedges] = histcounts2(centerPos(:,1), centerPos(:,2), [(ceil(vidWidth/3)), (ceil(vidHeight/3))]);
     d = N';
 
-    d = imgaussfilt(d, 3);
+    gausFactor = 3; % default for 1920x1080 videos
+    % Reduce the gaussian factor for smaller videos, and increase for larger videos based on the larger dimension
+    if vidWidth >= vidHeight
+        compdim = vidWidth;
+        compto = 1920;
+    else
+        compdim = vidHeight;
+        compto = 1080;
+    end
+    if compdim < compto
+        gausFactor = max(1, round(gausFactor * (compdim / compto)));
+    elseif compdim > compto
+        gausFactor = round(gausFactor * (compdim / compto));
+    end
+
+    d = imgaussfilt(d, gausFactor);
     d = log10(d + 1); % log transform for better visualization of low-occupancy areas
 
     name = strcat(header("Experiment"), " - ", header("Trial name"));
@@ -117,8 +132,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     % Turn axis back on to show ticks and labels
     axis(a, 'on');
     alphadata = zeros(size(d));
-    alphadata(d > 0.001) = 1;
-    alphadata(d > 0.001 & d <= 0.005*max(d(:))) = 0.2;
+    alphadata(d > 0.0015) = 1;
+    alphadata(d > 0.0015 & d <= 0.005*max(d(:))) = 0.2;
     alphadata(d > 0.005*max(d(:)) & d <= 0.01*max(d(:))) = 0.35;
     alphadata(d > 0.01*max(d(:)) & d <= 0.05*max(d(:))) = 0.5;
     alphadata(d > 0.05*max(d(:)) & d <= 0.18*max(d(:))) = 0.65;
@@ -272,7 +287,6 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
 
     %% L/R DISTANCE FROM MIDLINE OVER TIME
-    assignin('base', 'stimPeriodTable', stimPeriodTable);
     centerPosX = centerPos(:,1); % in pixels, should already be adjusted such that 0,0 is top-left
     midlineX = vidWidth/2;
     % If there are override variables, adjust midlineX based on center offset
