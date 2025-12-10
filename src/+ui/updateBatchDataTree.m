@@ -17,22 +17,22 @@ function updateBatchDataTree(appTreeRootNode, batchData, kvargs)
         batchData struct
 
         kvargs.MetadataTable {validator.mustBeFileTableOrEmpty} = table()
-        kvargs.Filters (1,1) {mustBeValidFiltersOrEmpty} = struct('sex', {}, 'strain', {}, 'genotype', {})
+        kvargs.Filters (:,1) {mustBeValidFiltersOrEmpty} = struct('sex', {cell(0)}, 'strain', {cell(0)}, 'genotype', {cell(0)})
     end
 
-    if isempty(kvargs.Filters)
-        kvargs.Filters = struct('sex', {}, 'strain', {}, 'genotype', {});
-    end
-    % Assert as cellstr for easier comparison later
-    filterFields = fieldnames(kvargs.Filters);
-    for i = 1:length(filterFields)
-        fieldValue = kvargs.Filters.(filterFields{i});
-        kvargs.Filters.(filterFields{i}) = cellstr(fieldValue);
-    end
-
-
-
-    
+    % if isempty(kvargs.Filters)
+    %     kvargs.Filters = struct('sex', {cell(0)}, 'strain', {cell(0)}, 'genotype', {cell(0)});
+    % else
+    %     % Assert as cellstr for easier comparison later
+    %     filterFields = fieldnames(kvargs.Filters);
+    %     for i = 1:length(filterFields)
+    %         if isempty(kvargs.Filters.(filterFields{i}))
+    %             continue; % No filter for this field
+    %         end
+    %         fieldValue = kvargs.Filters.(filterFields{i});
+    %         kvargs.Filters.(filterFields{i}) = cellstr(fieldValue);
+    %     end
+    % end
 
     % Handle empty or invalid batchData
     if isempty(batchData) || ~isfield(batchData, 'dir')
@@ -210,7 +210,7 @@ function mustBeValidFiltersOrEmpty(x)
     for i = 1:length(requiredFields)
         fieldValue = x.(requiredFields{i});
         if ~isempty(fieldValue) && ~ischar(fieldValue) && ~iscellstr(fieldValue) && ~isstring(fieldValue)
-            error('Filter field ''%s'' must be a character vector, a string array, cell array of strings, or empty. To specify no filter for certain fields, set their values to {} empty cell.', requiredFields{i});
+            error('Filter field ''%s'' must be a character vector, a string array, cell array of strings, or empty. To specify no filter for certain fields, set their values to {cell(0)} empty cell.', requiredFields{i});
         end
     end
 end
