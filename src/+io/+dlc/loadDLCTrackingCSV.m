@@ -91,7 +91,7 @@ function [header, datatable, units] = loadDLCTrackingCSV(filePath, kvargs)
     end
 
     trialName = videoFileName;
-    arenaName = "";
+    arenaName = "Arena 1"; % default arena name to match Ethovision convention
     if contains(videoFileName, " @ ")
         parts = strsplit(videoFileName, " @ ");
         trialName = parts{1};

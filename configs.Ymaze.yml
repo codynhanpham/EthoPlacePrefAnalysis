@@ -1,0 +1,73 @@
+## THIS FILE SHOW THE COMPLETE CONFIGURATION OPTIONS, THEIR DEFAULT VALUES, AND DOCUMENTATION.
+
+preferences:
+
+defaults:
+  # Directory containing stimuli playlists (audio files).
+  # This directory will be searched recursively, so specify the closest common path to your stimuli will improve performance.
+  stimuli_directory: "../Stimuli/playlists" 
+
+  # Path to the master metadata table Excel file
+  master_metadata_table: "../Place Preferences - Master Metadata.xlsx"
+
+  # Root directory containing your projects (direct parent folder whose subfolders are your datasets - each containing a set of recordings/trials)
+  project_root: "../ETHOVISION"
+
+  # The default tracking platform to use on app startup
+  # While the GUI is running, run ui.trackingPlatforms.TrackingProvider.listAvailablePlatforms() to see available options
+  # This value is also case-insensitive
+  tracking_platform: "EthoVision"
+
+  # Set the preferred binaries for extracting audio metadata
+  # By default, the included ./metadata_extract (.exe on Windows) will be used
+  # However, you can override this to use a custom build if desired
+  audio_metadata_extract_bin: #"./src/+io/+stimuli/metadata_extract.exe" # When not specfied, the pre-bundled binary will be used (path shown here)
+  # If the metadata_extract binary is not found anywhere, you can also specify the path to the full nidaq_audioplayer executable app as alternative
+  nidaq_audioplayer_bin: #"%LOCALAPPDATA%/NI-DAQmxAudioPlayer/nidaq_audioplayer.exe" # This is the default installation path, though update to reflect your actual installation if needed
+
+tracking_providers:
+  # Specify the settings for your tracking platform here
+  # The tracking platform key/name here should exactly match the 'Tracking Provider' dropdown values in the GUI,
+  # or the names returned by ui.trackingPlatforms.TrackingProvider.listAvailablePlatforms()
+  # If there are spaces in the platform name, enclose the name in double quotes
+  #
+  # Note that the settings for different platforms are independent of each other, thus heterogeneous values in tracking_providers is expected
+
+
+  EthoVision:
+    # Default settings applied to all sub-categories unless overridden 
+    coordsUnit: "cm" # The unit of the coordinates in the EthoVision tracking data; set in Arena Settings. Default is "cm". This must be consistent across all arenas used in your experiments.
+
+    default_camera_imgwidth_fov_cm: 95.3 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+    default_camera_center_offset_px: [0, 0] # EthoVision coordinates' origin is the center of the image; specify an offset here if your arena/area of interest is not perfectly centered in the camera view. Default is [0,0].
+    default_zone_match_method: "startsWith"  # method to match the zone name set here to the ones set in EthoVision; one of these: "exact", "startsWith", "endsWith", "contains". Default is "startsWith".
+
+    arena:
+      # When using multiple arenas or different arena configs exist, specify them here
+      # Just make sure the names match those used in EthoVision
+      # The arenas set here should be a superset of all arenas used in your experiments
+
+      - name: "Arena 1" # required: name of the arena as specified in EthoVision
+        camera_imgwidth_fov_cm: 95.3
+        camera_center_offset_px: [0, 0]
+        zone: # required: list of zone names as specified in EthoVision for this arena matched to left/right sides of the place preference setup
+          left: Left
+          right: Right
+        zone_match_method: "startsWith"
+
+
+  DeepLabCut:
+    config_file: "../DLCDetectionModel/config.yaml" # Path to the DeepLabCut config.yaml file associated with your trained model for subject tracking/pose estimation
+
+    # Default x-offset in pixels to correctly define the midpoint between left/right zones if the arena is not perfectly centered in the camera view. This can be overridden per-arena if needed.
+    default_midpoint_xoffset_px: 0
+
+    default_camera_imgwidth_fov_cm: 95.3 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+
+    arena:
+      # When using multiple arenas or different arena configs exist, specify them here
+      # Just make sure the names match those used in your experiments and the master metadata table
+
+      - name: "Arena 1" # Required: name of the arena as specified in your experiments, must match the master metadata table and processed file names
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 95.3
