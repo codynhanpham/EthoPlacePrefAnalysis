@@ -287,13 +287,72 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
 
     %% L/R DISTANCE FROM MIDLINE OVER TIME
-    centerPosX = centerPos(:,1); % in pixels, should already be adjusted such that 0,0 is top-left
-    midlineX = vidWidth/2;
-    % If there are override variables, adjust midlineX based on center offset
-    %...
 
-    distFromMidline_cm = (centerPosX - midlineX) * pixelsize; % in cm, negative = left, positive = right
+    fromConfigKey = {'tracking_providers', 'EthoVision', 'xflip'};
+    xflip = false; % default value for compat with older code
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        xflip = getfield(configs, fromConfigKey{:});
+        if iscell(xflip)
+            xflip = cell2mat(ImgWidthFOV_cm);
+        end
+    end
+
+    % If there is a <mediafilename>.midpoint.csv file next to the mediafile, load that to get the reference point and calculate signed distance directly using the XY position
+    distFromMidline_cm = [];
     trialTime = stimPeriodTable{:,'Trial time'};
+    [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+    midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
+    % If midpoint file exists, load that as default reference point
+    if isfile(midPointFilePath)
+        try
+            midpointData = readtable(midPointFilePath);
+            if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
+                referencePoint = [midpointData.x(1), midpointData.y(1)]; % this is in px, (0,0) in top-left: should be in image coordinates (compatible with centerPos)
+                % Calculate Euclidean distance from each centerPos to referencePoint
+                diffs = centerPos - referencePoint; % in px
+                dists = sqrt(sum(diffs.^2, 2)); % in px
+                % Determine sign based on X position relative to the mid-point (X0, Y0) (left = negative, right = positive)
+                distFromMidline_cm = sign((centerPos(:,1) - referencePoint(1))) .* (dists * pixelsize); % in cm
+                if xflip
+                    distFromMidline_cm = -distFromMidline_cm;
+                end
+            end
+        catch ME
+            warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
+        end
+    end
+
+    % Fallback to using EthoVision data and known configs only when no midpoint file is found or cannot calculate from it
+    % TODO: For now, prioritize if there is a column in EthoVision data called "Distance to point"
+    % Otherwise, compute distance from midline using X center position only
+    if isempty(distFromMidline_cm)
+        if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
+            distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are all positive values, need to determine sign based on X position!
+            assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
+
+            % Determine sign based on X position relative to the mid-point (X0, Y0)
+            centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+            % Find the coordinate of the midpoint (where the distance to point was measured from)
+            % EthoVision doesn't provide this directly, so we have to calculate it via intersection of circles
+            refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
+            distFromMidline_cm = sign((centerPos_cm(:,1) - refPoint(1))) .* distFromMidline_cm;
+            if xflip
+                distFromMidline_cm = -distFromMidline_cm;
+            end
+        else
+            % Compute distance from midline using X center position
+            centerPosX = centerPos(:,1); % in pixels, should already be adjusted such that 0,0 is top-left
+            midlineX = vidWidth/2;
+            % If there are override variables, adjust midlineX based on center offset
+            %...
+
+            distFromMidline_cm = (centerPosX - midlineX) * pixelsize; % in cm, negative = left, positive = right
+            if xflip
+                distFromMidline_cm = -distFromMidline_cm;
+            end
+        end
+    end
+
     assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
 
     a = nexttile(t, [1,2]);
@@ -398,4 +457,34 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
     a.XLim = plotXLim; a.YLim = plotYLim; % Restore original limits after enabling interactivity
     hold(a, 'off');
+end
+
+
+
+function refPoint = findReferencePointLinear(xyCoords, distances)
+    % Filter out NaN values
+    validIdx = ~isnan(xyCoords(:,1)) & ~isnan(xyCoords(:,2)) & ~isnan(distances);
+    validCoords = xyCoords(validIdx, :);
+    validDistances = distances(validIdx);
+    
+    n = size(validCoords, 1);
+    if n < 2
+        error('Need at least 2 valid (non-NaN) points to calculate reference point. Found %d valid points.', n);
+    end
+    
+    % Use first valid point as reference for differencing
+    x1 = validCoords(1, 1); y1 = validCoords(1, 2); d1 = validDistances(1);
+    
+    % Build linear system Ax = b
+    A = zeros(n-1, 2);
+    b = zeros(n-1, 1);
+    
+    for i = 2:n
+        xi = validCoords(i, 1); yi = validCoords(i, 2); di = validDistances(i);
+        A(i-1, :) = 2 * [x1 - xi, y1 - yi];
+        b(i-1) = x1^2 - xi^2 + y1^2 - yi^2 + di^2 - d1^2;
+    end
+    
+    % Solve linear system
+    refPoint = (A \ b)';
 end

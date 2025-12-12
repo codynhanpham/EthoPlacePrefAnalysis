@@ -42,6 +42,8 @@ tracking_providers:
     default_camera_center_offset_px: [0, 0] # EthoVision coordinates' origin is the center of the image; specify an offset here if your arena/area of interest is not perfectly centered in the camera view. Default is [0,0].
     default_zone_match_method: "startsWith"  # method to match the zone name set here to the ones set in EthoVision; one of these: "exact", "startsWith", "endsWith", "contains". Default is "startsWith".
 
+    xflip: true
+
     arena:
       # When using multiple arenas or different arena configs exist, specify them here
       # Just make sure the names match those used in EthoVision
