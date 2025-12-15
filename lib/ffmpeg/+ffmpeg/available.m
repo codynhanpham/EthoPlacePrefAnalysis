@@ -30,9 +30,9 @@ function [bool, bin] = available()
 
     % If not found in system path, check portable binaries
     if ispc
-        bin = fullfile(fileparts(mfilename('fullpath')), 'bin', 'ffmpeg.exe');
+        bin = fullfile(fileparts(mfilename('fullpath')), '..', 'bin', 'ffmpeg.exe');
     else
-        bin = fullfile(fileparts(mfilename('fullpath')), 'bin', 'ffmpeg');
+        bin = fullfile(fileparts(mfilename('fullpath')), '..', 'bin', 'ffmpeg');
     end
     if isfile(bin)
         [status, ~] = system(['"', bin, '" -version']);

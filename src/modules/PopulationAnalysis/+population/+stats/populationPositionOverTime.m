@@ -21,6 +21,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     %           There are the following fields:
     %               - stimfileName: Name of the stimulus file
     %               - stimuliSorted: Formatted-name of the stimuli pair in the trials of the same kind, sorted alphabetically. If stim name contains "normal" (case-insensitive), that stim is listed first.
+    %               - animalMetadata: A dictionary (string-struct) in the order of columns in centerpointData, where each key is a hash key corresponding to a trial's centerpointData, and each value is the animal metadata struct for that trial.
     %               - centerpointData: A table with columns 'Trial time', 'X center', 'Y center', 'Distance from Midline', 'Stimulus name', standardized across trials.
     %                   Note that 'X center', 'Y center', and 'Distance from Midline' are multi-column variables in the table, with each column representing a trial aligned to stimulus onset and interpolated to the target framerate.
     %                   The coordinates here are flipped such that negative values are towards stimuliSorted(1) and positive values are towards stimuliSorted(2), according to the speaker flip information in the trial metadata.
@@ -36,7 +37,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         kvargs.Config (1,1) struct = struct()
         kvargs.TargetFPS (1,1) double {mustBePositive, mustBeFinite} = 30;
         kvargs.SpeakerFlipAxes {mustBeMember(kvargs.SpeakerFlipAxes, {'x', 'y'}), mustBeTextScalar} = 'x';
-        kvargs.Interpolation {mustBeMember(kvargs.Interpolation, {'linear', 'nearest', 'spline', 'pchip', 'cubic'}), mustBeTextScalar} = 'spline';
+        % https://www.mathworks.com/help/matlab/ref/double.interp1.html#btwp6lt-1-method
+        % linear is good but may produce NaN
+        % spline is often best, but if the data is sparse (missing lots of nearby points), can produce overshoot artifacts
+        % pchip is a good compromise that avoids overshoot, but less smooth and flatten missing data points more aggressively (though, for place preference, this may be desirable)
+        kvargs.Interpolation {mustBeMember(kvargs.Interpolation, {'linear', 'nearest', 'spline', 'makima', 'pchip', 'cubic'}), mustBeTextScalar} = 'pchip';
         kvargs.UIFigure {mustBeUIFigureOrEmpty} = gobjects(0);
     end
 
@@ -67,6 +72,21 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         drawnow;
     end
 
+
+    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    refmode = 'line'; % default
+    fromConfigKey = {'defaults', 'distance2refmode'};
+    if validator.nestedStructFieldExists(kvargs.Config, fromConfigKey)
+        refmode = getfield(kvargs.Config, fromConfigKey{:});
+        if iscell(refmode)
+            refmode = string(refmode{1});
+        end
+        if ~ismember(refmode, ["point", "line"])
+            refmode = 'line'; % fallback to default
+            warning("population:stats:populationPositionOverTime:InvalidConfig", "Invalid config value for 'defaults.distance2refmode': %s. Falling back to 'line'.", refmode);
+        end
+    end
+
     stimtables = configureDictionary("string", "struct");
     animalMetadataDict = configureDictionary("string", "struct");
 
@@ -82,6 +102,22 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         end
         
         [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
+        % Regardless of what is in config for refmode, we should prioritize what was used in trialSummary by inferring from the size() of centerpointData.midline_x_px and midline_x_px
+        if isfield(centerpointData, 'midline_x_px') && ~isempty(centerpointData.midline_x_px)
+            % Assert the size of midline_x_px and midline_y_px is the same
+            assert(isequal(size(centerpointData.midline_x_px), size(centerpointData.midline_y_px)), ...
+                'population:stats:populationPositionOverTime:MidlineSizeMismatch', ...
+                'Size mismatch between midline_x_px and midline_y_px in trial %d centerpointData.', i);
+            % If midline_x_px and midline_y_px are scalars, then refmode is 'point', else 'line'
+            if isscalar(centerpointData.midline_x_px)
+                refmode = 'point';
+            else
+                refmode = 'line';
+            end 
+        end
+        % Also note that if config specifies xflip/yflip, those were already applied in trialSummary
+        % flipCondition below only determines whether to flip based on speaker sides to normalize all trials to the same orientation
+
 
         stimmeta = centerpointData.stimuliMetadata;
         [~, stimfileName, stimfileExt] = fileparts(stimmeta.path);
@@ -121,8 +157,10 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         % Interpolate to the standardized timepoints
         standardizedTime = stimtables(stimfileName).centerpointData{:, 'Trial time'};
         standardizedStims = stimtables(stimfileName).centerpointData{:, 'Stimulus name'};
+        warning('off', 'MATLAB:interp1:NaNstrip');
         interpX = interp1(thisTrialTime, thisX, standardizedTime, kvargs.Interpolation, 'extrap');
         interpY = interp1(thisTrialTime, thisY, standardizedTime, kvargs.Interpolation, 'extrap');
+        warning('on', 'MATLAB:interp1:NaNstrip');
         centerpointData.data = table();
         centerpointData.data.('Trial time') = standardizedTime;
         centerpointData.data.('Stimulus name') = standardizedStims;
@@ -132,31 +170,92 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
 
         % If stimKeys(1) is not the same as stimuliSorted(1), mirror the relevant axis by the midline_*offset_px
         flipCondition = false;
+        midlineX_cm = centerpointData.midline_x_px * centerpointData.px2cm; % since data is in cm
+        midlineY_cm = centerpointData.midline_y_px * centerpointData.px2cm;
         if strcmpi(kvargs.SpeakerFlipAxes, 'x')
             if ~strcmpi(stimKeys(1), stimtables(stimfileName).stimuliSorted(1))
                 flipCondition = true;
             end
-            xcenterData = centerpointData.data{:, 'X center'};
-            midlineX_cm = centerpointData.midline_xoffset_px * centerpointData.px2cm; % since data is in cm
+            % xcenterData = centerpointData.data{:, 'X center'};
+            % For mirroring, if refmod is point then simply flip the 
+            % if flipCondition
+            %     % mirror horizontally around midlineX
+            %     xcenterData = 2 * midlineX_cm - xcenterData;
+            % end
+            % centerpointData.data{:, 'X center'} = xcenterData;
             if flipCondition
-                % mirror horizontally around midlineX
-                xcenterData = 2 * midlineX_cm - xcenterData;
+                if strcmpi(refmode, 'point')
+                    xcenterData = centerpointData.data{:, 'X center'};
+                    xcenterData = 2 * midlineX_cm - xcenterData;
+                    centerpointData.data{:, 'X center'} = xcenterData;
+                elseif strcmpi(refmode, 'line')
+                    points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
+                    lineX = [midlineX_cm(1), midlineX_cm(end)];
+                    lineY = [midlineY_cm(1), midlineY_cm(end)];
+                    mirroredPoints = mirrorPointsAcrossLine(points, lineX, lineY);
+                    centerpointData.data{:, 'X center'} = mirroredPoints(:,1);
+                    centerpointData.data{:, 'Y center'} = mirroredPoints(:,2);
+                end
             end
-            centerpointData.data{:, 'X center'} = xcenterData;
+
             % Calculate a Dist to Midline column that is the distance from the midline
-            centerpointData.data{:, 'Distance from Midline'} = xcenterData - midlineX_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+            % centerpointData.data{:, 'Distance from Midline'} = xcenterData - midlineX_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+            if strcmpi(refmode, 'point')
+                % Euclidean distance from reference point on midline
+                xcenterData = centerpointData.data{:, 'X center'};
+                ycenterData = centerpointData.data{:, 'Y center'};
+                distFromMidline = sqrt( (xcenterData - midlineX_cm).^2 + (ycenterData - midlineY_cm).^2 );
+                % Determine sign based on which side of the midline the subject is on
+                signMask = sign(xcenterData - midlineX_cm);
+                distFromMidline = distFromMidline .* signMask; % negative towards stimuliSorted(1), positive towards stimuliSorted(2)
+                centerpointData.data{:, 'Distance from Midline'} = distFromMidline;
+            elseif strcmpi(refmode, 'line')
+                xcenterData = centerpointData.data{:, 'X center'};
+
+                %TODO: For now, just use this. Should actually use perpendicular distance to line, though
+                centerpointData.data{:, 'Distance from Midline'} = xcenterData - midlineX_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+            end
+
         elseif strcmpi(kvargs.SpeakerFlipAxes, 'y')
             if ~strcmpi(stimKeys(1), stimtables(stimfileName).stimuliSorted(1))
                 flipCondition = true;
             end
-            ycenterData = centerpointData.data{:, 'Y center'};
-            midlineY_cm = centerpointData.midline_yoffset_px * centerpointData.px2cm;
+            % ycenterData = centerpointData.data{:, 'Y center'};
+            % midlineY_cm = centerpointData.midline_y_px * centerpointData.px2cm;
+            % if flipCondition
+            %     % mirror vertically around midlineY
+            %     ycenterData = 2 * midlineY_cm - ycenterData;
+            % end
+            % centerpointData.data{:, 'Y center'} = ycenterData;
+            % centerpointData.data{:, 'Distance from Midline'} = ycenterData - midlineY_cm;
             if flipCondition
-                % mirror vertically around midlineY
-                ycenterData = 2 * midlineY_cm - ycenterData;
+                if strcmpi(refmode, 'point')
+                    ycenterData = centerpointData.data{:, 'Y center'};
+                    ycenterData = 2 * midlineY_cm - ycenterData;
+                    centerpointData.data{:, 'Y center'} = ycenterData;
+                elseif strcmpi(refmode, 'line')
+                    points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
+                    lineX = [midlineY_cm(1), midlineY_cm(end)]; % swap x and y for vertical mirroring
+                    lineY = [midlineX_cm(1), midlineX_cm(end)];
+                    mirroredPoints = mirrorPointsAcrossLine(points, lineX, lineY);
+                    centerpointData.data{:, 'X center'} = mirroredPoints(:,1);
+                    centerpointData.data{:, 'Y center'} = mirroredPoints(:,2);
+                end
             end
-            centerpointData.data{:, 'Y center'} = ycenterData;
-            centerpointData.data{:, 'Distance from Midline'} = ycenterData - midlineY_cm;
+            if strcmpi(refmode, 'point')
+                % Euclidean distance from reference point on midline
+                xcenterData = centerpointData.data{:, 'X center'};
+                ycenterData = centerpointData.data{:, 'Y center'};
+                distFromMidline = sqrt( (xcenterData - midlineX_cm).^2 + (ycenterData - midlineY_cm).^2 );
+                % Determine sign based on which side of the midline the subject is on
+                signMask = sign(ycenterData - midlineY_cm);
+                distFromMidline = distFromMidline .* signMask; % negative towards stimuliSorted(1), positive towards stimuliSorted(2)
+                centerpointData.data{:, 'Distance from Midline'} = distFromMidline;
+            elseif strcmpi(refmode, 'line')
+                ycenterData = centerpointData.data{:, 'Y center'};
+                %TODO: For now, just use this. Should actually use perpendicular distance to line, though
+                centerpointData.data{:, 'Distance from Midline'} = ycenterData - midlineY_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+            end
         else
             % This should not happen due to argument validation
             error('Invalid SpeakerFlipAxes value: %s. Must be ''x'' or ''y''.', kvargs.SpeakerFlipAxes);
@@ -299,4 +398,25 @@ function t = makeTemplateTableByStim(stimuliMetadata, targetFPS)
 
     t.('Stimulus name') = strings(height(t), 1);
     t.('Stimulus name')(validMask) = assignedTitles;
+end
+
+
+function points = mirrorPointsAcrossLine(points, lineX, lineY)
+    % Define line passing through P1(x1,y1) and P2(x2,y2)
+    x1 = lineX(1); y1 = lineY(1);
+    x2 = lineX(2); y2 = lineY(2);
+    
+    % Line equation: Ax + By + C = 0
+    A = y1 - y2;
+    B = x2 - x1;
+    C = -A*x1 - B*y1;
+    
+    % Calculate reflection
+    M = A^2 + B^2;
+    if M > 0
+        val = A .* points(:,1) + B .* points(:,2) + C;
+        factor = -2 * val / M;
+        points(:,1) = points(:,1) + factor * A;
+        points(:,2) = points(:,2) + factor * B;
+    end
 end

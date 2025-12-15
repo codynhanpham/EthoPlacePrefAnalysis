@@ -9,7 +9,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %       masterMetadataTable - The master metadata table loaded from an Excel file with io.metadata.loadMasterMetadata
     %
     %   Name-Value Pair Arguments:
-    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
+    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml()
     %
     %   Outputs:
     %       summary - A struct containing the analysis results:
@@ -24,13 +24,16 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %               * 'X center' - The corrected (via config) X center position of the animal in cm 
     %               * 'Y center' - The corrected (via config) Y center position of the animal in cm
     %               * 'Stimulus name' - The name of the stimulus being played at that time
+    %           + midline_x_px - The X coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
+    %           + midline_y_px - The Y coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
+    %           + px2cm - Conversion factor from pixels to centimeters (such that cm = px * px2cm)
     %           + stimulusStartTimeOffset - The time offset in seconds from the start of the trial to the start of the stimulus period
     %           + stimuliCorrected - A struct with fields: neg and pos, each containing a scalar string of the stimulus names played on that side, corrected by (flipped?) speaker position
     %               * left: stimulus name played on left side
     %               * right: stimulus name played on right side
     %           + speakerFlipped - Boolean indicating if the speaker positions were flipped for this trial
     %               Whether this trial had the left/right speaker positions flipped compared to the default configuration originally
-    %        stimuliMetadata - metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
+    %           + stimuliMetadata - metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
     %
     %
     %   See also: io.ethovision.alignEthovisionRawToStim, io.metadata.loadMasterMetadata, io.config.loadConfigYaml, io.stimuli.extractMetadata
@@ -40,7 +43,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         stimuliDir {mustBeFolder}
         masterMetadataTable {validator.mustBeFileOrTable}
 
-        kvargs.Config (1,1) struct = struct()
+        kvargs.Config (1,1) struct = struct() % The full configuration struct loaded with io.config.loadConfigYaml()
     end
 
     [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
@@ -179,15 +182,153 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
     centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
     
-    % Convert to image coordinates (flip Y-axis to match imshow coordinate system)
-    centerPos(:,2) = vidHeight - centerPos(:,2);
+    % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
+    centerPos(:,2) = vidHeight * pixelsize - centerPos(:,2);
     trialTime = stimPeriodTable{:,'Trial time'};
 
 
-    % MidlineX and midlineY, corrected by midline_xoffset_px an midline_yoffset_px from config
-    midlineX = vidWidth / 2;
-    midlineY = vidHeight / 2;
-    % Add offset here
+    fromConfigKey = {'defaults', 'xflip'};
+    xflip = false; % default value for compat with older code
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        xflip = getfield(configs, fromConfigKey{:});
+        if ~islogical(xflip)
+            try
+                xflip = logical(xflip);
+            catch ME
+                xflip = false;
+                warning('graphics:trialPlacePref:xflip:InvalidValue', 'Invalid value for xflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+            end
+        end
+    end
+    fromConfigKey = {'defaults', 'yflip'};
+    yflip = false; % default value for compat with older code
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        yflip = getfield(configs, fromConfigKey{:});
+        if ~islogical(yflip)
+            try
+                yflip = logical(yflip);
+            catch ME
+                yflip = false;
+                warning('graphics:trialPlacePref:yflip:InvalidValue', 'Invalid value for yflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+            end
+        end
+    end
+
+
+    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    refmode = 'line'; % default
+    fromConfigKey = {'defaults', 'distance2refmode'};
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        refmode = getfield(configs, fromConfigKey{:});
+        if iscell(refmode)
+            refmode = string(refmode{1});
+        end
+        if ~ismember(refmode, ["point", "line"])
+            refmode = 'line'; % fallback to default
+            warning("trial:stats:trialSummary:InvalidConfig", "Invalid config value for 'defaults.distance2refmode': %s. Falling back to 'line'.", refmode);
+        end
+    end
+    [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+    switch refmode
+        % Note that in any condition, at this point centerPos already has been converted to image coordinates (top-left is (0,0)) AND adjusted by CenterOffset_px from config
+        % Any offset for midpoint/midline is relative to the size of the video frame itself
+        case 'point'
+            % Default values: midpoint is at center of video frame
+            midlineX = vidWidth / 2;
+            midlineY = vidHeight / 2;
+            midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
+            if ~isfile(midPointFilePath)
+                % Find any existing midpoint files in the same directory and use that as default
+                midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
+                if ~isempty(midPointFiles)
+                    midPointFilePathFallback = fullfile(videoDir, midPointFiles(end).name);
+                    % clone this file to be the current video's midpoint file
+                    copyfile(midPointFilePathFallback, midPointFilePath);
+                end
+            end
+
+            % If midpoint file exists, load that as reference point
+            fromfile_ok = false;
+            if isfile(midPointFilePath)
+                try
+                    midpointData = readtable(midPointFilePath);
+                    if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
+                        midlineX = midpointData.x(1);
+                        midlineY = midpointData.y(1);
+                        fromfile_ok = true;
+                    end
+                catch ME
+                    warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
+                end
+            end
+            if ~fromfile_ok
+                % Use Distance to point when available as secondary fallback if loading from file failed
+                % For 'point' mode, this is often much better than just assume the center of the frame
+                if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
+                    distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are absolute values, need to determine sign based on X position!
+                    assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
+
+                    % Determine sign based on X position relative to the mid-point (X0, Y0)
+                    centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+                    % Find the coordinate of the midpoint (where the distance to point was measured from)
+                    % EthoVision doesn't provide this directly, so we have to calculate it manually
+                    refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
+                    % Since refPoint was calc using the raw X,Y center positions in cm in the data table, we need to re-apply offsets and convert to px
+                    refPoint(1) = refPoint(1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+                    refPoint(2) = refPoint(2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+                    refPoint = refPoint / pixelsize; % convert to px
+                    midlineX = refPoint(1);
+                    midlineY = refPoint(2);
+                end
+            end
+
+
+        case 'line'
+            % Default values: midline is vertical line at center of video frame
+            midlineX = [vidWidth/2, vidWidth/2];
+            midlineY = [0, vidHeight];
+            midLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.midline.csv'));
+            if ~isfile(midLineFilePath)
+                % Find any existing midline files in the same directory and use that as default
+                midLineFiles = dir(fullfile(videoDir, '*.midline.csv'));
+                if ~isempty(midLineFiles)
+                    midLineFilePathFallback = fullfile(videoDir, midLineFiles(end).name);
+                    % clone this file to be the current video's midline file
+                    copyfile(midLineFilePathFallback, midLineFilePath);
+                end
+            end
+            % If midline file exists, load that as reference line
+            if isfile(midLineFilePath)
+                try
+                    midlineData = readtable(midLineFilePath);
+                    if all(ismember({'x', 'y'}, midlineData.Properties.VariableNames))
+                        % Get the first two points to define the midline
+                        midlineX = midlineData.x(1:2)';
+                        midlineY = midlineData.y(1:2)';
+                    end
+                catch ME
+                    warning('graphics:trialPlacePref:midLineFilePath:LoadError', 'Error loading existing midline file: %s\n%s', midLineFilePath, ME.message);
+                end
+            end
+
+        otherwise
+            error("Unexpected refmode: %s", refmode);
+    end
+
+    % Mirror the centerPos coordinates if specified in config:
+    % Note that centerPos here is in cm, but translated to fits image coordinates (top-left is (0,0))
+    % If ref is point, simply use the point as the horizontal and/or vertical axis of symmetry
+    % If ref is line, use the line as the axis of symmetry
+    if strcmpi(refmode, 'point')
+        if xflip
+            centerPos(:,1) = 2 * (midlineX * pixelsize) - centerPos(:,1);
+        end
+        if yflip
+            centerPos(:,2) = 2 * (midlineY * pixelsize) - centerPos(:,2);
+        end
+    elseif strcmpi(refmode, 'line')
+        centerPos = mirrorPointsAcrossLine(centerPos, midlineX * pixelsize, midlineY * pixelsize);
+    end
 
 
 
@@ -205,8 +346,8 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     centerpointData = struct(...
         'fps', mean(diff(stimPeriodTable{:,'Trial time'}))^-1, ...
         'data', cpdata, ...
-        'midline_xoffset_px', midlineX, ...
-        'midline_yoffset_px', midlineY, ...
+        'midline_x_px', midlineX, ...
+        'midline_y_px', midlineY, ...
         'px2cm', pixelsize, ... % conversion factor such that cm = px * px2cm
         'stimulusStartTimeOffset', offset, ...
         'stimuliCorrected', stimuliCorrected, ...
@@ -214,4 +355,54 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         'stimuliMetadata', stimuli ...
     );
 
+end
+
+
+
+function refPoint = findReferencePointLinear(xyCoords, distances)
+    % Filter out NaN values
+    validIdx = ~isnan(xyCoords(:,1)) & ~isnan(xyCoords(:,2)) & ~isnan(distances);
+    validCoords = xyCoords(validIdx, :);
+    validDistances = distances(validIdx);
+    
+    n = size(validCoords, 1);
+    if n < 2
+        error('Need at least 2 valid (non-NaN) points to calculate reference point. Found %d valid points.', n);
+    end
+    
+    % Use first valid point as reference for differencing
+    x1 = validCoords(1, 1); y1 = validCoords(1, 2); d1 = validDistances(1);
+    
+    % Build linear system Ax = b
+    A = zeros(n-1, 2);
+    b = zeros(n-1, 1);
+    
+    for i = 2:n
+        xi = validCoords(i, 1); yi = validCoords(i, 2); di = validDistances(i);
+        A(i-1, :) = 2 * [x1 - xi, y1 - yi];
+        b(i-1) = x1^2 - xi^2 + y1^2 - yi^2 + di^2 - d1^2;
+    end
+    
+    % Solve linear system
+    refPoint = (A \ b)';
+end
+
+function points = mirrorPointsAcrossLine(points, lineX, lineY)
+    % Define line passing through P1(x1,y1) and P2(x2,y2)
+    x1 = lineX(1); y1 = lineY(1);
+    x2 = lineX(2); y2 = lineY(2);
+    
+    % Line equation: Ax + By + C = 0
+    A = y1 - y2;
+    B = x2 - x1;
+    C = -A*x1 - B*y1;
+    
+    % Calculate reflection
+    M = A^2 + B^2;
+    if M > 0
+        val = A .* points(:,1) + B .* points(:,2) + C;
+        factor = -2 * val / M;
+        points(:,1) = points(:,1) + factor * A;
+        points(:,2) = points(:,2) + factor * B;
+    end
 end

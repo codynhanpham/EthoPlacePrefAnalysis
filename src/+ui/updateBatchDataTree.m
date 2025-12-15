@@ -20,19 +20,21 @@ function updateBatchDataTree(appTreeRootNode, batchData, kvargs)
         kvargs.Filters (:,1) {mustBeValidFiltersOrEmpty} = struct('sex', {cell(0)}, 'strain', {cell(0)}, 'genotype', {cell(0)})
     end
 
-    % if isempty(kvargs.Filters)
-    %     kvargs.Filters = struct('sex', {cell(0)}, 'strain', {cell(0)}, 'genotype', {cell(0)});
-    % else
-    %     % Assert as cellstr for easier comparison later
-    %     filterFields = fieldnames(kvargs.Filters);
-    %     for i = 1:length(filterFields)
-    %         if isempty(kvargs.Filters.(filterFields{i}))
-    %             continue; % No filter for this field
-    %         end
-    %         fieldValue = kvargs.Filters.(filterFields{i});
-    %         kvargs.Filters.(filterFields{i}) = cellstr(fieldValue);
-    %     end
-    % end
+    if isempty(kvargs.Filters)
+        kvargs.Filters = struct('sex', {cell(0)}, 'strain', {cell(0)}, 'genotype', {cell(0)});
+    else
+        % Assert as cellstr for easier comparison later
+        filterFields = fieldnames(kvargs.Filters);
+        for i = 1:length(filterFields)
+            if isempty(kvargs.Filters.(filterFields{i}))
+                continue; % No filter for this field
+            end
+            fieldValue = kvargs.Filters.(filterFields{i});
+            kvargs.Filters.(filterFields{i}) = cellstr(fieldValue);
+        end
+    end
+
+    ;;kvargs.Filters
 
     % Handle empty or invalid batchData
     if isempty(batchData) || ~isfield(batchData, 'dir')

@@ -24,6 +24,10 @@ defaults:
   audio_metadata_extract_bin: #"./src/+io/+stimuli/metadata_extract.exe" # When not specfied, the pre-bundled binary will be used (path shown here)
   # If the metadata_extract binary is not found anywhere, you can also specify the path to the full nidaq_audioplayer executable app as alternative
   nidaq_audioplayer_bin: #"%LOCALAPPDATA%/NI-DAQmxAudioPlayer/nidaq_audioplayer.exe" # This is the default installation path, though update to reflect your actual installation if needed
+  
+  xflip: true
+  yflip: false
+  distance2refmode: "point"
 
 tracking_providers:
   # Specify the settings for your tracking platform here
@@ -41,8 +45,6 @@ tracking_providers:
     default_camera_imgwidth_fov_cm: 95.3 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
     default_camera_center_offset_px: [0, 0] # EthoVision coordinates' origin is the center of the image; specify an offset here if your arena/area of interest is not perfectly centered in the camera view. Default is [0,0].
     default_zone_match_method: "startsWith"  # method to match the zone name set here to the ones set in EthoVision; one of these: "exact", "startsWith", "endsWith", "contains". Default is "startsWith".
-
-    xflip: true
 
     arena:
       # When using multiple arenas or different arena configs exist, specify them here

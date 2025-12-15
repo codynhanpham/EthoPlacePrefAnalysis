@@ -288,12 +288,17 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
 
     %% L/R DISTANCE FROM MIDLINE OVER TIME
 
-    fromConfigKey = {'tracking_providers', 'EthoVision', 'xflip'};
+    fromConfigKey = {'defaults', 'xflip'};
     xflip = false; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         xflip = getfield(configs, fromConfigKey{:});
-        if iscell(xflip)
-            xflip = cell2mat(ImgWidthFOV_cm);
+        if ~islogical(xflip)
+            try
+                xflip = logical(xflip);
+            catch ME
+                xflip = false;
+                warning('graphics:trialPlacePref:xflip:InvalidValue', 'Invalid value for xflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+            end
         end
     end
 
@@ -302,7 +307,17 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     trialTime = stimPeriodTable{:,'Trial time'};
     [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
     midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
-    % If midpoint file exists, load that as default reference point
+    if ~isfile(midPointFilePath)
+        % Find any existing midpoint files in the same directory and use that as default
+        midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
+        if ~isempty(midPointFiles)
+            midPointFilePathFallback = fullfile(videoDir, midPointFiles(end).name);
+            % clone this file to be the current video's midpoint file
+            copyfile(midPointFilePathFallback, midPointFilePath);
+        end
+    end
+
+    % If midpoint file exists, load that as reference point
     if isfile(midPointFilePath)
         try
             midpointData = readtable(midPointFilePath);
@@ -319,6 +334,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
             end
         catch ME
             warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
+            distFromMidline_cm = []; % reset to empty to fallback to EthoVision data
         end
     end
 
@@ -327,13 +343,13 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     % Otherwise, compute distance from midline using X center position only
     if isempty(distFromMidline_cm)
         if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
-            distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are all positive values, need to determine sign based on X position!
+            distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are absolute values, need to determine sign based on X position!
             assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
 
             % Determine sign based on X position relative to the mid-point (X0, Y0)
             centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
             % Find the coordinate of the midpoint (where the distance to point was measured from)
-            % EthoVision doesn't provide this directly, so we have to calculate it via intersection of circles
+            % EthoVision doesn't provide this directly, so we have to calculate it manually
             refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
             distFromMidline_cm = sign((centerPos_cm(:,1) - refPoint(1))) .* distFromMidline_cm;
             if xflip

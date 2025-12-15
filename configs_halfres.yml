@@ -9,14 +9,16 @@ defaults:
   nidaq_audioplayer_bin: #"%LOCALAPPDATA%/NI-DAQmxAudioPlayer/nidaq_audioplayer.exe"
   audio_metadata_extract_bin: #"./src/+io/+stimuli/metadata_extract.exe"
 
+  xflip: false
+  yflip: false
+  distance2refmode: "line"
+
 tracking_providers:
   EthoVision:
     # Default settings applied to all sub-categories unless overridden 
     coordsUnit: "cm"
     default_camera_imgwidth_fov_cm: 58.5
     default_camera_center_offset_px: [0, 0]
-    midline_xoffset_px: 0  # x-offset of midline from center of arena, in pixels (positive = right, negative = left)
-    midline_yoffset_px: 0  # y-offset of midline from center of arena, in pixels (positive = down, negative = up)
     default_zone_match_method: "startsWith"  # one of these: "exact", "startsWith", "endsWith", "contains"
 
     arena:
@@ -25,8 +27,6 @@ tracking_providers:
       - name: "Arena 1"
         camera_imgwidth_fov_cm: 58.5
         camera_center_offset_px: [0, 0]
-        midline_xoffset_px: 0
-        midline_yoffset_px: 0
         zone:
           left: Left
           right: Right
@@ -35,8 +35,6 @@ tracking_providers:
       - name: "Lily Booth"
         camera_imgwidth_fov_cm: 77.4
         camera_center_offset_px: [480, 0]
-        midline_xoffset_px: 0
-        midline_yoffset_px: 0
         zone:
           left: Left 1
           right: Right 1
@@ -45,8 +43,6 @@ tracking_providers:
       - name: "Rain Booth"
         camera_imgwidth_fov_cm: 77.4
         camera_center_offset_px: [-480, 0]
-        midline_xoffset_px: 0
-        midline_yoffset_px: 0
         zone:
           left: Left 2
           right: Right 2
