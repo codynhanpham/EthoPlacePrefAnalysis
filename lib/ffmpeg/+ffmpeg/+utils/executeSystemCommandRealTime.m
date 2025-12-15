@@ -11,7 +11,7 @@ function [exitCode] = executeSystemCommandRealTime(command, stdoutCallback)
 
 arguments
     command {mustBeTextScalar}
-    stdoutCallback (1,1) function_handle = @(varargin)[]
+    stdoutCallback {mustBeFunctionHandleOrEmpty} = [] % or @(varargin)[]
 end
 
 command = char(command);
@@ -40,14 +40,18 @@ try
 
     % Read output line by line in real-time
     line = reader.readLine();
-    while ~isempty(line)
-        % Convert Java string to MATLAB string
-        matlabLine = char(line);
-
-        stdoutCallback(matlabLine);
-
-        % Try to read next line (non-blocking)
-        line = reader.readLine();
+    if ~isempty(stdoutCallback)
+        if ~isempty(line)
+            while ~isempty(line)
+                % Convert Java string to MATLAB string
+                matlabLine = char(line);
+        
+                stdoutCallback(matlabLine);
+        
+                % Try to read next line (non-blocking)
+                line = reader.readLine();
+            end
+        end
     end
 
     % Wait for process to complete and get exit code
@@ -121,5 +125,13 @@ function cmdParts = parseCommandLine(command)
         if ~isempty(arg)
             cmdParts{end+1} = arg; %#ok<AGROW>
         end
+    end
+end
+
+
+
+function mustBeFunctionHandleOrEmpty(x)
+    if ~isempty(x) && ~isa(x, 'function_handle') && ~isscalar(x)
+        error('Value must be a scalar function_handle or empty.');
     end
 end

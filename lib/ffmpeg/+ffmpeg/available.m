@@ -7,9 +7,18 @@ function [bool, bin] = available()
     %   bool (logical): true if ffmpeg is available
     %   bin (char): path to ffmpeg binary, if available, otherwise empty
     %
-    % If you do not have ffmpeg installed system/user-wide, grab the executables for your OS at https://www.ffmpeg.org/download.html and place them in the "bin" folder located in this package '/lib/ffmpeg/+ffmpeg/bin'
+    % If you do not have ffmpeg installed system/user-wide, grab the executables for your OS at https://www.ffmpeg.org/download.html and place them in the "bin" folder located in this package '/lib/ffmpeg/bin'
 
+    persistent cachedFFmpegAvailable cachedFFmpegBin
+    
     [status, ~] = system('ffmpeg -version');
+
+    if ~isempty(cachedFFmpegAvailable) && ~isempty(cachedFFmpegBin) && status == 0
+        bool = cachedFFmpegAvailable;
+        bin = cachedFFmpegBin;
+        return
+    end
+
     if status == 0
         bool = true;
         % Log the base output of system commands (some can inject leading warning/error messages before actual command output)
@@ -44,4 +53,7 @@ function [bool, bin] = available()
     end
     bool = false;
     bin = '';
+
+    cachedFFmpegAvailable = bool;
+    cachedFFmpegBin = bin;
 end

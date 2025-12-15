@@ -381,6 +381,9 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             end
 
             timestampSec = (0:(nFrames-1))' / FPS;
+            %TODO: Replace this with actual frame time via pts (using ffprobe) instead of assuming constant FPS
+
+
             metadata = struct();
             metadata.FPS = FPS;
             metadata.px2cmFactor = pixelSize;

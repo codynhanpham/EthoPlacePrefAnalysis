@@ -25,7 +25,7 @@ function [status, cmdout] = vertSplit(input, outputTop, outputBottom, kvargs)
 
         kvargs.Overwrite (1,1) logical = false
         kvargs.Echo (1,1) logical = false
-        kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin)[];
+        kvargs.UpdateCallbackFcn {ffmpeg.validator.mustBeFunctionHandleOrEmpty} = [];
     end
 
     if ~kvargs.Overwrite
@@ -38,7 +38,7 @@ function [status, cmdout] = vertSplit(input, outputTop, outputBottom, kvargs)
 
     [s,bin] = ffmpeg.available();
     if ~s
-        error('FFmpeg is not available on the system. Either install FFmpeg system-wide, or place the binaries in the ffmpeg/+ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
+        error('FFmpeg is not available on the system. Either install FFmpeg system-wide, or place the binaries in the ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
     end
 
     input = string(input);
@@ -70,6 +70,6 @@ function [status, cmdout] = vertSplit(input, outputTop, outputBottom, kvargs)
     
 
     if status ~= 0
-        error('ffmpeg:horzSplit:ExecutionFailed', 'FFmpeg horzSplit execution failed with exit code %d', status);
+        error('ffmpeg:vertSplit:ExecutionFailed', 'FFmpeg vertSplit execution failed with exit code %d', status);
     end
 end

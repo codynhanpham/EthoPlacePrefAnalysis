@@ -1,18 +1,18 @@
 function [status, cmdout] = run(args, kvargs)
-    %%RUN Run ffmpeg command with specified arguments
+    %%RUN Run ffprobe command with specified arguments
     %
     %  [status, cmdout] = run(args)
     %
     % Input:
-    %   args - string or char array of ffmpeg command-line arguments (excluding 'ffmpeg' itself)
+    %   args - string or char array of ffprobe command-line arguments (excluding 'ffprobe' itself)
     %
     % Name-Value Pair Arguments:
-    %   'Echo' (logical): whether to echo ffmpeg command output to command window (default: false)
+    %   'Echo' (logical): whether to echo ffprobe command output to command window (default: false)
     %   'UpdateCallbackFcn' (function handle): callback function to run when progress updates occur (default: none)
     %
     % Output:
-    %   status - status of the ffmpeg command (0 if successful)
-    %   cmdout - command output from ffmpeg
+    %   status - status of the ffprobe command (0 if successful)
+    %   cmdout - command output from ffprobe
     %
     % Example:
     %   [status, cmdout] = ffmpeg.run('-i input.mp4 -c:v libx264 output.mp4', 'Echo', true);
@@ -25,9 +25,9 @@ function [status, cmdout] = run(args, kvargs)
         kvargs.UpdateCallbackFcn {ffmpeg.validator.mustBeFunctionHandleOrEmpty} = []
     end
 
-    [s,bin] = ffmpeg.available();
+    [s,bin] = ffprobe.available();
     if ~s
-        error('FFmpeg is not available on the system. Either install FFmpeg system-wide, or place the binaries in the ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
+        error('FFprobe is not available on the system. Either install FFprobe system-wide (typically, it should be installed alongside FFmpeg), or place the binaries in the ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
     end
 
     args = string(args);
@@ -42,7 +42,6 @@ function [status, cmdout] = run(args, kvargs)
         
         % Append line to cmdout with newline
         cmdout = [cmdout, line, newline];
-        
         if ~isempty(kvargs.UpdateCallbackFcn)
             kvargs.UpdateCallbackFcn(line);
         end
@@ -58,6 +57,6 @@ function [status, cmdout] = run(args, kvargs)
     
 
     if status ~= 0
-        error('ffmpeg:run:ExecutionFailed', 'FFmpeg run(_) execution failed with exit code %d', status);
+        error('ffprobe:run:ExecutionFailed', 'FFprobe run(_) execution failed with exit code %d.\n%s', status, cmdout);
     end
 end
