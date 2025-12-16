@@ -47,7 +47,7 @@ function [bool, bin] = available()
         [status, ~] = system(['"', bin, '" -version']);
         if status == 0
             bool = true;
-            bin = ffmpeg.utils.canonicalize(char(bin));
+            bin = ffmpeg.validator.canonicalize(char(bin));
             return
         end
     end
