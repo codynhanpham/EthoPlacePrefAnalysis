@@ -42,7 +42,7 @@ tracking_providers:
     # Default settings applied to all sub-categories unless overridden 
     coordsUnit: "cm" # The unit of the coordinates in the EthoVision tracking data; set in Arena Settings. Default is "cm". This must be consistent across all arenas used in your experiments.
 
-    default_camera_imgwidth_fov_cm: 95.3 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+    default_camera_imgwidth_fov_cm: 93.5 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
     default_camera_center_offset_px: [0, 0] # EthoVision coordinates' origin is the center of the image; specify an offset here if your arena/area of interest is not perfectly centered in the camera view. Default is [0,0].
     default_zone_match_method: "startsWith"  # method to match the zone name set here to the ones set in EthoVision; one of these: "exact", "startsWith", "endsWith", "contains". Default is "startsWith".
 
@@ -52,7 +52,7 @@ tracking_providers:
       # The arenas set here should be a superset of all arenas used in your experiments
 
       - name: "Arena 1" # required: name of the arena as specified in EthoVision
-        camera_imgwidth_fov_cm: 95.3
+        camera_imgwidth_fov_cm: 93.5
         camera_center_offset_px: [0, 0]
         zone: # required: list of zone names as specified in EthoVision for this arena matched to left/right sides of the place preference setup
           left: Left

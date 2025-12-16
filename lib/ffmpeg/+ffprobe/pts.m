@@ -20,19 +20,21 @@ function [pts, timebase] = pts(inputFile, kvargs)
         kvargs.UpdateCallbackFcn {ffmpeg.validator.mustBeFunctionHandleOrEmpty} = []
     end
 
-    args = sprintf('-v quiet -print_format json -show_packets -select_streams v:0 -show_entries packet=pts -i "%s"', inputFile);
+    args = sprintf('-v 0 -select_streams V:0 -show_entries packet=pts -of default=noprint_wrappers=1:nokey=1 "%s"', inputFile);
     [status, cmdout] = ffprobe.run(args, 'Echo', false, 'UpdateCallbackFcn', kvargs.UpdateCallbackFcn);
 
     if status ~= 0
         error('ffprobe:pts:ExecutionFailed', 'FFprobe pts(_) execution failed with exit code %d', status);
     end
-    data = jsondecode(cmdout);
-    packets = data.packets;
-    pts = zeros(length(packets), 1);
-    for k = 1:length(packets)
-        pts(k) = packets(k).pts;
-    end
-
+    
+    % Parse output
+    data = textscan(cmdout, '%f', 'TreatAsEmpty', 'N/A');
+    pts = data{1};
+    
+    % Filter out NaNs if any
+    pts = pts(~isnan(pts));
+    
+    pts = sort(pts);  % Ensure sorted order
     % Also get timebase
     timebase = ffprobe.timebase(inputFile);
 end

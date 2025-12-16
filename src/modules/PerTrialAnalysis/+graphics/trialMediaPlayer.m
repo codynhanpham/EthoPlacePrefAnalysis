@@ -33,12 +33,17 @@ pixelSize = [];
 bpColors = [];
 bodypartNames = strings(0);
 centerPointBodyPartIndex = [];
+frameTimestamps = [];
+
 if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && isfile(kvargs.TrackingDataFile) && ~isempty(kvargs.TrackingProvider)
     try
         [timestampSec, coords, metadata] = kvargs.TrackingProvider.loadTrackingCoordsPixels(kvargs.TrackingDataFile);
         % Assign outputs
         trackData = coords; % Nx2xM
         trackDataTime = timestampSec;
+        
+        % Use tracking timestamps for video navigation
+        frameTimestamps = timestampSec;
 
         % Bodypart names and center detection
         if isfield(metadata, 'bodyparts') && ~isempty(metadata.bodyparts)
@@ -90,13 +95,27 @@ end
 try
     videoObj = VideoReader(fullPath);
     frameRate = videoObj.FrameRate;
-    totalFrames = videoObj.NumFrames;
     vidWidth = videoObj.Width;
     vidHeight = videoObj.Height;
 catch
     uialert(uifigure, 'Error: Could not read the video file. Please check the file format and permissions.', 'Error');
     return;
 end
+
+% Determine frame timestamps if not already set by tracking
+if isempty(frameTimestamps)
+    try
+        % Try to use ffprobe to get PTS
+        [pts, timebase] = ffprobe.pts(fullPath);
+        frameTimestamps = pts * timebase;
+    catch
+        % Fallback to constant frame rate if ffprobe fails or not available
+        warning('graphics:trialMediaPlayer:FFprobeFailed', 'Could not get PTS from ffprobe. Falling back to constant frame rate.');
+        frameTimestamps = (0:videoObj.NumFrames-1)' / frameRate;
+    end
+end
+
+totalFrames = length(frameTimestamps);
 
 [screensize, videoaspect] = deal(get(0, 'ScreenSize'), vidWidth / vidHeight);
 extendHeight = 118; % controller offset
@@ -170,12 +189,36 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'trackData', trackData, 'trackDataTime', trackDataTime, 'pixelSize', pixelSize, 'lastFrameTime', tic, ...
     'showTracking', true, 'fastMode', false, 'showFps', false, ...
     'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic, ...
-    'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex);
+    'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex, ...
+    'frameTimestamps', frameTimestamps, 'frameTimestampEdges', [], 'overlayHandles', gobjects(0), ...
+    'lastSeekTime', NaN, 'videoFile', fullPath);
+
+% Precompute timestamp bin edges for fast time->index mapping
+try
+    ts = appData.frameTimestamps(:);
+    if numel(ts) >= 2
+        mids = (ts(1:end-1) + ts(2:end)) / 2;
+        appData.frameTimestampEdges = [-Inf; mids; Inf];
+    elseif isscalar(ts)
+        appData.frameTimestampEdges = [-Inf; Inf];
+    else
+        appData.frameTimestampEdges = [];
+    end
+catch
+    appData.frameTimestampEdges = [];
+end
 
 
 % Set up a keyboard listener on the figure
 set(fig, 'WindowKeyPressFcn', @keyPressCallback);
-displayFrameWithTrack(1); % Show first frame with tracking overlay
+
+% Slider behavior:
+% - While stopped: drag updates label only; release seeks once.
+% - While playing: first drag pauses; release seeks.
+slider.ValueChangingFcn = @(source, event) slider_valueChanging(event.Value);
+slider.ValueChangedFcn = @(source, event) slider_callback(source.Value);
+
+showFrameAtIndex(1); % Show first frame with tracking overlay
 togglePlayback();
 
 
@@ -229,20 +272,36 @@ function updateFpsDisplay()
     end
 end
 
-function displayFrameWithTrack(frameNum, realFrameTime)
+function displayFrameWithTrack(frameNum, ~)
     %%DISPLAYFRAMEWITHTRACK - Display a video frame with optional tracking overlay
     % Inputs:
-    %   frameNum - Video frame number to display (real frame)
+    %   frameNum - Video frame number to display (index in frameTimestamps)
     %   realFrameTime - Real time of the frame in seconds
-    %
-    %   realFrameTime is required when video frame rate differs (even slightly) with EthoVision tracking rate
-    %   since EthoVision will tracks and interpolate positions at a fixed time interval, while video frames may not align perfectly.
-    if nargin < 2
-        realFrameTime = [];
+    
+    if frameNum < 1 || frameNum > length(appData.frameTimestamps)
+        return;
     end
 
-    frame = read(appData.videoObj, frameNum);
+    % Get timestamp for the requested frame
+    t = appData.frameTimestamps(frameNum);
+    
+    ensureVideoObjAtTime(t);
+    try
+        if ~hasFrame(appData.videoObj)
+            return;
+        end
+        % VideoReader.CurrentTime typically advances *after* readFrame().
+        % Capture it before reading so tracking aligns with the displayed frame.
+        realFrameTime = appData.videoObj.CurrentTime;
+        frame = readFrame(appData.videoObj);
+    catch
+        return;
+    end
 
+    renderFrameWithTrack(frame, realFrameTime);
+end
+
+function renderFrameWithTrack(frame, realFrameTime)
     % Create a persistent image object that fills the axes and simply update
     % its CData each frame. This avoids imshow's axis resets and margins.
     if isempty(appData.imgHandle) || ~isvalid(appData.imgHandle)
@@ -265,39 +324,28 @@ function displayFrameWithTrack(frameNum, realFrameTime)
             'Box', 'off');
         
         axis(appData.videoAxes, 'tight');
-        
-        % Let layout manager handle positioning to center the content
         drawnow;
     else
-        % Update the image content
         set(appData.imgHandle, 'CData', frame);
     end
 
-    % Clear previous overlay graphics but keep the base image and FPS text (if any)
+    % Clear previous overlay graphics
     try
-        kids = appData.videoAxes.Children;
-        keep = appData.imgHandle;
-        if ~isempty(appData.fpsTextHandle) && isvalid(appData.fpsTextHandle)
-            keep = [keep; appData.fpsTextHandle];
-        end
-        toDelete = setdiff(kids, keep);
-        if ~isempty(toDelete)
-            delete(toDelete);
+        if ~isempty(appData.overlayHandles)
+            delete(appData.overlayHandles(isvalid(appData.overlayHandles)));
         end
     catch
-        % Safe-guard: ignore deletion errors
     end
+    appData.overlayHandles = gobjects(0);
 
-    % Draw tracking data if available and enabled
-    if ~isempty(appData.trackData) && frameNum <= size(appData.trackData, 1) && appData.showTracking
+    if ~isempty(appData.trackData) && appData.showTracking
         hold(appData.videoAxes, 'on');
 
-        % Determine the current tracking frame index based on real time if provided
-        trackFrame = frameNum;
+        trackFrame = 1;
         if ~isempty(realFrameTime) && ~isempty(appData.trackDataTime)
-            % Find the closest value (s) in the trackDataTime
             [~, trackFrame] = min(abs(appData.trackDataTime - realFrameTime));
         end
+        trackFrame = max(1, min(trackFrame, size(appData.trackData, 1)));
 
         % Draw the trail of the last N frames using the center bodypart (if present)
         trackHistoryLength = 125;
@@ -312,53 +360,45 @@ function displayFrameWithTrack(frameNum, realFrameTime)
                 xTrack = xTrack(:);
                 yTrack = yTrack(:);
 
-                % Remove NaN values but keep track of original indices for color mapping
                 validIdx = ~isnan(xTrack) & ~isnan(yTrack);
-
                 if any(validIdx)
                     xValid = xTrack(validIdx);
                     yValid = yTrack(validIdx);
 
                     numPoints = length(xValid);
                     if numPoints > 1
-                        % Create matrices for all line segments
                         x_segments = [xValid(1:end-1), xValid(2:end)]';
                         y_segments = [yValid(1:end-1), yValid(2:end)]';
 
-                        % Pre-compute all colors and properties
-                        segmentIndices = (1:numPoints-1) / (numPoints-1); % Normalize to [0,1]
-                        segColors = [segmentIndices', zeros(numPoints-1, 1), 1-segmentIndices']; % Blue to red
-                        alphas = 0.3 + 0.7 * segmentIndices'; % Progressive alpha
-                        lineWidths = 1 + 2 * segmentIndices'; % Progressive width
+                        segmentIndices = (1:numPoints-1) / (numPoints-1);
+                        segColors = [segmentIndices', zeros(numPoints-1, 1), 1-segmentIndices'];
+                        alphas = 0.3 + 0.7 * segmentIndices';
+                        lineWidths = 1 + 2 * segmentIndices';
 
                         x_plot = [x_segments; NaN(1, size(x_segments, 2))];
                         y_plot = [y_segments; NaN(1, size(y_segments, 2))];
 
-                        % Plot segments in batches by line width to reduce plot calls
                         if appData.fastMode
                             meanColor = mean(segColors, 1);
                             meanAlpha = mean(alphas);
                             meanWidth = mean(lineWidths);
-                            line(appData.videoAxes, x_plot(:), y_plot(:), ...
+                            h = line(appData.videoAxes, x_plot(:), y_plot(:), ...
                                 'Color', [meanColor, meanAlpha], 'LineWidth', meanWidth);
+                            appData.overlayHandles(end+1,1) = h;
                         else
                             uniqueWidths = unique(round(lineWidths * 2) / 2);
-
                             for w = uniqueWidths'
                                 widthMask = abs(lineWidths - w) < 0.25;
                                 if any(widthMask)
-                                    % Get segments for this width
                                     batchX = x_plot(:, widthMask);
                                     batchY = y_plot(:, widthMask);
                                     batchColors = segColors(widthMask, :);
                                     batchAlphas = alphas(widthMask);
-
-                                    % Use mean color and alpha for this batch
                                     meanColor = mean(batchColors, 1);
                                     meanAlpha = mean(batchAlphas);
-
-                                    line(appData.videoAxes, batchX(:), batchY(:), ...
+                                    h = line(appData.videoAxes, batchX(:), batchY(:), ...
                                         'Color', [meanColor, meanAlpha], 'LineWidth', w);
+                                    appData.overlayHandles(end+1,1) = h;
                                 end
                             end
                         end
@@ -379,7 +419,6 @@ function displayFrameWithTrack(frameNum, realFrameTime)
             xParts = xParts(:);
             yParts = yParts(:);
 
-            % Bounds and NaN checks
             inBounds = xParts > 0 & xParts <= size(frame, 2) & ...
                        yParts > 0 & yParts <= size(frame, 1);
             validMask = ~isnan(xParts) & ~isnan(yParts) & inBounds;
@@ -387,33 +426,78 @@ function displayFrameWithTrack(frameNum, realFrameTime)
             if any(validMask)
                 ptColors = appData.colors;
                 if size(ptColors, 1) ~= numel(xParts)
-                    % Safeguard: regenerate colors if mismatch
                     try
                         ptColors = lines(numel(xParts));
                     catch
                         ptColors = hsv(numel(xParts));
                     end
                 end
-                scatter(appData.videoAxes, xParts(validMask), yParts(validMask), 70, ptColors(validMask, :), 'filled', ...
+                h = scatter(appData.videoAxes, xParts(validMask), yParts(validMask), 70, ptColors(validMask, :), 'filled', ...
                     'MarkerEdgeColor', 'w', 'LineWidth', 1.2);
+                appData.overlayHandles(end+1,1) = h;
             end
         end
 
         hold(appData.videoAxes, 'off');
     end
 
-    % Update FPS display overlay
     updateFpsDisplay();
+end
+
+function idx = timeToFrameIndex(t)
+    try
+        if isempty(appData.frameTimestampEdges) || isempty(appData.frameTimestamps)
+            idx = max(1, min(appData.currentFrame, totalFrames));
+            return;
+        end
+        idx = discretize(t, appData.frameTimestampEdges);
+        if isempty(idx) || isnan(idx)
+            idx = 1;
+        end
+        idx = max(1, min(idx, totalFrames));
+    catch
+        idx = max(1, min(appData.currentFrame, totalFrames));
+    end
+end
+
+function ensureVideoObjAtTime(t)
+    try
+        if ~isfinite(t) || t < 0
+            t = 0;
+        end
+        if isfinite(appData.lastSeekTime) && t < appData.lastSeekTime
+            appData.videoObj = VideoReader(appData.videoFile);
+        end
+        appData.videoObj.CurrentTime = t;
+        appData.lastSeekTime = t;
+    catch
+        try
+            appData.videoObj = VideoReader(appData.videoFile);
+            appData.videoObj.CurrentTime = t;
+            appData.lastSeekTime = t;
+        catch
+        end
+    end
+end
+
+function showFrameAtIndex(frameNum)
+    frameNum = max(1, min(frameNum, totalFrames));
+    appData.currentFrame = frameNum;
+    displayFrameWithTrack(frameNum);
+    appData.slider.Value = frameNum;
+    appData.frameLabel.Value = frameNum;
 end
 
 function togglePlayback()
     if appData.isPlaying
         % Stop playback
         appData.isPlaying = false;
-        stop(appData.timer);
+        if ~isempty(appData.timer) && isvalid(appData.timer)
+            stop(appData.timer);
+            delete(appData.timer);
+        end
+        appData.timer = [];
         playButton.Text = 'Play';
-
-        slider.ValueChangingFcn = @(source, event) slider_callback(event.Value);
     else
         % Start playback
         appData.isPlaying = true;
@@ -424,8 +508,6 @@ function togglePlayback()
         appData.startTime = tic;
         appData.fpsHistory = [repmat(frameRate, 1, round(frameRate))]; % Reset history
 
-        % Slider value-changing callback will pause playback and jump
-        slider.ValueChangingFcn = @(source, event) pauseAndJump(event.Value);
         % Set up a timer to read frames with more aggressive timing
         targetPeriod = 1/frameRate;
         % Use a faster period to compensate for rendering overhead
@@ -439,61 +521,104 @@ end
 
 function updateFrame()
     % Check if the figure is still open and video has more frames
-    if ~isvalid(fig) || appData.currentFrame > totalFrames
+    % Stream decode: do NOT seek per frame; only readFrame sequentially.
+    if ~isvalid(fig)
+        try
+            togglePlayback();
+        catch
+        end
+        return;
+    end
+
+    if isempty(appData.videoObj)
+        try
+            appData.videoObj = VideoReader(appData.videoFile);
+        catch
+            togglePlayback();
+            return;
+        end
+    end
+
+    if ~hasFrame(appData.videoObj)
         togglePlayback();
         return;
     end
 
-    targetFrameTime = 1/frameRate;
+    targetPeriod = 1/frameRate;
     elapsedTime = toc(appData.lastFrameTime);
+    skipCount = max(1, min(5, floor(elapsedTime / targetPeriod)));
 
-    % Only render every few frames if we're behind
-    shouldRender = (elapsedTime >= targetFrameTime * 0.8) || ...
-        (mod(appData.currentFrame, max(1, floor(elapsedTime / targetFrameTime))) == 0);
+    try
+        for k = 1:(skipCount-1)
+            if hasFrame(appData.videoObj)
+                readFrame(appData.videoObj);
+            else
+                togglePlayback();
+                return;
+            end
+        end
 
-    if shouldRender
-        currentRealFrame = appData.currentFrame;
-        videoFps = appData.videoObj.FrameRate;
-        realFrameTime = currentRealFrame / videoFps;
-        % Display the frame with tracking overlay
-        displayFrameWithTrack(appData.currentFrame, realFrameTime);
-
-        % Update the UI elements
-        appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Value = appData.currentFrame;
-
-        appData.lastFrameTime = tic;
-        drawnow;
+        if hasFrame(appData.videoObj)
+            % Capture time before reading; CurrentTime advances after readFrame().
+            realFrameTime = appData.videoObj.CurrentTime;
+            frame = readFrame(appData.videoObj);
+        else
+            togglePlayback();
+            return;
+        end
+    catch
+        togglePlayback();
+        return;
     end
 
-    frameSkip = max(1, min(5, floor(elapsedTime / targetFrameTime))); % Skip up to 5 frames
-    appData.currentFrame = appData.currentFrame + frameSkip;
+    renderFrameWithTrack(frame, realFrameTime);
+
+    idx = timeToFrameIndex(realFrameTime);
+    appData.currentFrame = idx;
+    appData.slider.Value = idx;
+    appData.frameLabel.Value = idx;
+
+    appData.lastFrameTime = tic;
+    drawnow limitrate nocallbacks;
 end
 
 function pauseAndJump(newValue)
     % This function is called when the user drags the slider
     appData.isPlaying = false;
-    stop(appData.timer);
+    if ~isempty(appData.timer) && isvalid(appData.timer)
+        stop(appData.timer);
+        delete(appData.timer);
+    end
+    appData.timer = [];
     playButton.Text = 'Play';
 
-    appData.currentFrame = round(newValue);
-    currentRealFrame = appData.currentFrame;
-    videoFps = appData.videoObj.FrameRate;
-    realFrameTime = currentRealFrame / videoFps;
-    displayFrameWithTrack(appData.currentFrame, realFrameTime);
+    appData.currentFrame = max(1, min(round(newValue), totalFrames));
+    showFrameAtIndex(appData.currentFrame);
+end
 
+function slider_valueChanging(newValue)
+    if appData.isPlaying
+        pauseAndJump(newValue);
+    else
+        slider_drag(newValue);
+    end
+end
+
+function slider_drag(newValue)
+    if appData.isPlaying
+        return;
+    end
+    appData.currentFrame = max(1, min(round(newValue), totalFrames));
     appData.frameLabel.Value = appData.currentFrame;
 end
 
 function slider_callback(newValue)
     % Final callback after the user lets go of the slider
-    appData.currentFrame = round(newValue);
-    currentRealFrame = appData.currentFrame;
-    videoFps = appData.videoObj.FrameRate;
-    realFrameTime = currentRealFrame / videoFps;
-    displayFrameWithTrack(appData.currentFrame, realFrameTime);
-
-    appData.frameLabel.Value = appData.currentFrame;
+    if appData.isPlaying
+        return;
+    end
+    appData.currentFrame = max(1, min(round(newValue), totalFrames));
+    showFrameAtIndex(appData.currentFrame);
 end
 
 function jumpToFrame(frameNum)
@@ -503,24 +628,18 @@ function jumpToFrame(frameNum)
     % Pause playback if currently playing
     if appData.isPlaying
         appData.isPlaying = false;
-        stop(appData.timer);
+        if ~isempty(appData.timer) && isvalid(appData.timer)
+            stop(appData.timer);
+            delete(appData.timer);
+        end
+        appData.timer = [];
         playButton.Text = 'Play';
     end
     
-    appData.currentFrame = frameNum;
-    currentRealFrame = appData.currentFrame;
-    videoFps = appData.videoObj.FrameRate;
-    realFrameTime = currentRealFrame / videoFps;
-    displayFrameWithTrack(appData.currentFrame, realFrameTime);
-    
-    appData.slider.Value = appData.currentFrame;
-    appData.frameLabel.Value = appData.currentFrame;
+    showFrameAtIndex(frameNum);
 end
 
 function keyPressCallback(~, event)
-    currentRealFrame = appData.currentFrame;
-    videoFps = appData.videoObj.FrameRate;
-    realFrameTime = currentRealFrame / videoFps;
     switch event.Key
         case 'rightarrow'
             nextFrame();
@@ -530,7 +649,7 @@ function keyPressCallback(~, event)
             % Toggle tracking display for performance
             if ~isempty(appData.trackData)
                 appData.showTracking = ~appData.showTracking;
-                displayFrameWithTrack(appData.currentFrame, realFrameTime);
+                showFrameAtIndex(appData.currentFrame);
                 if appData.showTracking
                     fprintf('Tracking overlay: ON\n');
                 else
@@ -541,7 +660,7 @@ function keyPressCallback(~, event)
             % Toggle fast mode for tracking rendering
             if ~isempty(appData.trackData) && appData.showTracking
                 appData.fastMode = ~appData.fastMode;
-                displayFrameWithTrack(appData.currentFrame, realFrameTime);
+                showFrameAtIndex(appData.currentFrame);
                 if appData.fastMode
                     fprintf('Fast mode: ON (simplified trail rendering)\n');
                 else
@@ -572,15 +691,14 @@ function nextFrame()
     if appData.currentFrame < totalFrames
         % Pause playback and then advance
         appData.isPlaying = false;
-        stop(appData.timer);
+        if ~isempty(appData.timer) && isvalid(appData.timer)
+            stop(appData.timer);
+            delete(appData.timer);
+        end
+        appData.timer = [];
         playButton.Text = 'Play';
         appData.currentFrame = appData.currentFrame + 1;
-        currentRealFrame = appData.currentFrame;
-        videoFps = appData.videoObj.FrameRate;
-        realFrameTime = currentRealFrame / videoFps;
-        displayFrameWithTrack(appData.currentFrame, realFrameTime);
-        appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Value = appData.currentFrame;
+        showFrameAtIndex(appData.currentFrame);
     end
 end
 function prevFrame()
@@ -588,15 +706,14 @@ function prevFrame()
     if appData.currentFrame > 1
         % Pause playback and then go back
         appData.isPlaying = false;
-        stop(appData.timer);
+        if ~isempty(appData.timer) && isvalid(appData.timer)
+            stop(appData.timer);
+            delete(appData.timer);
+        end
+        appData.timer = [];
         playButton.Text = 'Play';
         appData.currentFrame = appData.currentFrame - 1;
-        currentRealFrame = appData.currentFrame;
-        videoFps = appData.videoObj.FrameRate;
-        realFrameTime = currentRealFrame / videoFps;
-        displayFrameWithTrack(appData.currentFrame, realFrameTime);
-        appData.slider.Value = appData.currentFrame;
-        appData.frameLabel.Value = appData.currentFrame;
+        showFrameAtIndex(appData.currentFrame);
     end
 end
 

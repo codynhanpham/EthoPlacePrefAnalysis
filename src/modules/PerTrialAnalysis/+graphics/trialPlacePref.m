@@ -81,7 +81,10 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     v = VideoReader(videoFilePath);
     vidWidth = v.Width;
     vidHeight = v.Height;
-    stimstartframedata = read(v, stimulusFrameRange(1));
+    % stimstartframedata = read(v, stimulusFrameRange(1)); % This assumes a constant frame rate video AND that all frames expected in EthoVision was recorded in the video file, which may not be the case!
+    v.CurrentTime = stimPeriodTable{1, 'Trial time'}; % in seconds
+    stimstartframedata = readFrame(v);
+
 
     pixelsize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
@@ -133,8 +136,8 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     axis(a, 'on');
     alphadata = zeros(size(d));
     alphadata(d > 0.0015) = 1;
-    alphadata(d > 0.0015 & d <= 0.005*max(d(:))) = 0.2;
-    alphadata(d > 0.005*max(d(:)) & d <= 0.01*max(d(:))) = 0.35;
+    alphadata(d > 0.0015 & d <= 0.005*max(d(:))) = 0.15;
+    alphadata(d > 0.005*max(d(:)) & d <= 0.01*max(d(:))) = 0.30;
     alphadata(d > 0.01*max(d(:)) & d <= 0.05*max(d(:))) = 0.5;
     alphadata(d > 0.05*max(d(:)) & d <= 0.18*max(d(:))) = 0.65;
     alphadata(d > 0.18*max(d(:)) & d <= 0.25*max(d(:))) = 0.75;

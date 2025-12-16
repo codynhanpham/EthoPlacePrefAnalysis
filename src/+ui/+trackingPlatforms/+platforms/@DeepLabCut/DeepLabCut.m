@@ -380,9 +380,10 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
                 coords(:, 2, b) = datatable.(yColName); % y
             end
 
-            timestampSec = (0:(nFrames-1))' / FPS;
-            %TODO: Replace this with actual frame time via pts (using ffprobe) instead of assuming constant FPS
-
+            % timestampSec = (0:(nFrames-1))' / FPS; % This assumes constant FPS!!!
+            % Slightly slower (need to extract PTS first), but more reliable for variable frame rate videos. The timestamps will reflect the actual real world frame times
+            [pts, timebase] = ffprobe.pts(header('Video file'));
+            timestampSec = double(pts) * double(timebase);
 
             metadata = struct();
             metadata.FPS = FPS;
