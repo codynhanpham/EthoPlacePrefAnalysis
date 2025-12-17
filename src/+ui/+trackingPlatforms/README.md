@@ -20,10 +20,11 @@ Generally, to add a new tracking platform, you would first need to check the fol
 
 After confirming the above requirements, you can proceed to implement the new tracking platform by following these steps:
 1. Make the new tracking platform interface available in MATLAB
-    1. If the platform has a MATLAB SDK, API, or library (MATLAB File Exchange submission, etc.), simply put it in the root `/lib` directory of this project. The program will automatically add it to the MATLAB path when initialized.
+    1. If the platform has a MATLAB SDK, API, or library (MATLAB File Exchange submission, etc.), simply put it in the root `/lib` directory of this project. The program will automatically add it to the MATLAB session path when initialized.
     2. If you need to create a MATLAB wrapper around a CLI or API, create a new directory under either `/lib` or `/src/+io/+yournewplatform` and implement the necessary functions to interact with the platform.
 2. Create a new class that inherits from `@TrackingProvider`, save it under `/src/+ui/+trackingPlatforms/+platforms/YourNewPlatform/YourNewPlatform.m`
     1. This ensure that the new platform is discoverable by the `listAvailablePlatforms()` static method in `@TrackingProvider`.
 3. Using the installed SDK/API/wrapper in step 1, implement all the abstract methods defined in `@TrackingProvider` to provide the necessary functionality for your new tracking platform.
-4. Add any additional helper functions or utilities as needed to support your tracking platform. These are often not used directly by the core analysis pipeline, but can be useful if you implement your own extension component.
-5. Test your new tracking platform implementation thoroughly to ensure it works as expected within the EthoPlacePrefAnalysis pipeline.
+4. If your platform requires specific configuration or setup parameraters, provide examples and document them clearly in `configs.yml` files and provide default values where appropriate.
+5. Add any additional helper functions or utilities as needed to support your tracking platform. These are often not used directly by the core analysis pipeline, but can be useful if you implement your own extension component. An example would be some shell scripts to automate the download of pre-trained models or datasets required by your tracking platform.
+6. Test your new tracking platform implementation thoroughly to ensure it works as expected within the **EthoPlacePrefAnalysis** pipeline.
