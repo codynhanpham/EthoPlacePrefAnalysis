@@ -69,17 +69,48 @@ function updateBatchDataTree(appTreeRootNode, batchData, kvargs)
         end
     else
         doFilter = false;
-        sex = {};
-        strains = {};
-        genotypes = {};
     end
 
 
-    persistent TrialHeadersCached
-    if isempty(TrialHeadersCached) || (isa(TrialHeadersCached, 'dictionary') && isempty(TrialHeadersCached.keys())) 
-        TrialHeadersCached = configureDictionary('string', 'dictionary');
-    end
 
+    % Filter MasterMetadata based on provided filters, create a whitelist of valid experiment project dirs + trial numbers
+    whitelist = struct('experiment', '', 'arena', '', 'trial', []); % Fields: experiment = ETHOVISION_FILE; arena = ETHOVISION_ARENA; trial = ETHOVISION_TRIAL
+    if doFilter
+        % Apply filters
+        filteredRows = masterMetadata;
+        filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_SEX"), kvargs.Filters.sex), :);
+        filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_STRAIN"), kvargs.Filters.strain), :);
+        filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_GENOTYPE"), kvargs.Filters.genotype), :);
+        % Build whitelist
+        if ~isempty(filteredRows)
+            projects = unique(filteredRows.("ETHOVISION_FILE"));
+            projects = projects(~cellfun(@isempty, projects));
+            for i = 1:length(projects)
+                proj = projects{i};
+                projRows = filteredRows(strcmp(filteredRows.("ETHOVISION_FILE"), proj), :);
+                
+                arenas = unique(projRows.("ETHOVISION_ARENA"));
+                arenas = arenas(~cellfun(@isempty, arenas));
+                for j = 1:length(arenas)
+                    arena = arenas{j};
+                    arenaRows = projRows(strcmp(projRows.("ETHOVISION_ARENA"), arena), :);
+                    trials = unique(arenaRows.("ETHOVISION_TRIAL"));
+                    % Ignore if trials are not numeric (should not happen, best to define this as a data validation step in the Excel sheet as well)
+                    if ~isnumeric(trials)
+                        trials = trials(cellfun(@(x) isnumeric(x) || (ischar(x) && all(isstrprop(x, 'digit'))), trials));
+                        trials = cellfun(@(x) str2double(x), trials);
+                    end
+                    trials = trials(~arrayfun(@isempty, trials));
+                    if isempty(trials)
+                        continue;
+                    end
+                    whitelist(end+1) = struct('experiment', proj, 'arena', arena, 'trial', trials); %#ok<AGROW>
+                end
+            end
+        end
+    end
+    % Remove the initial empty struct
+    whitelist = whitelist(2:end);
 
 
     % Handle empty or invalid batchData
@@ -125,14 +156,14 @@ function updateBatchDataTree(appTreeRootNode, batchData, kvargs)
         if isempty(expNode)
             % Add new experiment node
             expNode = uitreenode(appTreeRootNode, 'Text', exp, 'NodeData', expPath);
-            hasValidTrials = updateTrialsForExperiment(expNode, expPath);
+            hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter);
             % Remove experiment node if it has no valid trials
             if ~hasValidTrials
                 delete(expNode);
             end
         else
             % Update existing experiment node's trials
-            hasValidTrials = updateTrialsForExperiment(expNode, expPath);
+            hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter);
             % Remove experiment node if it has no valid trials
             if ~hasValidTrials
                 delete(expNode);
@@ -153,14 +184,14 @@ function node = findNodeByText(nodes, text)
     end
     
     for i = 1:length(nodes)
-        if strcmp(nodes(i).Text, text)
+        if isvalid(nodes(i)) && strcmp(nodes(i).Text, text)
             node = nodes(i);
             return;
         end
     end
 end
 
-function hasValidTrials = updateTrialsForExperiment(expNode, expPath)
+function hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter)
     %%UPDATETRIALSFOREXPERIMENT Update trials for a specific experiment node
     %   Returns true if the experiment has valid trials, false otherwise
     
@@ -170,6 +201,33 @@ function hasValidTrials = updateTrialsForExperiment(expNode, expPath)
         singleArenaIdx = arrayfun(@(t) isfield(t, 'multipleArena') && ~t.multipleArena, newTrialInfo);
         newTrialNames = newTrialNames(singleArenaIdx);
         newTrialInfo = newTrialInfo(singleArenaIdx);
+
+        % Apply whitelist filter if required
+        if doFilter && ~isempty(whitelist)
+            validIndices = false(size(newTrialNames));
+            experimentName = expNode.Text;
+            
+            % Whitelist for this experiment
+            expWhitelist = whitelist(strcmp({whitelist.experiment}, experimentName));
+            
+            if ~isempty(expWhitelist)
+                for j = 1:length(newTrialNames)
+                    trialInfo = newTrialInfo(j);
+                    % Check if this trial is in expWhitelist
+                    % Match arena and trial number
+                    
+                    for k = 1:length(expWhitelist)
+                        if strcmp(expWhitelist(k).arena, trialInfo.arena) && ismember(trialInfo.trialNumeric, expWhitelist(k).trial)
+                            validIndices(j) = true;
+                            break;
+                        end
+                    end
+                end
+            end
+            
+            newTrialNames = newTrialNames(validIndices);
+            newTrialInfo = newTrialInfo(validIndices);
+        end
         
         % Check if any valid trials remain after filtering
         if isempty(newTrialNames)

@@ -119,6 +119,7 @@ classdef (Abstract) TrackingProvider < handle
         %                'data'  - path to the tracking data file
         %                'trialNumeric' - numeric part of the trial name
         %                'multipleArena' - boolean indicating if the trial tracking/raw data export contains multiple arenas
+        %                'arena' - name of the arena, or '!multiple!' if multiple arenas
 
 
     end

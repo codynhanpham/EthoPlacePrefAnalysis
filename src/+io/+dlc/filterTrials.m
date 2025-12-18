@@ -49,6 +49,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
     trialNums = -1 * ones(length(videoFiles), 1);
     multipleArenaFlags = false(length(videoFiles), 1);
     dataFilesList = cell(length(videoFiles), 1);
+    arenaNames = cell(length(videoFiles), 1);
 
     for i = 1:length(videoFiles)
         [~, trialName, ~] = fileparts(videoFiles(i).name);
@@ -73,6 +74,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
         if ~isscalar(mediaBaseName)
             % All processed trials with " @ " should be filtered for single arena already
             multipleArenaFlags(i) = false;
+            arenaNames{i} = mediaBaseName{2};
         else
             [~, experimentName] = fileparts(fileparts((videoFiles(i).folder)));
             % If no " @ " found, need to check if this is a multi-arena trial by looking up the metadata table
@@ -86,8 +88,10 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
             else
                 if length(trialRowIdx) > 1
                     multipleArenaFlags(i) = true;
+                    arenaNames{i} = '!multiple!';
                 else
                     multipleArenaFlags(i) = false;
+                    arenaNames{i} = metadataTable.ETHOVISION_ARENA(trialRowIdx);
                 end
             end
         end
@@ -105,6 +109,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
     trialNums(toberemovedIndices) = [];
     multipleArenaFlags(toberemovedIndices) = [];
     dataFilesList(toberemovedIndices) = [];
+    arenaNames(toberemovedIndices) = [];
 
     % Construct trialInfo struct array
     trialInfo = struct('media', {}, 'data', {}, 'trialNumeric', [], 'multipleArena', []);
@@ -113,7 +118,8 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
             'media', fullfile(videoFiles(i).folder, videoFiles(i).name), ...
             'data', dataFilesList{i}, ...
             'trialNumeric', trialNums(i), ...
-            'multipleArena', multipleArenaFlags(i) ...
+            'multipleArena', multipleArenaFlags(i), ...
+            'arena', arenaNames{i} ...
         ); %#ok<AGROW>
     end
 end

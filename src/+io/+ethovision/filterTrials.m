@@ -12,6 +12,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
     %                'data'  - path to the data file (in Export Files subfolder)
     %                'trialNumeric' - last numeric part of the trial name
     %                'multipleArena' - boolean indicating if the trial XLSX export contains multiple arenas
+    %                'arena' - name of the arena, or '!multiple!' if multiple arenas
 
     arguments
         projectFolder {validator.isEthovisionProjectFolder}
@@ -32,27 +33,35 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
     [~, dataFileBaseNames, ~] = cellfun(@fileparts, dataFileNames, 'UniformOutput', false);
 
     % For each media file, check for a matching data file whose name ends with the base name
-    trials = struct('media', {}, 'data', {}, 'trialNumeric', [], 'multipleArena', []);
+    trials = struct('media', {}, 'data', {}, 'trialNumeric', [], 'multipleArena', [], 'arena', {});
 
     for i = 1:numel(mediaFileBaseNames)
         matchingDataFiles = dataFileBaseNames(endsWith(dataFileBaseNames, mediaFileBaseNames{i}));
         if ~isempty(matchingDataFiles)
             % Media is either: If original, "Trial   <number>.ext", or if processed (in case of multi-arena), "Trial   <number> @ <arena name>.ext"
             % Split by " @ " and take the first part as the base name
-            mediaBaseName = strsplit(mediaFileBaseNames{i}, ' @ ');
-            if isscalar(mediaBaseName)
+            mediaBaseNameParts = strsplit(mediaFileBaseNames{i}, ' @ ');
+            if isscalar(mediaBaseNameParts)
                 % If no " @ " found, need to check if this is a multi-arena xlsx export
-                narena = io.ethovision.narena(fullfile(exportFolder, [matchingDataFiles{1}, '.xlsx']));
+                [narena, names] = io.ethovision.narena(fullfile(exportFolder, [matchingDataFiles{1}, '.xlsx']));
                 if narena > 1
                     multipleArena = true;
+                    arenaName = '!multiple!';
                 else
                     multipleArena = false;
+                    if ~isempty(names)
+                        arenaName = names{1};
+                    else
+                        arenaName = '';
+                    end
                 end
             else
                 % All processed trials with " @ " should be filtered for single arena already
+                % The arena name can be extracted from the second part
                 multipleArena = false;
+                arenaName = mediaBaseNameParts{2};
             end
-            mediaBaseName = mediaBaseName{1};
+            mediaBaseName = mediaBaseNameParts{1};
 
 
             % Split whitespace, trim and parse the last numeric part of the media file base name
@@ -65,7 +74,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder)
             end
             trials(end+1) = struct('media', fullfile(mediaFolder, mediaFileNames{i}), ...
                 'data', fullfile(exportFolder, [matchingDataFiles{1}, '.xlsx']), ...
-                'trialNumeric', trialNum, 'multipleArena', multipleArena); %#ok<AGROW>
+                'trialNumeric', trialNum, 'multipleArena', multipleArena, 'arena', arenaName); %#ok<AGROW>
         end
     end
     
