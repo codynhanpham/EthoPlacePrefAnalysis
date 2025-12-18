@@ -13,7 +13,7 @@ function bool = includesTrials(masterMetadataTable, trialInfoList)
 
     arguments
         masterMetadataTable table
-        trialInfoList (:, 1) struct
+        trialInfoList (:, 1) struct {mustBeNonempty}
     end
 
     [isValidTable, missingHeaders] = io.metadata.isMasterMetadataTable(masterMetadataTable);

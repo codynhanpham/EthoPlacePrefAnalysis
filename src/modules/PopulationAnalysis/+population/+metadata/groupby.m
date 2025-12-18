@@ -31,6 +31,17 @@ function groupedTable = groupby(metadataTable, groupVars, kvargs)
         error('The following grouping variables are missing from the table: %s', strjoin(missing, ', '));
     end
 
+    % Filter out rows with empty values in groupVars
+    for i = 1:length(groupVars)
+        col = metadataTable.(groupVars{i});
+        if iscell(col) || isstring(col)
+            sCol = string(col);
+            metadataTable = metadataTable(strlength(sCol) > 0 & ~ismissing(sCol), :);
+        elseif iscategorical(col)
+            metadataTable = metadataTable(~isundefined(col), :);
+        end
+    end
+
     % Remaining variables to be converted to cell arrays
     remainVars = setdiff(tableVars, groupVars);
 

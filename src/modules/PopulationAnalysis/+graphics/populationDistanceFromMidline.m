@@ -12,6 +12,11 @@ function f = populationDistanceFromMidline(standardizedTables, kvargs)
     %
     %   See also: population.stats.populationPositionByStim
 
+    arguments
+        standardizedTables (1,:) struct
+        kvargs.MainApp {mustBeAOrEmpty(kvargs.MainApp, 'PlacePrefDataGUI_main')} = [];
+    end
+
 
 
     [screensize, videoaspect] = deal(get(0, 'ScreenSize'), 2/1);
