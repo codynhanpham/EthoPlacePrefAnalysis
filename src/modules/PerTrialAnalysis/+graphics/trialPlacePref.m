@@ -304,72 +304,196 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
             end
         end
     end
-
-    % If there is a <mediafilename>.midpoint.csv file next to the mediafile, load that to get the reference point and calculate signed distance directly using the XY position
-    distFromMidline_cm = [];
-    trialTime = stimPeriodTable{:,'Trial time'};
-    [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
-    midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
-    if ~isfile(midPointFilePath)
-        % Find any existing midpoint files in the same directory and use that as default
-        midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
-        if ~isempty(midPointFiles)
-            midPointFilePathFallback = fullfile(videoDir, midPointFiles(end).name);
-            % clone this file to be the current video's midpoint file
-            copyfile(midPointFilePathFallback, midPointFilePath);
+    fromConfigKey = {'defaults', 'yflip'};
+    yflip = false; % default value for compat with older code
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        yflip = getfield(configs, fromConfigKey{:});
+        if ~islogical(yflip)
+            try
+                yflip = logical(yflip);
+            catch ME
+                yflip = false;
+                warning('graphics:trialPlacePref:yflip:InvalidValue', 'Invalid value for yflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+            end
         end
     end
 
-    % If midpoint file exists, load that as reference point
-    if isfile(midPointFilePath)
-        try
-            midpointData = readtable(midPointFilePath);
-            if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
-                referencePoint = [midpointData.x(1), midpointData.y(1)]; % this is in px, (0,0) in top-left: should be in image coordinates (compatible with centerPos)
-                % Calculate Euclidean distance from each centerPos to referencePoint
-                diffs = centerPos - referencePoint; % in px
-                dists = sqrt(sum(diffs.^2, 2)); % in px
-                % Determine sign based on X position relative to the mid-point (X0, Y0) (left = negative, right = positive)
-                distFromMidline_cm = sign((centerPos(:,1) - referencePoint(1))) .* (dists * pixelsize); % in cm
-                if xflip
-                    distFromMidline_cm = -distFromMidline_cm;
+    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    refmode = 'line'; % default
+    fromConfigKey = {'defaults', 'distance2refmode'};
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        refmode = getfield(configs, fromConfigKey{:});
+        if iscell(refmode)
+            refmode = string(refmode{1});
+        end
+        if ~ismember(refmode, ["point", "line"])
+            refmode = 'line'; % fallback to default
+            warning("graphics:trialPlacePref:InvalidConfig", "Invalid config value for 'defaults.distance2refmode': %s. Falling back to 'line'.", refmode);
+        end
+    end
+
+    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    refmode = 'line'; % default
+    fromConfigKey = {'defaults', 'distance2refmode'};
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        refmode = getfield(configs, fromConfigKey{:});
+        if iscell(refmode)
+            refmode = string(refmode{1});
+        end
+        if ~ismember(refmode, ["point", "line"])
+            refmode = 'line'; % fallback to default
+            warning("trial:stats:trialSummary:InvalidConfig", "Invalid config value for 'defaults.distance2refmode': %s. Falling back to 'line'.", refmode);
+        end
+    end
+    [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+    trialTime = stimPeriodTable{:,'Trial time'};
+    switch refmode
+        % Note that in any condition, at this point centerPos already has been converted to image coordinates (top-left is (0,0)) AND adjusted by CenterOffset_px from config
+        % Any offset for midpoint/midline is relative to the size of the video frame itself
+        case 'point'
+            % Default values: midpoint is at center of video frame
+            midlineX = vidWidth / 2;
+            midlineY = vidHeight / 2;
+            midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
+            if ~isfile(midPointFilePath)
+                % Find any existing midpoint files in the same directory and use that as default
+                midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
+                if ~isempty(midPointFiles)
+                    midPointFilePathFallback = fullfile(videoDir, midPointFiles(end).name);
+                    % clone this file to be the current video's midpoint file
+                    copyfile(midPointFilePathFallback, midPointFilePath);
                 end
             end
-        catch ME
-            warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
-            distFromMidline_cm = []; % reset to empty to fallback to EthoVision data
-        end
+
+            % If midpoint file exists, load that as reference point
+            fromfile_ok = false;
+            if isfile(midPointFilePath)
+                try
+                    midpointData = readtable(midPointFilePath);
+                    if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
+                        midlineX = midpointData.x(1);
+                        midlineY = midpointData.y(1);
+                        fromfile_ok = true;
+                    end
+                catch ME
+                    warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
+                end
+            end
+            if ~fromfile_ok
+                % Use Distance to point when available as secondary fallback if loading from file failed
+                % For 'point' mode, this is often much better than just assume the center of the frame
+                if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
+                    distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are absolute values, need to determine sign based on X position!
+                    assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
+
+                    % Determine sign based on X position relative to the mid-point (X0, Y0)
+                    centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+                    % Find the coordinate of the midpoint (where the distance to point was measured from)
+                    % EthoVision doesn't provide this directly, so we have to calculate it manually
+                    refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
+                    % Since refPoint was calc using the raw X,Y center positions in cm in the data table, we need to re-apply offsets and convert to px
+                    refPoint(1) = refPoint(1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+                    refPoint(2) = refPoint(2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+                    refPoint = refPoint / pixelsize; % convert to px
+                    midlineX = refPoint(1);
+                    midlineY = refPoint(2);
+                end
+            end
+
+
+        case 'line'
+            % Default values: midline is vertical line at center of video frame
+            midlineX = [vidWidth/2, vidWidth/2];
+            midlineY = [0, vidHeight];
+            midLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.midline.csv'));
+            if ~isfile(midLineFilePath)
+                % Find any existing midline files in the same directory and use that as default
+                midLineFiles = dir(fullfile(videoDir, '*.midline.csv'));
+                if ~isempty(midLineFiles)
+                    midLineFilePathFallback = fullfile(videoDir, midLineFiles(end).name);
+                    % clone this file to be the current video's midline file
+                    copyfile(midLineFilePathFallback, midLineFilePath);
+                end
+            end
+            % If midline file exists, load that as reference line
+            if isfile(midLineFilePath)
+                try
+                    midlineData = readtable(midLineFilePath);
+                    if all(ismember({'x', 'y'}, midlineData.Properties.VariableNames))
+                        % Get the first two points to define the midline
+                        midlineX = midlineData.x(1:2)';
+                        midlineY = midlineData.y(1:2)';
+                    end
+                catch ME
+                    warning('graphics:trialPlacePref:midLineFilePath:LoadError', 'Error loading existing midline file: %s\n%s', midLineFilePath, ME.message);
+                end
+            end
+
+        otherwise
+            error("Unexpected refmode: %s", refmode);
     end
 
-    % Fallback to using EthoVision data and known configs only when no midpoint file is found or cannot calculate from it
-    % TODO: For now, prioritize if there is a column in EthoVision data called "Distance to point"
-    % Otherwise, compute distance from midline using X center position only
-    if isempty(distFromMidline_cm)
-        if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
-            distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are absolute values, need to determine sign based on X position!
-            assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
 
-            % Determine sign based on X position relative to the mid-point (X0, Y0)
-            centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
-            % Find the coordinate of the midpoint (where the distance to point was measured from)
-            % EthoVision doesn't provide this directly, so we have to calculate it manually
-            refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
-            distFromMidline_cm = sign((centerPos_cm(:,1) - refPoint(1))) .* distFromMidline_cm;
-            if xflip
-                distFromMidline_cm = -distFromMidline_cm;
-            end
-        else
-            % Compute distance from midline using X center position
-            centerPosX = centerPos(:,1); % in pixels, should already be adjusted such that 0,0 is top-left
-            midlineX = vidWidth/2;
-            % If there are override variables, adjust midlineX based on center offset
-            %...
+    % Convert + offset the midline points (currently in px, image coordinates) to cm
+    midlineX_cm = (midlineX - ((vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize))) * pixelsize;
+    midlineY_cm = (midlineY - ((vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize))) * pixelsize;
+    centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+    centerPos_cm(:,1) = centerPos_cm(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+    centerPos_cm(:,2) = centerPos_cm(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+    % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
+    centerPos_cm(:,2) = vidHeight * pixelsize - centerPos_cm(:,2);
 
-            distFromMidline_cm = (centerPosX - midlineX) * pixelsize; % in cm, negative = left, positive = right
-            if xflip
-                distFromMidline_cm = -distFromMidline_cm;
-            end
+    % Apply x/y flipping by mirroring center positions across the reference
+    % point/line before computing distances (consistent with populationPositionOverTime)
+    if ~exist('xflip','var'); xflip = false; end
+    if ~exist('yflip','var'); yflip = false; end
+    if xflip || yflip
+        pts = centerPos_cm;
+        switch refmode
+            case 'point'
+                if xflip
+                    % Mirror horizontally across vertical line x = midlineX_cm(1)
+                    pts(:,1) = 2 * midlineX_cm(1) - pts(:,1);
+                end
+                if yflip
+                    % Mirror vertically across horizontal line y = midlineY_cm(1)
+                    pts(:,2) = 2 * midlineY_cm(1) - pts(:,2);
+                end
+            case 'line'
+                if xflip
+                    % Mirror across the (potentially oblique) midline itself
+                    pts = mirrorPointsAcrossLine(pts, [midlineX_cm(1), midlineX_cm(end)], [midlineY_cm(1), midlineY_cm(end)]);
+                end
+                if yflip
+                    % Vertical mirroring: swap x/y to mirror across the perpendicular
+                    % line (same approach used in populationPositionOverTime)
+                    pts = mirrorPointsAcrossLine(pts, [midlineY_cm(1), midlineY_cm(end)], [midlineX_cm(1), midlineX_cm(end)]);
+                end
+            otherwise
+                error("Unexpected refmode: %s", refmode);
         end
+        centerPos_cm = pts;
+    end
+
+    switch refmode
+        case 'point'
+            % Calculate Euclidean distance from each centerPos to referencePoint
+            referencePoint = [midlineX_cm(1), midlineY_cm(1)]; % in cm
+            diffs = centerPos_cm - referencePoint; % in cm
+            dists = sqrt(sum(diffs.^2, 2)); % in cm
+            % Determine sign based on X position relative to the mid-point (X0, Y0) (left = negative, right = positive)
+            distFromMidline_cm = sign((centerPos_cm(:,1) - referencePoint(1))) .* dists; % in cm
+
+        case 'line'
+            % Calculate perpendicular distance to line defined by midlineX_cm and midlineY_cm
+            % Using formula for point to line distance
+            A = midlineY_cm(2) - midlineY_cm(1);
+            B = midlineX_cm(1) - midlineX_cm(2);
+            C = midlineX_cm(2)*midlineY_cm(1) - midlineX_cm(1)*midlineY_cm(2);
+            % Distance = (A*x0 + B*y0 + C) / sqrt(A^2 + B^2)
+            distFromMidline_cm = (A * centerPos_cm(:,1) + B * centerPos_cm(:,2) + C) / sqrt(A^2 + B^2); % in cm
+        otherwise
+            error("Unexpected refmode: %s", refmode);
     end
 
     assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
@@ -506,4 +630,25 @@ function refPoint = findReferencePointLinear(xyCoords, distances)
     
     % Solve linear system
     refPoint = (A \ b)';
+end
+
+
+function points = mirrorPointsAcrossLine(points, lineX, lineY)
+    % Define line passing through P1(x1,y1) and P2(x2,y2)
+    x1 = lineX(1); y1 = lineY(1);
+    x2 = lineX(2); y2 = lineY(2);
+    
+    % Line equation: Ax + By + C = 0
+    A = y1 - y2;
+    B = x2 - x1;
+    C = -A*x1 - B*y1;
+    
+    % Calculate reflection
+    M = A^2 + B^2;
+    if M > 0
+        val = A .* points(:,1) + B .* points(:,2) + C;
+        factor = -2 * val / M;
+        points(:,1) = points(:,1) + factor * A;
+        points(:,2) = points(:,2) + factor * B;
+    end
 end

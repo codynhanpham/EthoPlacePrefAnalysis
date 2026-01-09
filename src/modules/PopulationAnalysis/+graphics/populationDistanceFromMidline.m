@@ -146,3 +146,10 @@ function f = populationDistanceFromMidline(standardizedTables, kvargs)
 
     end
 end
+
+
+function mustBeAOrEmpty(x, className)
+    if ~isempty(x) && ~isa(x, className)
+        error('Input must be of class %s or empty.', className);
+    end
+end

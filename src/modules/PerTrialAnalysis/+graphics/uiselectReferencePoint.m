@@ -65,7 +65,7 @@ vidWidth = v.Width;
 vidHeight = v.Height;
 frame = readFrame(v);
 
-referencePoint = [vidWidth/2, vidHeight/2]; % Default to center point
+referencePoint = [vidWidth/2, vidHeight/2]; % Default to center point of frame
 % If midpoint file exists, load that as default reference point
 if ~isfile(midPointFilePath)
     % Find any existing midpoint files in the same directory and use that as default
@@ -274,34 +274,4 @@ function scrollWheelCallback(~, event, ax)
     % Set new limits
     xlim(ax, newXLims);
     ylim(ax, newYLims);
-end
-
-
-
-function refPoint = findReferencePointLinear(xyCoords, distances)
-    % Filter out NaN values
-    validIdx = ~isnan(xyCoords(:,1)) & ~isnan(xyCoords(:,2)) & ~isnan(distances);
-    validCoords = xyCoords(validIdx, :);
-    validDistances = distances(validIdx);
-    
-    n = size(validCoords, 1);
-    if n < 2
-        error('Need at least 2 valid (non-NaN) points to calculate reference point. Found %d valid points.', n);
-    end
-    
-    % Use first valid point as reference for differencing
-    x1 = validCoords(1, 1); y1 = validCoords(1, 2); d1 = validDistances(1);
-    
-    % Build linear system Ax = b
-    A = zeros(n-1, 2);
-    b = zeros(n-1, 1);
-    
-    for i = 2:n
-        xi = validCoords(i, 1); yi = validCoords(i, 2); di = validDistances(i);
-        A(i-1, :) = 2 * [x1 - xi, y1 - yi];
-        b(i-1) = x1^2 - xi^2 + y1^2 - yi^2 + di^2 - d1^2;
-    end
-    
-    % Solve linear system
-    refPoint = (A \ b)';
 end

@@ -196,7 +196,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
                 xflip = logical(xflip);
             catch ME
                 xflip = false;
-                warning('graphics:trialPlacePref:xflip:InvalidValue', 'Invalid value for xflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+                warning('stats:trialSummary:xflip:InvalidValue', 'Invalid value for xflip in config, must be boolean. Using default false.\n%s', getReport(ME));
             end
         end
     end
@@ -209,7 +209,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
                 yflip = logical(yflip);
             catch ME
                 yflip = false;
-                warning('graphics:trialPlacePref:yflip:InvalidValue', 'Invalid value for yflip in config, must be boolean. Using default false.\n%s', getReport(ME));
+                warning('stats:trialSummary:yflip:InvalidValue', 'Invalid value for yflip in config, must be boolean. Using default false.\n%s', getReport(ME));
             end
         end
     end
@@ -354,7 +354,6 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         'speakerFlipped', speakerFlipped, ...
         'stimuliMetadata', stimuli ...
     );
-
 end
 
 

@@ -176,13 +176,6 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
             if ~strcmpi(stimKeys(1), stimtables(stimfileName).stimuliSorted(1))
                 flipCondition = true;
             end
-            % xcenterData = centerpointData.data{:, 'X center'};
-            % For mirroring, if refmod is point then simply flip the 
-            % if flipCondition
-            %     % mirror horizontally around midlineX
-            %     xcenterData = 2 * midlineX_cm - xcenterData;
-            % end
-            % centerpointData.data{:, 'X center'} = xcenterData;
             if flipCondition
                 if strcmpi(refmode, 'point')
                     xcenterData = centerpointData.data{:, 'X center'};
@@ -210,24 +203,28 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 distFromMidline = distFromMidline .* signMask; % negative towards stimuliSorted(1), positive towards stimuliSorted(2)
                 centerpointData.data{:, 'Distance from Midline'} = distFromMidline;
             elseif strcmpi(refmode, 'line')
-                xcenterData = centerpointData.data{:, 'X center'};
-
-                %TODO: For now, just use this. Should actually use perpendicular distance to line, though
-                centerpointData.data{:, 'Distance from Midline'} = xcenterData - midlineX_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+                % Calculate perpendicular distance to line defined by midlineX_cm and midlineY_cm
+                points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
+                lineX = [midlineX_cm(1), midlineX_cm(end)];
+                lineY = [midlineY_cm(1), midlineY_cm(end)];
+                % Line equation: Ax + By + C = 0
+                A = lineY(1) - lineY(2);
+                B = lineX(2) - lineX(1);
+                C = -A*lineX(1) - B*lineY(1);
+                M = A^2 + B^2;
+                if M > 0
+                    val = A .* points(:,1) + B .* points(:,2) + C;
+                    distToLine = val / sqrt(M);
+                    centerpointData.data{:, 'Distance from Midline'} = distToLine; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+                else
+                    centerpointData.data{:, 'Distance from Midline'} = zeros(height(centerpointData.data), 1); % degenerate case, line is invalid
+                end
             end
 
         elseif strcmpi(kvargs.SpeakerFlipAxes, 'y')
             if ~strcmpi(stimKeys(1), stimtables(stimfileName).stimuliSorted(1))
                 flipCondition = true;
             end
-            % ycenterData = centerpointData.data{:, 'Y center'};
-            % midlineY_cm = centerpointData.midline_y_px * centerpointData.px2cm;
-            % if flipCondition
-            %     % mirror vertically around midlineY
-            %     ycenterData = 2 * midlineY_cm - ycenterData;
-            % end
-            % centerpointData.data{:, 'Y center'} = ycenterData;
-            % centerpointData.data{:, 'Distance from Midline'} = ycenterData - midlineY_cm;
             if flipCondition
                 if strcmpi(refmode, 'point')
                     ycenterData = centerpointData.data{:, 'Y center'};
@@ -252,9 +249,22 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 distFromMidline = distFromMidline .* signMask; % negative towards stimuliSorted(1), positive towards stimuliSorted(2)
                 centerpointData.data{:, 'Distance from Midline'} = distFromMidline;
             elseif strcmpi(refmode, 'line')
-                ycenterData = centerpointData.data{:, 'Y center'};
-                %TODO: For now, just use this. Should actually use perpendicular distance to line, though
-                centerpointData.data{:, 'Distance from Midline'} = ycenterData - midlineY_cm; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+                % Calculate perpendicular distance to line defined by midlineX_cm and midlineY_cm
+                points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
+                lineX = [midlineX_cm(1), midlineX_cm(end)];
+                lineY = [midlineY_cm(1), midlineY_cm(end)];
+                % Line equation: Ax + By + C = 0
+                A = lineY(1) - lineY(2);
+                B = lineX(2) - lineX(1);
+                C = -A*lineX(1) - B*lineY(1);
+                M = A^2 + B^2;
+                if M > 0
+                    val = A .* points(:,1) + B .* points(:,2) + C;
+                    distToLine = val / sqrt(M);
+                    centerpointData.data{:, 'Distance from Midline'} = distToLine; % negative should be towards stimuliSorted(1), positive towards stimuliSorted(2)
+                else
+                    centerpointData.data{:, 'Distance from Midline'} = zeros(height(centerpointData.data), 1); % degenerate case, line is invalid
+                end
             end
         else
             % This should not happen due to argument validation
