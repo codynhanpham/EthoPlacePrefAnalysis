@@ -313,6 +313,33 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                     inLeftData(isnan(inLeftData)) = 0;
                     inRightData(isnan(inRightData)) = 0;
 
+                    % Include hidden zones assigned to left/right
+                    if isfield(arenas{arenaIdx}, 'hidden_zones_assignment') && ~isempty(arenas{arenaIdx}.hidden_zones_assignment)
+                        hiddenZones = arenas{arenaIdx}.hidden_zones_assignment;
+                        for hz = 1:length(hiddenZones)
+                            hiddenZoneName = hiddenZones(hz).name;
+                            assignedSide = hiddenZones(hz).assign_to;
+                            
+                            % Find the hidden zone column in the datatable
+                            hiddenZoneMatch = cellfun(@(x) matchedZoneName(x, hiddenZoneName, "exact"), datazonenames);
+                            hiddenZoneIdx = find(hiddenZoneMatch, 1);
+                            
+                            if ~isempty(hiddenZoneIdx)
+                                hiddenZoneColIdx = find(strcmp(datatable.Properties.VariableNames, inzones{hiddenZoneIdx}), 1);
+                                hiddenZoneData = datatable{validStimIndices, hiddenZoneColIdx};
+                                hiddenZoneData(isnan(hiddenZoneData)) = 0;
+                                hiddenZoneData = logical(hiddenZoneData)';
+                                
+                                % Assign hidden zone data to appropriate side
+                                if strcmp(assignedSide, 'left')
+                                    inLeftData = inLeftData | hiddenZoneData;
+                                elseif strcmp(assignedSide, 'right')
+                                    inRightData = inRightData | hiddenZoneData;
+                                end
+                            end
+                        end
+                    end
+
                     % Ensure inLeftData and inRightData are logical arrays
                     inLeftData = logical(inLeftData)';
                     inRightData = logical(inRightData)';

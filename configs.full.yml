@@ -1,4 +1,4 @@
-## THIS FILE SHOW THE COMPLETE CONFIGURATION OPTIONS, THEIR DEFAULT VALUES, AND DOCUMENTATION.
+## THIS FILE SHOWS THE COMPLETE CONFIGURATION OPTIONS, THEIR DEFAULT VALUES, AND DOCUMENTATION.
 
 preferences:
   # User preferences can be specified here: theme color, default window sizes, etc.
@@ -61,6 +61,17 @@ tracking_providers:
           left: "Left"
           right: "Right"
         zone_match_method: "startsWith"
+        hidden_zones_assignment: # optional: If there are any hidden zones that should be treated as part of left/right zones, specify them here
+          - name: "TopLeft Hidden" # name of the hidden zone in EthoVision
+            assign_to: "left" # assign to either "left" or "right"
+          - name: "BottomLeft Hidden"
+            assign_to: "left"
+          - name: "TopRight Hidden"
+            assign_to: "right"
+          - name: "BottomRight Hidden"
+            assign_to: "right"
+        neutral_zones: # optional: If there are any neutral zones or utilities zones that should be noted, specify them here. They won't be use for calculations, but will be listed or carry along the dataset in outputs as needed (i.e. any time the the tracking data is updated/split/modified/filtered, these zones will be preserved)
+          - name: "Hallway"
 
       - name: "Lily Booth"
         camera_imgwidth_fov_cm: 77.4
@@ -69,6 +80,17 @@ tracking_providers:
           left: "Left 1"
           right: "Right 1"
         zone_match_method: "exact"
+        hidden_zones_assignment:
+          - name: "TopLeft Hidden 1"
+            assign_to: "left"
+          - name: "BottomLeft Hidden 1"
+            assign_to: "left"
+          - name: "TopRight Hidden 1"
+            assign_to: "right"
+          - name: "BottomRight Hidden 1"
+            assign_to: "right"
+        neutral_zones:
+          - name: "Hallway 1"
       
       - name: "Rain Booth"
         camera_imgwidth_fov_cm: 77.4
@@ -77,6 +99,17 @@ tracking_providers:
           left: "Left 2"
           right: "Right 2"
         zone_match_method: "exact"
+        hidden_zones_assignment:
+          - name: "TopLeft Hidden 2"
+            assign_to: "left"
+          - name: "BottomLeft Hidden 2"
+            assign_to: "left"
+          - name: "TopRight Hidden 2"
+            assign_to: "right"
+          - name: "BottomRight Hidden 2"
+            assign_to: "right"
+        neutral_zones:
+          - name: "Hallway 2"
 
 
   DeepLabCut:

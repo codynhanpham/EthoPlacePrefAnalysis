@@ -1,3 +1,5 @@
+# THIS IS THE CONFIGURATION FILE FOR THE HBOX (OpenField with Hallway) PLACE PREFERENCE SETUP.
+
 preferences:
 
 defaults:
@@ -17,7 +19,7 @@ tracking_providers:
   EthoVision:
     # Default settings applied to all sub-categories unless overridden 
     coordsUnit: "cm"
-    default_camera_imgwidth_fov_cm: 58.5
+    default_camera_imgwidth_fov_cm: 90.5
     default_camera_center_offset_px: [0, 0]
     default_zone_match_method: "startsWith"  # one of these: "exact", "startsWith", "endsWith", "contains"
 
@@ -26,28 +28,59 @@ tracking_providers:
       # When using multiple arenas or different arena configs exist, specify them here
       # Just make sure the names match those used in EthoVision
       - name: "Arena 1"
-        camera_imgwidth_fov_cm: 58.5
+        camera_imgwidth_fov_cm: 90.5
         camera_center_offset_px: [0, 0]
         zone:
           left: Left
           right: Right
         zone_match_method: "startsWith"
+        hidden_zones_assignment: # optional: If there are any hidden zones that should be treated as part of left/right zones, specify them here
+          - name: "TopLeft Hidden" # name of the hidden zone in EthoVision
+            assign_to: "left" # assign to either "left" or "right"
+          - name: "BottomLeft Hidden"
+            assign_to: "left"
+          - name: "TopRight Hidden"
+            assign_to: "right"
+          - name: "BottomRight Hidden"
+            assign_to: "right"
 
       - name: "Lily Booth"
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 90.5
         camera_center_offset_px: [960, 0]
         zone:
           left: Left 1
           right: Right 1
         zone_match_method: "exact"
+        hidden_zones_assignment:
+          - name: "TopLeft Hidden 1"
+            assign_to: "left"
+          - name: "BottomLeft Hidden 1"
+            assign_to: "left"
+          - name: "TopRight Hidden 1"
+            assign_to: "right"
+          - name: "BottomRight Hidden 1"
+            assign_to: "right"
+        neutral_zones:
+          - name: "Hallway 1"
       
       - name: "Rain Booth"
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 90.5
         camera_center_offset_px: [-960, 0]
         zone:
           left: Left 2
           right: Right 2
         zone_match_method: "exact"
+        hidden_zones_assignment:
+          - name: "TopLeft Hidden 2"
+            assign_to: "left"
+          - name: "BottomLeft Hidden 2"
+            assign_to: "left"
+          - name: "TopRight Hidden 2"
+            assign_to: "right"
+          - name: "BottomRight Hidden 2"
+            assign_to: "right"
+        neutral_zones:
+          - name: "Hallway 2"
 
 
   DeepLabCut:

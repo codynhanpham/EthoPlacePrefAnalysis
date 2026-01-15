@@ -519,7 +519,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [0, plotYLim(2), plotYLim(2), 0], [1,0,0], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
     patch(a, [plotXLim(1), plotXLim(1), plotXLim(2), plotXLim(2)], [plotYLim(1), 0, 0, plotYLim(1)], [0,0,1], 'FaceAlpha', 0.04, 'EdgeColor', 'none');
 
-    
+
     % Add text annotation at start of xlim, indicating left/right
     textPaddingX = 0.02 * diff(plotXLim);
     % Rotate 270 degrees to have text vertical along y-axis

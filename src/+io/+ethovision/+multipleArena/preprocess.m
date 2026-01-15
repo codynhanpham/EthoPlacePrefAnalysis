@@ -122,11 +122,29 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
         inzones = datatable.Properties.VariableNames(startsWith(datatable.Properties.VariableNames, "In zone("));
         % Find columns matching left and right zone names based on config
         datazonenames = cellfun(@(x) parseInZoneText(x), inzones, 'UniformOutput', false);
-        % Remove other inzone columns that do not match either left or right zone names
+
+        
+
+
+        % Remove other inzone columns that do not match either left/right zone names
+        % Also, keep hidden zones assigned to left/right for this arena
+        % As well as marked neutral zones
         nonmatchedIdx = true(length(inzones), 1);
         for z = 1:length(datazonenames)
             zoneName = datazonenames{z}{1};
-            if matchedZoneName(zoneName, leftTerm, zoneMatchMethod) || matchedZoneName(zoneName, rightTerm, zoneMatchMethod)
+            isMatchLR = matchedZoneName(zoneName, leftTerm, zoneMatchMethod) || matchedZoneName(zoneName, rightTerm, zoneMatchMethod);
+            isHiddenMatch = false;
+            if ~isempty(arenaIdx) && isfield(arenas{arenaIdx}, 'hidden_zones_assignment') && ~isempty(arenas{arenaIdx}.hidden_zones_assignment)
+                hiddenZones = arenas{arenaIdx}.hidden_zones_assignment;
+                isHiddenMatch = any(arrayfun(@(hz) matchedZoneName(zoneName, string(hz.name), "exact"), hiddenZones));
+            end
+            % Also check for neutral zones
+            isNeutralMatch = false;
+            if ~isempty(arenas{arenaIdx}) && isfield(arenas{arenaIdx}, 'neutral_zones') && ~isempty(arenas{arenaIdx}.neutral_zones)
+                neutralZones = arenas{arenaIdx}.neutral_zones;
+                isNeutralMatch = any(arrayfun(@(nz) matchedZoneName(zoneName, string(nz.name), "exact"), neutralZones));
+            end
+            if isMatchLR || isHiddenMatch || isNeutralMatch
                 nonmatchedIdx(z) = false;
             end
         end

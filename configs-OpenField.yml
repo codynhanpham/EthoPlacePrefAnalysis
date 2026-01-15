@@ -1,0 +1,56 @@
+# THIS IS THE CONFIGURATION FILE FOR THE OPEN FIELD PLACE PREFERENCE SETUP.
+
+preferences:
+
+defaults:
+  stimuli_directory: "../Stimuli/playlists"
+  master_metadata_table: "../Place Preferences - Master Metadata.xlsx"
+  project_root: "../ETHOVISION"
+  tracking_platform: "EthoVision"
+
+  nidaq_audioplayer_bin: #"%LOCALAPPDATA%/NI-DAQmxAudioPlayer/nidaq_audioplayer.exe"
+  audio_metadata_extract_bin: #"./src/+io/+stimuli/metadata_extract.exe"
+
+  xflip: false
+  yflip: false
+  distance2refmode: "line"
+
+tracking_providers:
+  EthoVision:
+    # Default settings applied to all sub-categories unless overridden 
+    coordsUnit: "cm"
+    default_camera_imgwidth_fov_cm: 58.5
+    default_camera_center_offset_px: [0, 0]
+    default_zone_match_method: "startsWith"  # one of these: "exact", "startsWith", "endsWith", "contains"
+
+
+    arena:
+      # When using multiple arenas or different arena configs exist, specify them here
+      # Just make sure the names match those used in EthoVision
+      - name: "Arena 1"
+        camera_imgwidth_fov_cm: 58.5
+        camera_center_offset_px: [0, 0]
+        zone:
+          left: Left
+          right: Right
+        zone_match_method: "startsWith"
+
+      - name: "Lily Booth"
+        camera_imgwidth_fov_cm: 77.4
+        camera_center_offset_px: [960, 0]
+        zone:
+          left: Left 1
+          right: Right 1
+        zone_match_method: "exact"
+      
+      - name: "Rain Booth"
+        camera_imgwidth_fov_cm: 77.4
+        camera_center_offset_px: [-960, 0]
+        zone:
+          left: Left 2
+          right: Right 2
+        zone_match_method: "exact"
+
+
+  DeepLabCut:
+    config_file: "../DLCDetectionModel/config.yaml"
