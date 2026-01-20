@@ -1,0 +1,6 @@
+# The official master repo will be pulled locally per-workspace
+matnwb
+
+# The HDF5 3rd-party plugin binaries will be pulled locally per-workspace as needed
+# If the HDF5_PLUGIN_PATH is set to elsewhere and valid, a local copy is not needed
++matnwb/resources/hdf5plugin

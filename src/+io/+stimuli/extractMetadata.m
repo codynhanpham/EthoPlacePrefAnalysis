@@ -25,6 +25,7 @@ function metadata = extractMetadata(stimulusFile, kvargs)
     %   Name-Value Pair Arguments:
     %       'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
     %       'BinaryPath': Path to either the 'nidaq_audioplayer' or 'metadata_extract' binary. If both 'Config' and 'BinaryPath' are provided, 'BinaryPath' takes precedence.
+    %       'JSONOutput': (logical) If true, returns the raw JSON output string from the binary instead of a parsed struct. Default is false.
     %
     %   OUTPUTS:
     %       metadata: Struct containing the extracted metadata.
@@ -35,6 +36,7 @@ function metadata = extractMetadata(stimulusFile, kvargs)
         stimulusFile {mustBeTextScalar, mustBeFile}
         kvargs.Config (1,1) struct = struct()
         kvargs.BinaryPath {mustBeTextScalar} = ""
+        kvargs.JSONOutput (1,1) logical = false
     end
 
 
@@ -93,6 +95,11 @@ function metadata = extractMetadata(stimulusFile, kvargs)
         cmdout = strtrim(extractAfter(cmdout, strlength(basesystemoutput)));
     end
     cmdout = strtrim(cmdout);
+
+    if kvargs.JSONOutput
+        metadata = cmdout;
+        return;
+    end
 
     % Parse the output
     try
