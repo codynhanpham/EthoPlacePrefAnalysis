@@ -48,7 +48,7 @@ As everything is installed locally and self-contained, simply delete the folder 
 
 While often unnecessary to remove the `HDF5_PLUGIN_PATH` environment variable, you can do so manually:
 
-- On Windows:
+- On Windows (PowerShell):
 ```powershell
 REG delete HKCU\Environment /F /V HDF5_PLUGIN_PATH
 ```
