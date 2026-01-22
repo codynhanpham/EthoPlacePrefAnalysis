@@ -16,9 +16,12 @@ For the fully automated installation of Python-based packages, this library uses
 
 ## Usage
 ### Prerequisites
+- Any MATLAB-supported operating system: Windows, macOS, or Linux.
 - The [minimum required MATLAB version](https://matnwb.readthedocs.io/en/latest/pages/getting_started/installation.html) specified by the MatNWB library (typically within the last 5 major releases) or newer.
-- Git installed and available in your system `PATH`. You can download Git from [git-scm.com](https://git-scm.com/downloads) or through your system's package manager (e.g., `apt`, `brew`, `pacman`, `winget`, etc.).
 - Internet connection for the initial installation of MatNWB, extensions, and HDF5 plugins.
+- ***(Optional)*** `Git` installed and available in your system `PATH`. You can download Git from [git-scm.com](https://git-scm.com/downloads) or through your system's package manager (e.g., `apt`, `brew`, `pacman`, `winget`, etc.).
+    - If Git is not available, the library will fall back to downloading ZIP archives of the required repositories from GitHub.
+    - Even though it is optional, having Git installed is recommended to reliably resolve the latest **stable** release tags of the MatNWB library and extensions.
 
 ### Installation and setup
 To use this library, simply clone or download it into your MATLAB project folder or somewhere in your MATLAB path. Only the folder that contains the `+matnwb` package folder (the folder with this README file) needs to be in the MATLAB path.
