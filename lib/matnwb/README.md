@@ -6,9 +6,9 @@ This is a wrapper around the official [MatNWB](https://github.com/NeurodataWitho
 Simply provides a `matnwb.install()` function that:
 1. Pulls the MatNWB library and some default extensions from GitHub (for now, `ndx-pose` and `ndx-sound`, which you can change in [`./+matnwb/available.m`](./+matnwb/available.m)) if they are not already installed in the current MATLAB workspace (i.e., the current folder or its clones in the MATLAB path).
 2. Checks and automatically installs 3rd-party HDF5 plugins required for reading and writing NWB files using additional compression filters (e.g., `lzf`, `bzip2`, `zstd`, etc.) if they are not already installed on the system.
-3. Ensure the `HDF5_PLUGIN_PATH` environment variable is correctly set and available to MATLAB. Will try to set the variable and prompt the user to restart MATLAB if necessary.
-4. Ensure the MatNWB library is correctly initialized in the current MATLAB workspace.
-5. No-op if everything is already installed and set up, so it is safe to call multiple times when you need to ensure MatNWB is ready to use.
+3. Ensures the `HDF5_PLUGIN_PATH` environment variable is correctly set and available to MATLAB. Will try to set the variable and prompt the user to restart MATLAB if necessary.
+4. Ensures the MatNWB library is correctly initialized in the current MATLAB workspace.
+5. Is no-op if everything is already installed and set up, so it is safe to call multiple times when you need to ensure MatNWB is ready to use.
 
 For step `[2]`, this library uses the excellent [hdf5plugin](https://github.com/silx-kit/hdf5plugin) Python-based project to handle the installation of HDF5 plugins (also [recommended](https://matnwb.readthedocs.io/en/latest/pages/tutorials/dynamically_loaded_filters.html) by the MatNWB team). After downloaded, the HDF5 plugins are placed in a local folder (by default, `./+matnwb/resources/hdf5plugins/`) and the `HDF5_PLUGIN_PATH` environment variable is set to point to that folder.
 
