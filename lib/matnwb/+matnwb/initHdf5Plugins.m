@@ -51,7 +51,7 @@ function status = initHdf5Plugins()
 
     % Check the default installation directory for HDF5 plugins
     if ~isfolder(defaultInstallDir)
-        fprintf("This seem to be the first time you are setting up additional 3rd-party HDF5 plugins on this computer. The NWB format relies on some additional HDF5 plugins for improved storage performance and accessibility. This tool will now try to automate the installation process using the Python-based `hdf5plugin` package. Everything will be sandboxed to a temporary environment and clean up for you afterwards.\nAfter the compatible HDF5 plugins are downloaded, you may be prompted for Administrator privileges to set the HDF5_PLUGIN_PATH environment variable for your system. This is required for MATLAB to locate the HDF5 plugins properly. Please follow the on-screen instructions carefully.\nFor additional information about this, see: <a href=""https://www.mathworks.com/help/matlab/import_export/read-and-write-hdf5-datasets-using-dynamically-loaded-filters.html"">https://www.mathworks.com/help/matlab/import_export/read-and-write-hdf5-datasets-using-dynamically-loaded-filters.html</a>\n");
+        fprintf("This seem to be the first time you are setting up additional 3rd-party HDF5 plugins on this computer. The NWB format relies on some additional HDF5 plugins for improved storage performance and accessibility. This tool will now try to automate the installation process using the Python-based `hdf5plugin` package. Everything will be sandboxed to a temporary environment and clean up for you afterwards.\nPlease follow the on-screen instructions carefully. For additional information about this, see: <a href=""https://www.mathworks.com/help/matlab/import_export/read-and-write-hdf5-datasets-using-dynamically-loaded-filters.html"">https://www.mathworks.com/help/matlab/import_export/read-and-write-hdf5-datasets-using-dynamically-loaded-filters.html</a>\n");
         installHdf5PluginsFromPython(defaultInstallDir, tempdirforpython); 
     end
 
@@ -92,9 +92,11 @@ function ensurehdf5pluginspath(pluginDir)
                 if ~contains(path, pluginDir)
                     addpath(pluginDir);
                 end
-                fprintf("\nSetting environment variable:\n\tHDF5_PLUGIN_PATH=%s\n", pluginDir);
+                fprintf("\nSetting environment variable in startup.m:\n\tHDF5_PLUGIN_PATH=%s\n", pluginDir);
                 setStartupEnv('HDF5_PLUGIN_PATH', pluginDir);
                 fprintf("Environment variable HDF5_PLUGIN_PATH updated successfully.\n");
+                fprintf("To inspect changes made to your startup.m, run:\n");
+                fprintf("    edit(which('startup'));\n\n");
                 fprintf("Please restart MATLAB, then run either matnwb.install() or matnwb.initHdf5Plugins() again to make sure the HDF5 plugins are properly accessible.\n");
                 error(sprintf("\n\t----- THIS IS NOT AN ERROR -----\nPlease check the message above and restart MATLAB."));
             end
@@ -106,9 +108,11 @@ function ensurehdf5pluginspath(pluginDir)
         if ~contains(path, pluginDir)
             addpath(pluginDir);
         end
-        fprintf("\nSetting environment variable:\n\tHDF5_PLUGIN_PATH=%s\n", pluginDir);
+        fprintf("\nSetting environment variable in startup.m:\n\tHDF5_PLUGIN_PATH=%s\n", pluginDir);
         setStartupEnv('HDF5_PLUGIN_PATH', pluginDir);
         fprintf("Environment variable HDF5_PLUGIN_PATH updated successfully.\n");
+        fprintf("To inspect changes made to your startup.m, run:\n");
+        fprintf("    edit(which('startup'));\n\n");
         fprintf("Please restart MATLAB, then run either matnwb.install() or matnwb.initHdf5Plugins() again to make sure the HDF5 plugins are properly accessible.\n");
         error(sprintf("\n\t----- THIS IS NOT AN ERROR -----\nPlease check the message above and restart MATLAB."));
     end
