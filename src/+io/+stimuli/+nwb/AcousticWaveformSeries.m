@@ -35,6 +35,11 @@ function output = AcousticWaveformSeries(stimulusFile, kvargs)
     %               + Actual Data = (Raw Data * data_conversion) + data_offset
     %               + Offset the timing of this stimulus by 'starting_time' seconds.
     %
+    %   EXAMPLE:
+    %       stimulusFile = 'path/to/stimulus.wav';
+    %       awSeries = io.stimuli.nwb.AcousticWaveformSeries(stimulusFile, 'StartingTimeOffset', 180.0);
+    %       nwbFile = io.nwb.NwbFile(...); % Create an NWB file object
+    %
     %
     %   See also: io.config.loadConfigYaml, io.stimuli.findNiDaqAudioPlayerBin, io.stimuli.findAudioMetadataExtractorBin, io.stimuli.extractMetadata
 

@@ -317,8 +317,13 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                     if isfield(arenas{arenaIdx}, 'hidden_zones_assignment') && ~isempty(arenas{arenaIdx}.hidden_zones_assignment)
                         hiddenZones = arenas{arenaIdx}.hidden_zones_assignment;
                         for hz = 1:length(hiddenZones)
-                            hiddenZoneName = hiddenZones(hz).name;
-                            assignedSide = hiddenZones(hz).assign_to;
+                            if iscell(hiddenZones)
+                                zone = hiddenZones{hz};
+                            else
+                                zone = hiddenZones(hz);
+                            end
+                            hiddenZoneName = zone.name;
+                            assignedSide = zone.assign_to;
                             
                             % Find the hidden zone column in the datatable
                             hiddenZoneMatch = cellfun(@(x) matchedZoneName(x, hiddenZoneName, "exact"), datazonenames);
@@ -328,7 +333,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                                 hiddenZoneColIdx = find(strcmp(datatable.Properties.VariableNames, inzones{hiddenZoneIdx}), 1);
                                 hiddenZoneData = datatable{validStimIndices, hiddenZoneColIdx};
                                 hiddenZoneData(isnan(hiddenZoneData)) = 0;
-                                hiddenZoneData = logical(hiddenZoneData)';
+                                hiddenZoneData = logical(hiddenZoneData);
                                 
                                 % Assign hidden zone data to appropriate side
                                 if strcmp(assignedSide, 'left')

@@ -155,9 +155,8 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             kvargs.Options = defaultOptions;
             validateattributes(kvargs.Options.ExpectedNumVariables, {'numeric'}, {'scalar'});
 
-            configs = struct('tracking_platform', struct(string(obj.platformVarnameCompat(obj.platform)), obj.userConfig));
             args = namedargs2cell(kvargs.Options);
-            updates = io.ethovision.multipleArena.preprocess(trackingDataFilePath, masterMetadata, configs, args{:});
+            updates = io.ethovision.multipleArena.preprocess(trackingDataFilePath, masterMetadata, obj.userConfig, args{:});
         end
 
 

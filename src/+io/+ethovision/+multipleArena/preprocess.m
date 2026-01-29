@@ -104,7 +104,7 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
             zoneMatchMethod = getfield(configs, zonematchconfigkey{:});
         end
         % Check if this arenaName is specified in the config
-        arenaConfigKey = {'tracking_providers', 'EthoVision', 'arena'};
+        arenaConfigKey = {'arena'};
         if validator.nestedStructFieldExists(configs, arenaConfigKey)
             arenas = getfield(configs, arenaConfigKey{:});
             arenaIdx = find(cellfun(@(x) strcmp(x.name, arenaName), arenas), 1);
@@ -116,6 +116,9 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
                     zoneMatchMethod = arenas{arenaIdx}.zone_match_method;
                 end
             end
+        else
+            % Error that this arena name is not found in the config
+            error('io:ethovision:multipleArena:preprocess:ARENANOTINCONFIG', 'Arena name "%s" not found in the configuration for EthoVision multiple-arena preprocessing.', arenaName);
         end
 
         % All potential "In zone(...)" columns
@@ -136,13 +139,21 @@ function updates = preprocess(ethovisionXlsx, masterMetadata, configs, kvargs)
             isHiddenMatch = false;
             if ~isempty(arenaIdx) && isfield(arenas{arenaIdx}, 'hidden_zones_assignment') && ~isempty(arenas{arenaIdx}.hidden_zones_assignment)
                 hiddenZones = arenas{arenaIdx}.hidden_zones_assignment;
-                isHiddenMatch = any(arrayfun(@(hz) matchedZoneName(zoneName, string(hz.name), "exact"), hiddenZones));
+                if iscell(hiddenZones)
+                    isHiddenMatch = any(cellfun(@(hz) matchedZoneName(zoneName, string(hz.name), "exact"), hiddenZones));
+                else
+                    isHiddenMatch = any(arrayfun(@(hz) matchedZoneName(zoneName, string(hz.name), "exact"), hiddenZones));
+                end
             end
             % Also check for neutral zones
             isNeutralMatch = false;
             if ~isempty(arenas{arenaIdx}) && isfield(arenas{arenaIdx}, 'neutral_zones') && ~isempty(arenas{arenaIdx}.neutral_zones)
                 neutralZones = arenas{arenaIdx}.neutral_zones;
-                isNeutralMatch = any(arrayfun(@(nz) matchedZoneName(zoneName, string(nz.name), "exact"), neutralZones));
+                if iscell(neutralZones)
+                    isNeutralMatch = any(cellfun(@(nz) matchedZoneName(zoneName, string(nz.name), "exact"), neutralZones));
+                else
+                    isNeutralMatch = any(arrayfun(@(nz) matchedZoneName(zoneName, string(nz.name), "exact"), neutralZones));
+                end
             end
             if isMatchLR || isHiddenMatch || isNeutralMatch
                 nonmatchedIdx(z) = false;
