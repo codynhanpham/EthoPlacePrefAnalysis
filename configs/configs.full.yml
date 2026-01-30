@@ -7,13 +7,13 @@ preferences:
 defaults:
   # Directory containing stimuli playlists (audio files).
   # This directory will be searched recursively, so specify the closest common path to your stimuli will improve performance.
-  stimuli_directory: "../Stimuli/playlists" 
+  stimuli_directory: "../../Stimuli/playlists" 
 
   # Path to the master metadata table Excel file
-  master_metadata_table: "../Place Preferences - Master Metadata.xlsx"
+  master_metadata_table: "../../Place Preferences - Master Metadata.xlsx"
 
   # Root directory containing your projects (direct parent folder whose subfolders are your datasets - each containing a set of recordings/trials)
-  project_root: "../ETHOVISION"
+  project_root: "../../ETHOVISION"
 
   # The default tracking platform to use on app startup
   # While the GUI is running, run ui.trackingPlatforms.TrackingProvider.listAvailablePlatforms() to see available options
@@ -113,7 +113,7 @@ tracking_providers:
 
 
   DeepLabCut:
-    config_file: "../DLCDetectionModel/config.yaml" # Path to the DeepLabCut config.yaml file associated with your trained model for subject tracking/pose estimation
+    config_file: "../../DLCDetectionModel/config.yaml" # Path to the DeepLabCut config.yaml file associated with your trained model for subject tracking/pose estimation
 
     # Default x-offset in pixels to correctly define the midpoint between left/right zones if the arena is not perfectly centered in the camera view. This can be overridden per-arena if needed.
     default_midpoint_xoffset_px: 0

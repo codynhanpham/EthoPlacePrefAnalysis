@@ -1,4 +1,4 @@
-function f = distOverTimeBinned(standardizedTable,binSizeSec)
+function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
     arguments
         standardizedTable struct {mustBeNonempty}
         binSizeSec (1,1) {mustBePositive, mustBeInteger} = 10
