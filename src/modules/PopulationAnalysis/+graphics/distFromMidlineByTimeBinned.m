@@ -87,6 +87,7 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
                     distanceFromMidline = distanceFromMidlineMatrix(:, combinedMask);
 
                     % Normalize each replicate to (-1,1) where [-1,0] if negative and [0-1] if positive
+                    % This is necessary as different trials may use a slightly different arena size, so the max distance from midline may vary
                     for replicateIdx = 1:size(distanceFromMidline, 2)
                         colData = distanceFromMidline(:, replicateIdx);
                         maxVal = max(colData, [], 'omitnan');
@@ -167,7 +168,7 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
                         lineColor = 'r';
                     end  
                     if ~isempty(xConf)
-                        fill(a, xConf, yConf, lineColor, 'FaceAlpha', 0.05, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+                        fill(a, xConf, yConf, lineColor, 'FaceAlpha', 0.08, 'EdgeColor', 'none', 'HandleVisibility', 'off');
                     end
 
                     % Plot the binned data
