@@ -1,7 +1,9 @@
-function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
+function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
     arguments
         standardizedTable struct {mustBeNonempty}
         binSizeSec (1,1) {mustBePositive, mustBeInteger} = 10
+
+        kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
     end
 
     requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
@@ -45,6 +47,9 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
 
     f = figure('Name', sprintf("Distance from Midline Binned (Bin Size: %d sec)", binSizeSec), 'Position', figPos, 'NumberTitle', 'off');
     t = tiledlayout(f, nrows, ncols, 'Padding', 'compact', 'TileSpacing', 'compact');
+    t.Title.String = kvargs.Title;
+    t.Title.FontWeight = 'bold';
+
     plotIdx = 1;
 
     for stimIdx = 1:nstims
@@ -249,7 +254,7 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec)
             yline(a, 0, ':k', 'LineWidth', 0.5);
 
             hold(a, 'off');
-            title(a, sprintf("%s  %s  (Bin = %ds, Mean±SEM)", strcat('[',strjoin(stimSets{stimIdx}, '/'), '] '), strain, binSizeSec), 'Interpreter', 'none');
+            title(a, sprintf("%s  %s\n(Bin = %ds, Mean±SEM)", strcat('[',strjoin(stimSets{stimIdx}, '/'), '] '), strain, binSizeSec), 'Interpreter', 'none');
             xlabel(a, 'Time (sec)');
             ylabel(a, 'Preference Index');
 
