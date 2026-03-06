@@ -28,7 +28,7 @@ tracking_providers:
       # When using multiple arenas or different arena configs exist, specify them here
       # Just make sure the names match those used in EthoVision
       - name: "Arena 1"
-        camera_imgwidth_fov_cm: 92.55
+        camera_imgwidth_fov_cm: 92
         camera_center_offset_px: [0, 0]
         zone:
           left: Left
@@ -45,8 +45,8 @@ tracking_providers:
             assign_to: "right"
 
       - name: "Lily Booth"
-        camera_imgwidth_fov_cm: 92.55
-        camera_center_offset_px: [960, 0]
+        camera_imgwidth_fov_cm: 92
+        camera_center_offset_px: [950, 0]
         zone:
           left: Left Speaker 1
           right: Right Speaker 1
@@ -64,8 +64,8 @@ tracking_providers:
           - name: "Hallway 1"
       
       - name: "Rain Booth"
-        camera_imgwidth_fov_cm: 92.55
-        camera_center_offset_px: [-960, 0]
+        camera_imgwidth_fov_cm: 92
+        camera_center_offset_px: [-955, 0]
         zone:
           left: Left Speaker 2
           right: Right Speaker 2

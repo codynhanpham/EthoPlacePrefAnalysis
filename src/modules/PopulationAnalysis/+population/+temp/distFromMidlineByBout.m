@@ -166,13 +166,15 @@ function f = distFromMidlineByBout(standardizedTable, kvargs)
         for strainIdx = 1:nstrains
             strain = animalStrains{strainIdx};
             strainMask = strcmp(columnByStrainOrder, strain);
-            
-            a = nexttile(t);
-            hold(a, 'on');
+
             for genotypeIdx = 1:ngenotypes
                 genotype = animalGenotypes{genotypeIdx};
                 genotypeMask = strcmp(columnByGenotypeOrder, genotype);
                 genotypeSexData = dictionary(); % Use dictionary to handle stimulus names with spaces
+
+                % One tile per StimSet x Strain x Genotype combination.
+                a = nexttile(t);
+                hold(a, 'on');
 
                 for sexIdx = 1:nsexes
                     sex = animalSexes{sexIdx};
