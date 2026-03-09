@@ -1,4 +1,19 @@
 function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
+    %%DISTANCEFROMMIDLINEBYTIMEBINNED Distance from midline over time, binned by specified bin size in seconds
+    %
+    %   Inputs:
+    %       standardizedTables - struct array of standardized tables, generated via population.stats.populationPositionByStim()
+    %       binSizeSec - scalar positive integer specifying the size of time bins in seconds for averaging the distance from midline data. Default is 10 seconds.
+    %
+    %   Name-Value Pair Arguments:
+    %       'MainApp' - handle to the main PlacePrefDataGUI_main app (for additional configs + syncing)
+    %
+    %   Outputs:
+    %       f - handle to the generated figure
+    %
+    %   See also: population.stats.populationPositionByStim
+
+
     arguments
         standardizedTable struct {mustBeNonempty}
         binSizeSec (1,1) {mustBePositive, mustBeInteger} = 10

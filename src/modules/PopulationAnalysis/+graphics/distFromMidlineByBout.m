@@ -1,14 +1,11 @@
-function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
-    %%CUMULATIVEDISPLACEMENTBYBOUT Plot cumulative distance from midline aligned by bout onset, binned over time
+function f = distFromMidlineByBout(standardizedTable, kvargs)
+    %%DISTFROMMIDLINEBYBOUT Plot average distance from midline aligned by bout onset, binned over time
     %
-    %   This function accumulates the signed distance from midline over time, aligned to bout onset,
+    %   This function averages the signed distance from midline over time, aligned to bout onset,
     %   for each bout of stimulus presentation in the provided standardizedTable.
-    %   Positive preference (moving toward the active stimulus side) results in positive cumulative distance,
-    %   while negative preference (moving away from the active stimulus side) results in negative cumulative distance.
+    %   Similar to graphics.distFromMidlineByTimeBinned(), but here the data is chunked into bouts based on stimulus presentation times.
     %
-    %   WARNING: What this plot style doesn't show: If the animal is already at the max distance from midline on the stimulus side at bout onset, no further movement toward that side is possible. This accumulation method rewards movement toward the stimulus side, but under-represents cases where the animal is already at the max distance from midline on that side.
-    %
-    %   f = population.temp.cumulativeDisplacementByBout(standardizedTable, kvargs)
+    %   f = population.temp.distFromMidlineByBout(standardizedTable, kvargs)
     %
     %   Inputs:
     %       standardizedTable : Struct array in standardized format, as output by population.stats.populationPositionOverTime()
@@ -21,7 +18,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     %   Outputs:
     %       f : Figure handle of the generated plot
     %
-    %   See also: population.stats.populationPositionOverTime, graphics.distFromMidlineByTimeBinned
+    %   See also: population.stats.populationPositionOverTime, graphics.distFromMidlineByTimeBinned, graphics.cumulativeDisplacementByBout
 
 
     arguments
@@ -65,11 +62,8 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     % Within each plot, the stimulus (within the set) will be represented by line style, and Sex by color within each plot
     % With 2 stimuli per set, there will be 2 line styles (e.g., solid for stim that includes 'normal', dashed for the other stimulus --> 4 lines per plot
 
-    % At the onset of each bout, start tracking the distance of the subject from midline over time
-    % Using the current position at bout onset as the zero point (i.e., how the animal displaces from its initial position due to stimulus)
-    % Keep track of direction and stimulus type, so that the resulting result: toward the same side as stimulus = positive displacement, away from stimulus = negative displacement
-    % (do able as centerpointData "Distance from Midline" is signed, with negative values towards stimuliSorted{1} side, positive values towards stimuliSorted{2} side)
-    % For each bout, bin the distance data into time bins of (BinWidth)s, then average + sem across replicates/animals belonging to the same Strain/Genotype/Sex group
+    % At the onset of each bout, track the distance of the subject from midline over time
+    % Bin the distance data into time bins, then average across replicates/animals belonging to the same Strain/Genotype/Sex group
 
 
     nplots = nstrains * nstimsets * ngenotypes;
@@ -83,7 +77,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     % Center the figure on the primary screen
     figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
 
-    f = figure('Name', sprintf("Cumulative Displacement By Bout (Bin Size: %.3f sec)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
+    f = figure('Name', sprintf("Distance From Midline By Bout (Bin Size: %.3f sec)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
     t = tiledlayout(f, nrows, ncols, 'Padding', 'compact', 'TileSpacing', 'compact');
     t.Title.String = kvargs.Title;
     t.Title.FontWeight = 'bold';
@@ -216,7 +210,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                         stimName = stimsBouts.keys{stimIdx};
                         boutInfo = stimsBouts(stimName);
                         nBouts = boutInfo.nBouts;
-                        refIdx = boutInfo.startIdx; % At this index, distance = 0
+                        refIdx = boutInfo.startIdx;
                         responseWindowStartIdx = boutInfo.responseWindowStartIdx;
                         responseWindowEndIdx = boutInfo.responseWindowEndIdx;
 
@@ -236,74 +230,38 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                         nBins = length(binEdgesRelative) - 1;
                         binTimeCenters = (binEdgesRelative(1:nBins) + binEdgesRelative(2:nBins+1)) / 2;
 
-                        allBinnedDisplacements = []; % will be nBins x nReplicates x nBouts
+                        allBinnedDistances = []; % will be nBins x nReplicates x nBouts
                         
                         for boutIdx = 1:nBouts
                             startIdx = responseWindowStartIdx(boutIdx);
                             endIdx = responseWindowEndIdx(boutIdx);
                             boutData = distanceFromMidline(startIdx:endIdx, :); % time x replicates
 
-                            refIdxInBout = refIdx(boutIdx) - startIdx + 1; % index within boutData corresponding to bout onset (time 0s)
                             boutStartTime = trialTime(refIdx(boutIdx)); % absolute time when this bout started
 
-                            % Calculate cumulative displacement as signed absolute differences
-                            % Displacement accumulates based on movement direction relative to stimulus
-                            % Stimulus side determines cumulation sign: toward active stimulus = positive, away from active stimulus = negative
-                            
-                            % Initialize cumulative displacement series
-                            displacementSeries = zeros(size(boutData));
-                            
-                            % Calculate cumulative displacement from consecutive differences
-                            for timeIdx = 2:size(boutData, 1)
-                                prevDistances = boutData(timeIdx - 1, :);
-                                currDistances = boutData(timeIdx, :);
-                                absDiff = abs(currDistances - prevDistances);
-                                
-                                % Determine sign based on movement direction relative to stimulus
-                                if stimIdx == 1
-                                    % Stim1 is on left (negative side), as per stimuliSorted order
-                                    % If moving left (current < previous), add to cumulative (toward stimulus)
-                                    % If moving right (current > previous), subtract from cumulative (away from stimulus)
-                                    directionSign = ones(size(absDiff));
-                                    directionSign(currDistances > prevDistances) = -1;
-                                else
-                                    % Stim2 is on right (positive side)
-                                    % If moving right (current > previous), add to cumulative (toward stimulus)
-                                    % If moving left (current < previous), subtract from cumulative (away from stimulus)
-                                    directionSign = ones(size(absDiff));
-                                    directionSign(currDistances < prevDistances) = -1;
-                                end
-                                
-                                % Accumulate signed displacement
-                                displacementSeries(timeIdx, :) = displacementSeries(timeIdx - 1, :) + (absDiff .* directionSign);
-                            end
-                            
-                            % Translate so that at bout onset (refIdxInBout), displacement = 0
-                            displacementSeries = displacementSeries - displacementSeries(refIdxInBout, :);
-
-                            % Bin the displacementSeries into fixed bins anchored at time 0
+                            % Bin the raw distance data into fixed bins anchored at time 0
                             timeVector = trialTime(startIdx:endIdx);
                             binEdgesAbsolute = binEdgesRelative + boutStartTime;
                             [~, ~, binIndices] = histcounts(timeVector, binEdgesAbsolute);
                             
-                            binnedBoutDisplacements = NaN(nBins, size(displacementSeries, 2)); % nBins x nReplicates
+                            binnedBoutDistances = NaN(nBins, size(boutData, 2)); % nBins x nReplicates
                             for binIdx = 1:nBins
                                 binMask = binIndices == binIdx;
                                 if any(binMask)
-                                    binnedBoutDisplacements(binIdx, :) = mean(displacementSeries(binMask, :), 1, 'omitnan');
+                                    binnedBoutDistances(binIdx, :) = mean(boutData(binMask, :), 1, 'omitnan');
                                 end
                             end
                             
-                            allBinnedDisplacements = cat(3, allBinnedDisplacements, binnedBoutDisplacements); % nBins x nReplicates x nBouts
+                            allBinnedDistances = cat(3, allBinnedDistances, binnedBoutDistances); % nBins x nReplicates x nBouts
                         end
 
-                        nreplicates = size(allBinnedDisplacements, 2);
+                        nreplicates = size(allBinnedDistances, 2);
                         
                         % Average + SEM across bouts and replicates for this stimulus x sex combination
                         % Shape: nBins x nReplicates x nBouts -> average to nBins
-                        meanDisplacement = squeeze(mean(allBinnedDisplacements, 3, 'omitnan')); % nBins x nReplicates
-                        meanAcrossReplicates = mean(meanDisplacement, 2, 'omitnan'); % nBins x 1
-                        semAcrossReplicates = std(meanDisplacement, 0, 2, 'omitnan') / sqrt(size(meanDisplacement, 2));
+                        meanDistance = squeeze(mean(allBinnedDistances, 3, 'omitnan')); % nBins x nReplicates
+                        meanAcrossReplicates = mean(meanDistance, 2, 'omitnan'); % nBins x 1
+                        semAcrossReplicates = std(meanDistance, 0, 2, 'omitnan') / sqrt(size(meanDistance, 2));
                         
                         % Store results for this stimulus and sex
                         % Use a composite key: "stimName:sex" to handle stimulus names with spaces
@@ -341,13 +299,13 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                         if isKey(genotypeSexData, compositeKey)
                             data = genotypeSexData(compositeKey);
                             binTimeCenters = data.binTimeCenters;
-                            meanDisplacement = data.mean;
-                            semDisplacement = data.sem;
+                            meanDistance = data.mean;
+                            semDistance = data.sem;
                             
                             % Ensure vectors are column vectors for fill function
                             binTimeCenters = binTimeCenters(:);
-                            meanDisplacement = meanDisplacement(:);
-                            semDisplacement = semDisplacement(:);
+                            meanDistance = meanDistance(:);
+                            semDistance = semDistance(:);
 
                             % Make sure the color matches sex
                             if strcmpi(sex, 'M') || strcmpi(sex, 'Male')
@@ -360,8 +318,8 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                             end
                             
                             % Add error shading (polygon envelope) - don't include in legend
-                            upperBound = meanDisplacement + semDisplacement;
-                            lowerBound = meanDisplacement - semDisplacement;
+                            upperBound = meanDistance + semDistance;
+                            lowerBound = meanDistance - semDistance;
                             fill(a, [binTimeCenters; flipud(binTimeCenters)], ...
                                 [upperBound; flipud(lowerBound)], ...
                                 lineColor, ...
@@ -369,7 +327,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                                 'EdgeColor', 'none', ...
                                 'HandleVisibility', 'off');
 
-                            lineHandle = plot(a, binTimeCenters, meanDisplacement, ...
+                            lineHandle = plot(a, binTimeCenters, meanDistance, ...
                                 'LineStyle', lineStyles{stimIdx}, ...
                                 'Color', lineColor, ...
                                 'LineWidth', 2, ...
@@ -378,16 +336,42 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                             % Collect line handle for legend
                             lineHandles = [lineHandles; lineHandle]; %#ok<AGROW>
                             lineLabels{end+1} = sprintf('%s - %s (n=%d)', stimName, sex, data.nreplicates); %#ok<AGROW>
+
+                            % Force axis to use tick every 1 second and limit to range of ResponseWindow
+                            xlim(a, kvargs.ResponseWindow);
+                            xticks(a, floor(kvargs.ResponseWindow(1)):1:ceil(kvargs.ResponseWindow(2)));
                         end
                     end
                 end
-                
+                    
                 yline(a, 0, 'k--', 'LineWidth', 1);
                 xline(a, 0, '--', 'LineWidth', 1, 'Color', [0.3, 0.3, 0.3]);
-                    
+                
                 title(a, sprintf('[%s]\n%s  %s\n(Bin = %.2fs, Bout Range = %s)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth, percentRangeStr), 'Interpreter', 'none');
                 xlabel(a, 'Time (s) relative to Bout Onset');
-                ylabel(a, sprintf('Cumulative Displacement (normalized)\nPositive = toward stimulus, Negative = away from stimulus'));
+                ylabel(a, sprintf('Distance from Midline (normalized)'));
+                
+                % Y limit should be at least [-0.3, 0.3]
+                % But if either max or min exceeds that, expand accordingly plus 10% margin
+                % While keeping 0 at Y center
+                yLims = ylim(a);
+                yMaxAbs = max(abs(yLims));
+                if yMaxAbs < 0.3
+                    yMaxAbs = 0.3;
+                else
+                    yMaxAbs = yMaxAbs * 1.1; % add 10% margin
+                end
+                ylim(a, [-yMaxAbs, yMaxAbs]);
+                yLims = ylim(a); % get updated yLims after setting
+
+                % Add stimulus labels at top-left and bottom-left corners
+                xLimits = xlim(a);
+                xPosLeft = xLimits(2) - 0.05 * (xLimits(2) - xLimits(1));
+                yPosTop = yLims(2) - 0.05 * (yLims(2) - yLims(1));
+                yPosBottom = yLims(1) + 0.05 * (yLims(2) - yLims(1));
+                text(a, xPosLeft, yPosBottom, thisStimSet{1}, 'Color', 'black', 'FontWeight', 'bold', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', 'Interpreter', 'none');
+                text(a, xPosLeft, yPosTop, thisStimSet{2}, 'Color', 'black', 'FontWeight', 'bold', 'HorizontalAlignment', 'right', 'VerticalAlignment', 'top', 'Interpreter', 'none');
+                
                 if ~isempty(lineHandles)
                     legend(a, lineHandles, lineLabels, 'Location', 'southwest', 'Interpreter', 'none');
                 end
