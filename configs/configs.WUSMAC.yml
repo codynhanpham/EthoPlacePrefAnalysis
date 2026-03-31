@@ -4,7 +4,7 @@ preferences:
 
 defaults:
   stimuli_directory: "../../Stimuli/playlists"
-  master_metadata_table: "../../Place Preferences - Master Metadata.xlsx"
+  master_metadata_table: "../../WUSMAC - Place Preferences - Master Metadata.xlsx"
   project_root: "../../ETHOVISION"
   tracking_platform: "EthoVision"
 

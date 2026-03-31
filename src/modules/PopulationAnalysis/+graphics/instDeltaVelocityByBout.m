@@ -62,8 +62,58 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
     % Within each plot, the stimulus (within the set) will be represented by line style, and Sex by color within each plot
     % With 2 stimuli per set, there will be 2 line styles (e.g., solid for stim that includes 'normal', dashed for the other stimulus --> 4 lines per plot
 
-    % At the onset of each bout, calc the instantaneous velocity, then delta velocity relative to baseline period
+    % At the onset of each bout, calc the instantaneous absolute velocity, then delta velocity relative to baseline period
     % Bin the distance data into time bins, then average across replicates/animals belonging to the same Strain/Genotype/Sex group
 
+    nplots = nstrains * nstimsets * ngenotypes;
 
+    ncols = ceil(sqrt(nplots));
+    nrows = ceil(nplots / ncols);
+
+    [screensize, videoaspect] = deal(get(0, 'ScreenSize'), ncols/nrows);
+    [figW, figH] = ui.dynamicFigureSize(videoaspect, 0);
+
+    % Center the figure on the primary screen
+    figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
+
+    f = figure('Name', sprintf("Instantaneous Velocity By Bout (Bin Size: %.3f sec)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
+    t = tiledlayout(f, nrows, ncols, 'Padding', 'compact', 'TileSpacing', 'compact');
+    t.Title.String = kvargs.Title;
+    t.Title.FontWeight = 'bold';
+
+    for stimsetIdx = 1:nstimsets
+        thisStimSet = stimSets{stimsetIdx};
+        thisStdTable = standardizedTable(stimsetIdx);
+        stimPeriodTable = thisStdTable.centerpointData;
+        stimPeriodTable = stimPeriodTable(:, ismember(stimPeriodTable.Properties.VariableNames, {'Trial time', 'Stimulus name', 'Distance from Midline'} ));
+        trialTime = stimPeriodTable{:, 'Trial time'};
+        distanceFromMidlineMatrix = stimPeriodTable{:, 'Distance from Midline'};
+        columnByStrainOrder = {thisStdTable.animalMetadata.values().strain};
+        columnByGenotypeOrder = {thisStdTable.animalMetadata.values().genotype};
+        columnBySexOrder = {thisStdTable.animalMetadata.values().sex};
+
+        
+
+
+    end
+
+end
+
+function [speed, angle] = calcInstantaneousVelocity(centerpointData, timeVector)
+    % Calculate instantaneous velocity (speed and angle) from centerpoint data and time vector
+    % centerpointData: Nx2 array of x,y positions over time
+    % timeVector: Nx1 array of time points corresponding to centerpointData
+
+    % Calculate differences in position and time
+    dx = diff(centerpointData(:,1));
+    dy = diff(centerpointData(:,2));
+    dt = diff(timeVector);
+
+    % Calculate speed and angle
+    speed = sqrt(dx.^2 + dy.^2) ./ dt; % Speed is distance over time
+    angle = atan2d(dy, dx); % Angle in degrees, relative to the positive x-axis: 0 degrees is to the right, 90 degrees is up, -90 degrees is down
+
+    % Pad the speed and angle with NaN for the first time point (since diff reduces length by 1)
+    speed = [NaN; speed];
+    angle = [NaN; angle];
 end

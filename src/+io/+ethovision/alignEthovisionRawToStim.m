@@ -160,7 +160,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         dob = metadataRow.('ANIMAL_DOB');
         cagecode = char(metadataRow.('CAGE_CODE'));
         id = char(metadataRow.('ANIMAL_ID'));
-        source = char(metadataRow.('SOURCE_CODE'));
+
+        % Some exp may not have SOURCE_CODE column, as it is not a required header
+        if ismember('SOURCE_CODE', metadataRow.Properties.VariableNames)
+            source = char(metadataRow.('SOURCE_CODE'));
+        end
 
         if isempty(kvargs.StimulusProtocol)
             kvargs.StimulusProtocol = char(metadataRow.('STIMULUS_PROTOCOL'));
