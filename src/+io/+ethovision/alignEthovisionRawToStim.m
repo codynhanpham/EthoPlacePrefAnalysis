@@ -157,6 +157,9 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         genotype = char(metadataRow.('ANIMAL_GENOTYPE'));
         strain = char(metadataRow.('ANIMAL_STRAIN'));
         age = metadataRow.('ANIMAL_P_AGE');
+        if ~isnumeric(age)
+            age = str2double(string(age));
+        end
         dob = metadataRow.('ANIMAL_DOB');
         cagecode = char(metadataRow.('CAGE_CODE'));
         id = char(metadataRow.('ANIMAL_ID'));

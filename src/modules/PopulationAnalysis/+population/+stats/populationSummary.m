@@ -80,7 +80,10 @@ function summaryTable = populationSummary(ethovisionTrials, stimuliDir, masterMe
         stimTask = strjoin(stimsCleanedSorted, ' || ');
         clear stimsCleanedSorted;
 
-        
+        if ~isnumeric(animalMeta.age)
+            animalMeta.age = str2double(string(animalMeta.age));
+        end
+
         metaKeys = {'Strain', 'Sex', 'Genotype', 'Age', 'Cage Code', 'Animal ID', 'Animal UID', 'Stimulus Task'};
         newRow = table( ...
             categorical(cellstr(animalMeta.strain)), categorical(cellstr(animalMeta.sex)), categorical(cellstr(animalMeta.genotype)), ...

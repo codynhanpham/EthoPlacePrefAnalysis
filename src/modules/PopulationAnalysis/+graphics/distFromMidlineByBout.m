@@ -384,4 +384,23 @@ function f = distFromMidlineByBout(standardizedTable, kvargs)
 
     end
 
+    % Harmonize y-limits across all tile axes so subplots are directly comparable.
+    allAxes = findall(t, 'Type', 'Axes');
+    if ~isempty(allAxes)
+        yLimMatrix = NaN(numel(allAxes), 2);
+        for axIdx = 1:numel(allAxes)
+            thisYLim = ylim(allAxes(axIdx));
+            if all(isfinite(thisYLim))
+                yLimMatrix(axIdx, :) = thisYLim;
+            end
+        end
+
+        globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
+        globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
+
+        if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
+            ylim(allAxes, [globalYMin, globalYMax]);
+        end
+    end
+
 end
