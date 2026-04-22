@@ -8,6 +8,9 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
     %   Name-Value Pair Arguments:
     %       'MainApp' - handle to the main PlacePrefDataGUI_main app (for additional configs + syncing)
     %
+    %       'Title' - Text scalar for the overall figure title. Default is '' (no title).
+    %       'SameYLim' - Logical scalar indicating whether to harmonize y-limits across all subplots for direct comparability. Default is true.
+    %
     %   Outputs:
     %       f - handle to the generated figure
     %
@@ -19,6 +22,7 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
         binSizeSec (1,1) {mustBePositive, mustBeInteger} = 10
 
         kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
+        kvargs.SameYLim (1,1) logical = true % whether to harmonize y-limits across all subplots for direct comparability
     end
 
     requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
@@ -298,26 +302,26 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
 
     end
 
-    % Harmonize y-limits across all tile axes so subplots are directly comparable.
-    allAxes = findall(t, 'Type', 'Axes');
-    if ~isempty(allAxes)
-        yLimMatrix = NaN(numel(allAxes), 2);
-        for axIdx = 1:numel(allAxes)
-            thisYLim = ylim(allAxes(axIdx));
-            if all(isfinite(thisYLim))
-                yLimMatrix(axIdx, :) = thisYLim;
+    if kvargs.SameYLim
+        % Harmonize y-limits across all tile axes so subplots are directly comparable.
+        allAxes = findall(t, 'Type', 'Axes');
+        if ~isempty(allAxes)
+            yLimMatrix = NaN(numel(allAxes), 2);
+            for axIdx = 1:numel(allAxes)
+                thisYLim = ylim(allAxes(axIdx));
+                if all(isfinite(thisYLim))
+                    yLimMatrix(axIdx, :) = thisYLim;
+                end
+            end
+
+            globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
+            globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
+
+            if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
+                ylim(allAxes, [globalYMin, globalYMax]);
             end
         end
-
-        globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
-        globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
-
-        if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
-            ylim(allAxes, [globalYMin, globalYMax]);
-        end
     end
-
-
 
 end
 

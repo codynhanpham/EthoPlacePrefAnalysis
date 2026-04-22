@@ -35,25 +35,21 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         error('dracc:io:L1export:MissingAlignedMatFiles', 'The aligned .mat files corresponding to the data files of the non-multi-arena trials are missing. These .mat files are required for the L1 export. Please make sure they are generated and placed next to their corresponding data files before running this export.\n%s', strjoin(missingMatFiles, '\n'));
     end
 
-    % Similarly, the .media files also need to have a corresponding <base name>.[midline/midpoint].csv file next to them that contains the midline/midpoint data
+    % Similarly, the .media files also need to have a corresponding <base name>.ref.json file.
+    % Auto-migrate legacy midpoint/midline CSV files before validating.
     missingRefFiles = [];
     for i = 1:numel(nonmultiarenatrials)
         trial = nonmultiarenatrials(i);
         mediaFile = trial.media;
         [mediaDir, mediaBaseName, ~] = fileparts(mediaFile);
-        refCsvFile = "";
-        for file = dir(fullfile(mediaDir, strcat(mediaBaseName, ".*.csv")))
-            if startsWith(string(file.name), strcat(mediaBaseName, ".")) && endsWith(string(file.name), ".csv")
-                refCsvFile = fullfile(mediaDir, file.name);
-                break;
-            end
-        end
-        if isempty(refCsvFile) || ~isfile(refCsvFile)
+        graphics.migrateLegacyCSVRefs2JSON(mediaDir);
+        refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
+        if ~isfile(refJsonFile)
             missingRefFiles = [missingRefFiles; string(mediaFile)]; %#ok<AGROW>
         end
     end
     if ~isempty(missingRefFiles)
-        error('dracc:io:L1export:MissingReferenceCsvFiles', 'The reference midpoint/midline .csv files corresponding to the media files of the non-multi-arena trials are missing. These .csv files are required for the L1 export. Please make sure they are generated and placed next to their corresponding media files before running this export.\n%s', strjoin(missingRefFiles, '\n'));
+        error('dracc:io:L1export:MissingReferenceJsonFiles', 'The reference .ref.json files corresponding to the media files of the non-multi-arena trials are missing. These files are required for the L1 export. Please make sure they are generated and placed next to their corresponding media files before running this export.\n%s', strjoin(missingRefFiles, '\n'));
     end
 
 
@@ -86,7 +82,7 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         trial = nonmultiarenatrials(i);
         copyfile(trial.media, mediaOutputDir);
         copyfile(trial.data, dataOutputDir);
-        % Also copy the corresponding aligned .mat file and reference .csv file
+        % Also copy the corresponding aligned .mat file and reference .ref.json file
         [dataDir, dataBaseName, ~] = fileparts(trial.data);
         hashMatFile = "";
         for file = dir(fullfile(dataDir, [dataBaseName, ' - *.mat']))
@@ -100,15 +96,10 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         end
 
         [mediaDir, mediaBaseName, ~] = fileparts(trial.media);
-        refCsvFile = "";
-        for file = dir(fullfile(mediaDir, strcat(mediaBaseName, ".*.csv")))
-            if startsWith(string(file.name), strcat(mediaBaseName, ".")) && endsWith(string(file.name), ".csv")
-                refCsvFile = fullfile(mediaDir, file.name);
-                break;
-            end
-        end
-        if ~isempty(refCsvFile)
-            copyfile(refCsvFile, mediaOutputDir);
+        graphics.migrateLegacyCSVRefs2JSON(mediaDir);
+        refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
+        if isfile(refJsonFile)
+            copyfile(refJsonFile, mediaOutputDir);
         end
     end
 

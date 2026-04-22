@@ -4,8 +4,9 @@ function [fig, referencePoint] = uiselectReferencePoint(kvargs)
 %   that will be used as a reference point for calculating distances relative to in place preference analysis.
 %
 %   This returns the figure handle and the selected reference point coordinates.
-%   The function also saves the reference point to a .midpoint.csv file next to the video file.
-%   CSV format: "x,y\n<value_x>,<value_y>\n"
+%   The function also saves the reference point to a .ref.json file next to the video file.
+%    JSON format: {"midpoint": {"x": <value_x>, "y": <value_y>}}
+%    CSV format (legacy): "x,y\n<value_x>,<value_y>\n"
 %
 %   If MasterMetadataTable, TrackingDataFile, and TrackingProvider are provided, the function will use the first frame with stimulus onset as the default frame to display instead of the first frame in video.
 %
@@ -56,7 +57,10 @@ end
 
 videoFilePath = kvargs.VideoFile;
 [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
-midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
+referencePointFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+
+% Upgrade any legacy .midpoint.csv files in the folder to per-video .ref.json files.
+graphics.migrateLegacyCSVRefs2JSON(videoDir);
 
 v = VideoReader(videoFilePath);
 % Read the specified frame
@@ -66,26 +70,31 @@ vidHeight = v.Height;
 frame = readFrame(v);
 
 referencePoint = [vidWidth/2, vidHeight/2]; % Default to center point of frame
-% If midpoint file exists, load that as default reference point
-if ~isfile(midPointFilePath)
-    % Find any existing midpoint files in the same directory and use that as default
-    midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
-    if ~isempty(midPointFiles)
-        midPointFilePath = fullfile(videoDir, midPointFiles(end).name);
+% If current video's .ref.json does not exist, use any existing .ref.json as seed.
+referencePointSeedFilePath = referencePointFilePath;
+if ~isfile(referencePointSeedFilePath)
+    referencePointFiles = dir(fullfile(videoDir, '*.ref.json'));
+    if ~isempty(referencePointFiles)
+        referencePointSeedFilePath = fullfile(videoDir, referencePointFiles(end).name);
     end
 end
-if isfile(midPointFilePath)
+
+if isfile(referencePointSeedFilePath)
     try
-        midpointData = readtable(midPointFilePath);
-        if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
-            referencePoint = [midpointData.x(1), midpointData.y(1)];
+        jsonData = jsondecode(fileread(referencePointSeedFilePath));
+        if isfield(jsonData, 'midpoint')
+            if isstruct(jsonData.midpoint) && isfield(jsonData.midpoint, 'x') && isfield(jsonData.midpoint, 'y')
+                referencePoint = [jsonData.midpoint.x, jsonData.midpoint.y];
+            elseif isnumeric(jsonData.midpoint) && numel(jsonData.midpoint) >= 2
+                referencePoint = [jsonData.midpoint(1), jsonData.midpoint(2)];
+            end
         end
     catch ME
-        warning('UISELECTREFERENCEPOINT:LoadError', 'Error loading existing midpoint file: %s\nUsing the center of the frame as default.\n%s', midPointFilePath, ME.message);
+        warning('UISELECTREFERENCEPOINT:LoadError', 'Error loading existing reference point file: %s\nUsing the center of the frame as default.\n%s', referencePointSeedFilePath, ME.message);
     end
 end
-% Reset the midPointFilePath to the current video file's midpoint file (to be saved later)
-midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
+% Reset the path to the current video's .ref.json file (to be saved later)
+referencePointFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
 
 name = strcat(header("Experiment"), " - ", header("Trial name"));
 name = strcat(name, " @ ", string(arenaName));
@@ -114,13 +123,13 @@ figData = struct('referencePoint', referencePoint, 'userInteracted', false);
 set(fig, 'UserData', figData);
 
 % Set up click callback for the axes
-set(ax, 'ButtonDownFcn', @(src, event) axesClickCallback(src, event, ax, markerHandle, midPointFilePath, fig));
+set(ax, 'ButtonDownFcn', @(src, event) axesClickCallback(src, event, ax, markerHandle, referencePointFilePath, fig));
 
 % Set up scroll wheel zoom callback
 set(fig, 'WindowScrollWheelFcn', @(src, event) scrollWheelCallback(src, event, ax));
 
 % Set up figure close callback to save the final reference point
-set(fig, 'CloseRequestFcn', @(src, event) figureCloseCallback(src, event, midPointFilePath));
+set(fig, 'CloseRequestFcn', @(src, event) figureCloseCallback(src, event, referencePointFilePath));
 
 % Wait for figure to close and get the final reference point
 waitfor(fig);
@@ -135,7 +144,7 @@ end
 
 
 
-function axesClickCallback(~, ~, ax, markerHandle, midPointFilePath, fig)
+function axesClickCallback(~, ~, ax, markerHandle, referencePointFilePath, fig)
     % Get the current point where the user clicked
     currentPoint = get(ax, 'CurrentPoint');
     newReferencePoint = [currentPoint(1,1), currentPoint(1,2)];
@@ -150,26 +159,21 @@ function axesClickCallback(~, ~, ax, markerHandle, midPointFilePath, fig)
     set(fig, 'UserData', figData);
     
     % Immediately save to file
-    saveReferencePointToFile(newReferencePoint, midPointFilePath);
+    saveReferencePointToFile(newReferencePoint, referencePointFilePath);
     
     % Update title to show coordinates
     title(ax, sprintf('Reference Point: (%.1f, %.1f) px\nClick to update, close window when done', newReferencePoint(1), newReferencePoint(2)), 'Interpreter', 'none');
 end
 
-function figureCloseCallback(src, ~, midPointFilePath)
+function figureCloseCallback(src, ~, referencePointFilePath)
     % Get the final reference point from figure data
     figData = get(src, 'UserData');
     
     if ~isempty(figData) && isfield(figData, 'referencePoint')
         finalReferencePoint = figData.referencePoint;
         
-        % Only save to file if user has interacted
-        % if figData.userInteracted
-        %     saveReferencePointToFile(finalReferencePoint, midPointFilePath);
-        % end
-
         % Always save to file on close
-        saveReferencePointToFile(finalReferencePoint, midPointFilePath);
+        saveReferencePointToFile(finalReferencePoint, referencePointFilePath);
 
         % Store in base workspace for return, this will be cleared after retrieval
         assignin('base', 'uiselectReferencePoint_result', finalReferencePoint);
@@ -179,21 +183,33 @@ function figureCloseCallback(src, ~, midPointFilePath)
     delete(src);
 end
 
-function saveReferencePointToFile(referencePoint, midPointFilePath)
-    % Save the reference point to CSV file
-    % CSV format: "x,y\n<value_x>,<value_y>\n"
+function saveReferencePointToFile(referencePoint, referencePointFilePath)
+    % Save the reference point to .ref.json in midpoint field while preserving other JSON fields.
+    jsonData = struct();
+    if isfile(referencePointFilePath)
+        try
+            jsonData = jsondecode(fileread(referencePointFilePath));
+        catch ME
+            warning('UISELECTREFERENCEPOINT:SaveLoadError', 'Error loading existing reference point file for saving: %s\nOverwriting midpoint field with new data.\n%s', referencePointFilePath, ME.message);
+        end
+    end
+    jsonData.midpoint.x = referencePoint(1);
+    jsonData.midpoint.y = referencePoint(2);
+
     try
-        fileID = fopen(midPointFilePath, 'w');
+        jsonText = jsonencode(jsonData);
+        fileID = fopen(referencePointFilePath, 'w');
         if fileID == -1
-            warning('Could not open file for writing: %s', midPointFilePath);
+            warning('Could not open file for writing: %s', referencePointFilePath);
             return;
         end
-        fprintf(fileID, 'x,y\n%.6f,%.6f\n', referencePoint(1), referencePoint(2));
+        fwrite(fileID, jsonText, 'char');
         fclose(fileID);
     catch ME
         warning('UISELECTREFERENCEPOINT:SaveError', 'Error saving reference point to file: %s', ME.message);
     end
 end
+
 
 function scrollWheelCallback(~, event, ax)
     % Implement scroll wheel zoom functionality

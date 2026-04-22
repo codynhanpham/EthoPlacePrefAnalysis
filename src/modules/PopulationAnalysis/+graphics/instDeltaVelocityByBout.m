@@ -24,6 +24,9 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
     %       'BinWidth' : Scalar double specifying the width of time bins (in seconds) for averaging distance data. Default is NaN, which uses the smallest time resolution available. Set to 0 or NaN for no binning, or Inf for one single bin over the whole ResponseWindow.
     %       'BoutRange' : 1x2 double array specifying which bouts to include. Default is [1, Inf] (all bouts). Use integers for bout indices (e.g., [1,3]), or floats in [0,1] for percentage (e.g., [0,0.5] for first 50% of bouts).
     %
+    %       'Title' : Text scalar for the overall figure title. Default is '' (no title).
+    %       'SameYLim' : Logical scalar indicating whether to harmonize y-limits across all subplots for direct comparability. Default is true.
+    %
     %   Outputs:
     %       f : Figure handle of the generated plot
     %
@@ -39,6 +42,7 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
         kvargs.BoutRange (1,2) double = [1, Inf] % which bouts to include. Use integers for bout indices (e.g., [1,3]), or floats in [0,1] for percentage (e.g., [0,0.5] for first 50% of bouts)
 
         kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
+        kvargs.SameYLim (1,1) logical = true % whether to harmonize y-limits across all subplots for direct comparability
     end
 
     % Make sure response window is valid: end > start
@@ -74,6 +78,12 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
     % At each bout, calculate instantaneous speed, then subtract the
     % baseline reference value (mean within BaselineWindow).
     % Bin the delta-speed data into time bins, then average across replicates/animals belonging to the same Strain/Genotype/Sex group.
+
+
+    NORMAL_LINE_STYLE = {'-'}; % stimuliSorted should place 'normal' stimulus first
+    OTHER_LINE_STYLE = {'-.', '--', ':'}; % for additional stimuli, each gets a different non-solid line style
+    knownOtherStimLineStyles = configureDictionary('char', 'char'); % Map known non-normal stimulus keywords to specific line styles (e.g., 'inverted' -> '-.', 'white noise' -> '--', etc.)
+
 
     nplots = nstrains * nstimsets * ngenotypes;
 
@@ -312,8 +322,6 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
 
 
                 % Plot the results for this strain x genotype
-                % Different line styles for different stimuli, different colors for different sexes
-                lineStyles = {'-', '-.'}; % solid for stim1, dashed for stim2
                 colorMap = {'blue', 'red'}; % blue for M, red for F
 
                 lineHandles = [];
@@ -330,6 +338,24 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
                     % Plot lines for each stimulus
                     for stimIdx = 1:length(stimsBouts.keys())
                         stimName = stimsBouts.keys{stimIdx};
+
+                        % Determine line style for this stimulus
+                        if stimIdx == 1
+                            lineStyle = NORMAL_LINE_STYLE{1}; % normal stimulus gets solid line
+                        else
+                            assignedStyle = false;
+                            if isKey(knownOtherStimLineStyles, stimName)
+                                lineStyle = knownOtherStimLineStyles(stimName);
+                                assignedStyle = true;
+                            end
+                            if ~assignedStyle
+                                % If no known keyword matches, assign a line style based on this stimulus's index among the non-normal stimuli
+                                currentKnownOtherStimIndex = length(knownOtherStimLineStyles.keys()) + 1; % index for this new unknown stimulus
+                                lineStyle = OTHER_LINE_STYLE{mod(currentKnownOtherStimIndex-1, length(OTHER_LINE_STYLE)) + 1}; % cycle through OTHER_LINE_STYLE
+                                knownOtherStimLineStyles(stimName) = lineStyle;
+                            end
+                        end
+
                         compositeKey = sprintf('%s:%s', stimName, sex);
                         if isKey(genotypeSexData, compositeKey)
                             data = genotypeSexData(compositeKey);
@@ -362,7 +388,7 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
                                 'HandleVisibility', 'off');
 
                             lineHandle = plot(a, binTimeCenters, meanDeltaSpeed, ...
-                                'LineStyle', lineStyles{stimIdx}, ...
+                                'LineStyle', lineStyle, ...
                                 'Color', lineColor, ...
                                 'LineWidth', 2, ...
                                 'DisplayName', sprintf('%s - %s', stimName, sex));
@@ -397,22 +423,24 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
 
     end
 
-    % Harmonize y-limits across all tile axes so subplots are directly comparable.
-    allAxes = findall(t, 'Type', 'Axes');
-    if ~isempty(allAxes)
-        yLimMatrix = NaN(numel(allAxes), 2);
-        for axIdx = 1:numel(allAxes)
-            thisYLim = ylim(allAxes(axIdx));
-            if all(isfinite(thisYLim))
-                yLimMatrix(axIdx, :) = thisYLim;
+    if kvargs.SameYLim
+        % Harmonize y-limits across all tile axes so subplots are directly comparable.
+        allAxes = findall(t, 'Type', 'Axes');
+        if ~isempty(allAxes)
+            yLimMatrix = NaN(numel(allAxes), 2);
+            for axIdx = 1:numel(allAxes)
+                thisYLim = ylim(allAxes(axIdx));
+                if all(isfinite(thisYLim))
+                    yLimMatrix(axIdx, :) = thisYLim;
+                end
             end
-        end
 
-        globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
-        globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
+            globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
+            globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
 
-        if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
-            ylim(allAxes, [globalYMin, globalYMax]);
+            if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
+                ylim(allAxes, [globalYMin, globalYMax]);
+            end
         end
     end
 

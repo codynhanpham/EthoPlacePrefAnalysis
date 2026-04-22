@@ -318,7 +318,9 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         end
     end
 
-    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    % MidlineX and midlineY, in px, top-left is (0,0), loaded from .ref.json
+    % (legacy .midpoint.csv/.midline.csv are auto-migrated) depending on
+    % config's defaults.distance2refmode.
     refmode = 'line'; % default
     fromConfigKey = {'defaults', 'distance2refmode'};
     if validator.nestedStructFieldExists(configs, fromConfigKey)
@@ -332,7 +334,9 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         end
     end
 
-    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    % MidlineX and midlineY, in px, top-left is (0,0), loaded from .ref.json
+    % (legacy .midpoint.csv/.midline.csv are auto-migrated) depending on
+    % config's defaults.distance2refmode.
     refmode = 'line'; % default
     fromConfigKey = {'defaults', 'distance2refmode'};
     if validator.nestedStructFieldExists(configs, fromConfigKey)
@@ -346,6 +350,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         end
     end
     [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+    graphics.migrateLegacyCSVRefs2JSON(videoDir);
     trialTime = stimPeriodTable{:,'Trial time'};
     switch refmode
         % Note that in any condition, at this point centerPos already has been converted to image coordinates (top-left is (0,0)) AND adjusted by CenterOffset_px from config
@@ -354,29 +359,33 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
             % Default values: midpoint is at center of video frame
             midlineX = vidWidth / 2;
             midlineY = vidHeight / 2;
-            midPointFilePath = fullfile(videoDir, strcat(videoBaseName, '.midpoint.csv'));
-            if ~isfile(midPointFilePath)
-                % Find any existing midpoint files in the same directory and use that as default
-                midPointFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
-                if ~isempty(midPointFiles)
-                    midPointFilePathFallback = fullfile(videoDir, midPointFiles(end).name);
-                    % clone this file to be the current video's midpoint file
-                    copyfile(midPointFilePathFallback, midPointFilePath);
+            referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+            referenceSeedFilePath = referenceFilePath;
+            if ~isfile(referenceSeedFilePath)
+                referenceFiles = dir(fullfile(videoDir, '*.ref.json'));
+                if ~isempty(referenceFiles)
+                    referenceSeedFilePath = fullfile(videoDir, referenceFiles(end).name);
                 end
             end
 
-            % If midpoint file exists, load that as reference point
+            % If midpoint exists in reference file, load that as reference point.
             fromfile_ok = false;
-            if isfile(midPointFilePath)
+            if isfile(referenceSeedFilePath)
                 try
-                    midpointData = readtable(midPointFilePath);
-                    if all(ismember({'x', 'y'}, midpointData.Properties.VariableNames))
-                        midlineX = midpointData.x(1);
-                        midlineY = midpointData.y(1);
-                        fromfile_ok = true;
+                    jsonData = jsondecode(fileread(referenceSeedFilePath));
+                    if isfield(jsonData, 'midpoint')
+                        if isstruct(jsonData.midpoint) && isfield(jsonData.midpoint, 'x') && isfield(jsonData.midpoint, 'y')
+                            midlineX = jsonData.midpoint.x;
+                            midlineY = jsonData.midpoint.y;
+                            fromfile_ok = true;
+                        elseif isnumeric(jsonData.midpoint) && numel(jsonData.midpoint) >= 2
+                            midlineX = jsonData.midpoint(1);
+                            midlineY = jsonData.midpoint(2);
+                            fromfile_ok = true;
+                        end
                     end
                 catch ME
-                    warning('graphics:trialPlacePref:midPointFilePath:LoadError', 'Error loading existing midpoint file: %s\n%s', midPointFilePath, ME.message);
+                    warning('graphics:trialPlacePref:referencePointFilePath:LoadError', 'Error loading reference midpoint from file: %s\n%s', referenceSeedFilePath, ME.message);
                 end
             end
             if ~fromfile_ok
@@ -405,27 +414,27 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
             % Default values: midline is vertical line at center of video frame
             midlineX = [vidWidth/2, vidWidth/2];
             midlineY = [0, vidHeight];
-            midLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.midline.csv'));
-            if ~isfile(midLineFilePath)
-                % Find any existing midline files in the same directory and use that as default
-                midLineFiles = dir(fullfile(videoDir, '*.midline.csv'));
-                if ~isempty(midLineFiles)
-                    midLineFilePathFallback = fullfile(videoDir, midLineFiles(end).name);
-                    % clone this file to be the current video's midline file
-                    copyfile(midLineFilePathFallback, midLineFilePath);
+            referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+            referenceSeedFilePath = referenceFilePath;
+            if ~isfile(referenceSeedFilePath)
+                referenceFiles = dir(fullfile(videoDir, '*.ref.json'));
+                if ~isempty(referenceFiles)
+                    referenceSeedFilePath = fullfile(videoDir, referenceFiles(end).name);
                 end
             end
-            % If midline file exists, load that as reference line
-            if isfile(midLineFilePath)
+
+            % If midline exists in reference file, load that as reference line.
+            if isfile(referenceSeedFilePath)
                 try
-                    midlineData = readtable(midLineFilePath);
-                    if all(ismember({'x', 'y'}, midlineData.Properties.VariableNames))
-                        % Get the first two points to define the midline
-                        midlineX = midlineData.x(1:2)';
-                        midlineY = midlineData.y(1:2)';
+                    jsonData = jsondecode(fileread(referenceSeedFilePath));
+                    if isfield(jsonData, 'midline') && isfield(jsonData.midline, 'x') && isfield(jsonData.midline, 'y')
+                        if numel(jsonData.midline.x) >= 2 && numel(jsonData.midline.y) >= 2
+                            midlineX = [jsonData.midline.x(1), jsonData.midline.x(2)];
+                            midlineY = [jsonData.midline.y(1), jsonData.midline.y(2)];
+                        end
                     end
                 catch ME
-                    warning('graphics:trialPlacePref:midLineFilePath:LoadError', 'Error loading existing midline file: %s\n%s', midLineFilePath, ME.message);
+                    warning('graphics:trialPlacePref:referenceLineFilePath:LoadError', 'Error loading reference midline from file: %s\n%s', referenceSeedFilePath, ME.message);
                 end
             end
 

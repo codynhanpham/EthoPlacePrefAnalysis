@@ -73,7 +73,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     end
 
 
-    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint.csv or .midline.csv data depending on config's defaults.distance2refmode
+    % MidlineX and midlineY, in px, top-left is (0,0), corrected by the relevant .midpoint or .midline field in *.ref.json data depending on config's defaults.distance2refmode
     refmode = 'line'; % default
     fromConfigKey = {'defaults', 'distance2refmode'};
     if validator.nestedStructFieldExists(kvargs.Config, fromConfigKey)

@@ -4,8 +4,9 @@ function [fig, pointA, pointB] = uiselectReferenceLine(kvargs)
 %   that will define a reference line for place preference analysis.
 %
 %   This returns the figure handle and the two selected point coordinates.
-%   The function also saves the reference line points to a .midline.csv file next to the video file.
-%   CSV format: "x,y\n<value_x_A>,<value_y_A>\n<value_x_B>,<value_y_B>\n"
+%   The function also saves the reference line points to a .ref.json file next to the video file.
+%    JSON format: {"midline": {"x": [<value_x_A>, <value_x_B>], "y": [<value_y_A>, <value_y_B>]}}
+%    CSV format (legacy): "x,y\n<value_x_A>,<value_y_A>\n<value_x_B>,<value_y_B>\n"
 %
 %   If MasterMetadataTable, TrackingDataFile, and TrackingProvider are provided, the function will use the first frame with stimulus onset as the default frame to display instead of the first frame in video.
 %
@@ -56,7 +57,10 @@ end
 
 videoFilePath = kvargs.VideoFile;
 [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
-referenceLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.midline.csv'));
+referenceLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+
+% Upgrade any legacy .midline.csv files in the folder to per-video .ref.json files.
+graphics.migrateLegacyCSVRefs2JSON(videoDir);
 
 v = VideoReader(videoFilePath);
 % Read the specified frame
@@ -70,27 +74,31 @@ centerX = vidWidth / 2;
 pointA = [centerX, vidHeight * 0.15];
 pointB = [centerX, vidHeight * 0.85];
 
-% If referenceline file exists, load that as default
-if ~isfile(referenceLineFilePath)
-    % Find any existing referenceline files in the same directory and use that as default
-    referenceLineFiles = dir(fullfile(videoDir, '*.midline.csv'));
+% If current video's .ref.json does not exist, use any existing .ref.json as seed.
+referenceLineSeedFilePath = referenceLineFilePath;
+if ~isfile(referenceLineSeedFilePath)
+    referenceLineFiles = dir(fullfile(videoDir, '*.ref.json'));
     if ~isempty(referenceLineFiles)
-        referenceLineFilePath = fullfile(videoDir, referenceLineFiles(end).name);
+        referenceLineSeedFilePath = fullfile(videoDir, referenceLineFiles(end).name);
     end
 end
-if isfile(referenceLineFilePath)
+
+if isfile(referenceLineSeedFilePath)
     try
-        lineData = readtable(referenceLineFilePath);
-        if all(ismember({'x', 'y'}, lineData.Properties.VariableNames)) && height(lineData) >= 2
-            pointA = [lineData.x(1), lineData.y(1)];
-            pointB = [lineData.x(2), lineData.y(2)];
+        jsonData = jsondecode(fileread(referenceLineSeedFilePath));
+        % midline points should be in struct data.midline.x and data.midline.y as 2-element vectors
+        if isfield(jsonData, 'midline') && isfield(jsonData.midline, 'x') && isfield(jsonData.midline, 'y')
+            if numel(jsonData.midline.x) >= 2 && numel(jsonData.midline.y) >= 2
+                pointA = [jsonData.midline.x(1), jsonData.midline.y(1)];
+                pointB = [jsonData.midline.x(2), jsonData.midline.y(2)];
+            end
         end
     catch ME
-        warning('UISELECTREFERENCELINE:LoadError', 'Error loading existing referenceline file: %s\nUsing default vertical line.\n%s', referenceLineFilePath, ME.message);
+        warning('UISELECTREFERENCELINE:LoadError', 'Error loading existing referenceline file: %s\nUsing default vertical line.\n%s', referenceLineSeedFilePath, ME.message);
     end
 end
 % Reset the referenceLineFilePath to the current video file's referenceline file (to be saved later)
-referenceLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.midline.csv'));
+referenceLineFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
 
 name = strcat(header("Experiment"), " - ", header("Trial name"));
 name = strcat(name, " @ ", string(arenaName));
@@ -385,16 +393,28 @@ end
 
 
 function saveReferenceLineToFile(pointA, pointB, referenceLineFilePath)
-    % Save the reference line points to CSV file
-    % CSV format: "x,y\n<value_x_A>,<value_y_A>\n<value_x_B>,<value_y_B>\n"
+    %%Save the reference line points to a .ref.json file in the .midline field
+    % Preserve existing data structure if file already exists, otherwise create new structure
+    jsonData = struct();
+    if isfile(referenceLineFilePath)
+        try
+            jsonData = jsondecode(fileread(referenceLineFilePath));
+        catch ME
+            warning('UISELECTREFERENCELINE:SaveLoadError', 'Error loading existing referenceline file for saving: %s\nOverwriting with new reference line data.\n%s', referenceLineFilePath, ME.message);
+        end
+    end
+    jsonData.midline.x = [pointA(1), pointB(1)];
+    jsonData.midline.y = [pointA(2), pointB(2)];
+
     try
-        fileID = fopen(referenceLineFilePath, 'w');
-        if fileID == -1
-            warning('Could not open file for writing: %s', referenceLineFilePath);
+        jsonText = jsonencode(jsonData);
+        fid = fopen(referenceLineFilePath, 'w');
+        if fid == -1
+            warning('UISELECTREFERENCELINE:SaveError', 'Could not open file for writing: %s', referenceLineFilePath);
             return;
         end
-        fprintf(fileID, 'x,y\n%.6f,%.6f\n%.6f,%.6f\n', pointA(1), pointA(2), pointB(1), pointB(2));
-        fclose(fileID);
+        fwrite(fid, jsonText, 'char');
+        fclose(fid);
     catch ME
         warning('UISELECTREFERENCELINE:SaveError', 'Error saving reference line to file: %s', ME.message);
     end
