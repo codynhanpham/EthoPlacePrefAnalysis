@@ -107,6 +107,17 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
                     userConfig.(field{1}) = defaults.(field{1});
                 end
             end
+            % Carry over any other root-level fields in the original config struct/YAML aside from defaults and tracking_providers
+            otherfields = setdiff(fieldnames(configs), [{'defaults', 'tracking_providers'}, excludeFields]);
+            for i = 1:length(otherfields)
+                field = otherfields{i};
+                % WARNING!!!
+                % TODO: Handle cases where the tracking platform itself defines a field that is also present in the root level of the config YAML
+                % Maybe merge struct?
+                if ~isfield(userConfig, field)
+                    userConfig.(field) = configs.(field);
+                end
+            end
 
             obj.userConfig = userConfig;
             if isfield(userConfig, 'coordsUnit')

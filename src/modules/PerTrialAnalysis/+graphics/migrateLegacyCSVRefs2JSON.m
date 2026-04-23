@@ -13,15 +13,18 @@ arguments
 	videoDir {mustBeFolder}
 end
 
-upgradeMidlineCsvFiles(videoDir);
-upgradeMidpointCsvFiles(videoDir);
-warning('graphics:migrateLegacyCSVRefs2JSON:UpgradeComplete', 'Legacy CSV midline/midpoint reference files in "%s" have been upgraded to JSON format. Please check warnings for any issues during the upgrade process.', videoDir);
-
+count1 = upgradeMidlineCsvFiles(videoDir);
+count2 = upgradeMidpointCsvFiles(videoDir);
+if count1 + count2 > 0
+	warning('graphics:migrateLegacyCSVRefs2JSON:UpgradeComplete', 'Legacy CSV midline/midpoint reference files in "%s" have been upgraded to JSON format. Please check warnings for any issues during the upgrade process.', videoDir);
+end
 end
 
 
-function upgradeMidlineCsvFiles(videoDir)
+function count = upgradeMidlineCsvFiles(videoDir)
+	count = 0;
 	csvFiles = dir(fullfile(videoDir, '*.midline.csv'));
+	
 	for i = 1:numel(csvFiles)
 		csvPath = fullfile(videoDir, csvFiles(i).name);
 		baseName = erase(csvFiles(i).name, '.midline.csv');
@@ -39,6 +42,7 @@ function upgradeMidlineCsvFiles(videoDir)
 				pointB = [lineData.x(2), lineData.y(2)];
 				saveMidlineToRefJson(pointA, pointB, refPath);
 				deleteLegacyCsv(csvPath, 'graphics:migrateLegacyCSVRefs2JSON:LegacyCleanupError');
+				count = count + 1;
 			else
 				warning('graphics:migrateLegacyCSVRefs2JSON:MidlineRefUpgrade', 'Skipping malformed legacy .midline.csv file during upgrade: %s', csvPath);
 			end
@@ -49,7 +53,8 @@ function upgradeMidlineCsvFiles(videoDir)
 end
 
 
-function upgradeMidpointCsvFiles(videoDir)
+function count = upgradeMidpointCsvFiles(videoDir)
+	count = 0;
 	csvFiles = dir(fullfile(videoDir, '*.midpoint.csv'));
 	for i = 1:numel(csvFiles)
 		csvPath = fullfile(videoDir, csvFiles(i).name);
@@ -67,6 +72,7 @@ function upgradeMidpointCsvFiles(videoDir)
 				referencePoint = [midpointData.x(1), midpointData.y(1)];
 				saveMidpointToRefJson(referencePoint, refPath);
 				deleteLegacyCsv(csvPath, 'graphics:migrateLegacyCSVRefs2JSON:LegacyCleanupError');
+				count = count + 1;
 			else
 				warning('graphics:migrateLegacyCSVRefs2JSON:MidpointRefUpgrade', 'Skipping malformed legacy .midpoint.csv file during upgrade: %s', csvPath);
 			end

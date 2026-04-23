@@ -31,6 +31,17 @@ defaults:
   xflip: false # Whether to flip the X coordinates (e.g., if camera view is mirrored or arena is set up in reverse) around the vertical midline. This corrects the directionality towards left/right zones when calculating subject's position relative to the midline/midpoint. Default is false.
   yflip: false # Whether to flip the Y coordinates (e.g., if camera view is upside-down) around the horizontal midline. This is less commonly needed, but provided here for completeness. Default is false.
   distance2refmode: "line" # must be either "line" or "point". "line" mode computes perpendicular distance from reference midline to subject's position; "point" mode computes Euclidean distance from a reference point on the midline. Default is "line".
+  arena_grid_mode: "auto" # must be "auto", "manual" or "FOV": method to define the arena grid bounding box for spatial analyses and visualizations. "auto" will use either the full camera FOV or the recorded exploration range (if tracking data is available) as the basis to define the arena grid; "manual" will use a per-video arena grid defined by drawing a polygon on the video; and "FOV" will enforce the full camera FOV regardless of the tracking data or defined grid. Default is "auto".
+
+
+arena_grid:
+  # Number of vertices for the arena grid polygon when arena_grid_mode is set to "manual". In "auto" or "FOV" modes, n_vertices will always be 4.
+  n_vertices: 4
+  n_tiles: [50, 50] # Number of tiles along x and y dimensions, respectively. Default is [100, 100].
+  score_x_gradient_function: "linear" # How to interpolate the 'score_x_gradient' values across the x-dimension of the arena grid. Must be: linear, quadratic, cubic, spline, makima
+  score_x_gradient: [-1, 0, 1] # The gradient of the preference score along the x-dimension, assuming a perfect rectangle. At least 2 values are required, but more may be required depending on the gradient function and/or the complexity of the gradient. Min will be assigned to the leftmost edge of the arena; and Max will be assigned to the rightmost edge. The expected middle value (inferred from the gradient range), will be matched to the midpoint/midline of the arena (distance2refmode) and interact with the actual reference line/point (in GUI or set in *.ref.json) such that it stretches or compresses the gradient accordingly (in other words, the selected midpoint/line will always have the theoretical middle value of the gradient, and the gradient will stretch/compress from there towards the left and right edges of the arena/grid). Default is [-1, 0, 1] for a linear gradient with 3 points (min, middle, max).
+  score_y_gradient_function: "linear" # same as x
+  score_y_gradient: [0.4, 1, 0.4] # same as x, for the y-dimension. Default is [0.5, 1, 0.5] for a linear gradient that peaks in the middle of the y-dimension. Min will be assigned to the bottom edge of the arena; and Max will be assigned to the top edge.
 
 
 tracking_providers:

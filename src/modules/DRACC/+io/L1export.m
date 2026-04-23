@@ -35,21 +35,29 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         error('dracc:io:L1export:MissingAlignedMatFiles', 'The aligned .mat files corresponding to the data files of the non-multi-arena trials are missing. These .mat files are required for the L1 export. Please make sure they are generated and placed next to their corresponding data files before running this export.\n%s', strjoin(missingMatFiles, '\n'));
     end
 
-    % Similarly, the .media files also need to have a corresponding <base name>.ref.json file.
+    % Similarly, the .media files also need to have a corresponding <base name>.ref.json and a <base name>.ref.arenagrid.mat file.
     % Auto-migrate legacy midpoint/midline CSV files before validating.
     missingRefFiles = [];
+    missingArenaGridFiles = [];
     for i = 1:numel(nonmultiarenatrials)
         trial = nonmultiarenatrials(i);
         mediaFile = trial.media;
         [mediaDir, mediaBaseName, ~] = fileparts(mediaFile);
         graphics.migrateLegacyCSVRefs2JSON(mediaDir);
         refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
+        arenaGridMatFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.arenagrid.mat'));
         if ~isfile(refJsonFile)
             missingRefFiles = [missingRefFiles; string(mediaFile)]; %#ok<AGROW>
+        end
+        if ~isfile(arenaGridMatFile)
+            missingArenaGridFiles = [missingArenaGridFiles; string(mediaFile)]; %#ok<AGROW>
         end
     end
     if ~isempty(missingRefFiles)
         error('dracc:io:L1export:MissingReferenceJsonFiles', 'The reference .ref.json files corresponding to the media files of the non-multi-arena trials are missing. These files are required for the L1 export. Please make sure they are generated and placed next to their corresponding media files before running this export.\n%s', strjoin(missingRefFiles, '\n'));
+    end
+    if ~isempty(missingArenaGridFiles)
+        error('dracc:io:L1export:MissingArenaGridFiles', 'The arena grid .ref.arenagrid.mat files corresponding to the media files of the non-multi-arena trials are missing. These files are required for the L1 export. Please make sure they are generated and placed next to their corresponding media files before running this export.\n%s', strjoin(missingArenaGridFiles, '\n'));
     end
 
 
@@ -100,6 +108,12 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
         if isfile(refJsonFile)
             copyfile(refJsonFile, mediaOutputDir);
+        end
+
+        % Copy the corresponding arena grid file
+        arenaGridMatFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.arenagrid.mat'));
+        if isfile(arenaGridMatFile)
+            copyfile(arenaGridMatFile, mediaOutputDir);
         end
     end
 

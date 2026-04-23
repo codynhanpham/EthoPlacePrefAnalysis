@@ -181,7 +181,8 @@ classdef (Abstract) TrackingProvider < handle
         % The platform specific config is expected to be under tracking_providers.<PlatformName> in the config struct
         % The config typically defines the user's setup (units, arena size, etc.) and tracking parameters
         % At the same time!! Save the original CONFIG_ROOT from the original config struct/YAML in case the config file needs to be referenced later!
-        % Keep values in config.defaults, override the fields if equilvalent ones are defined in tracking_providers.<PlatformName> in the config struct/YAML file 
+        % Keep values in config.defaults, override the fields if equilvalent ones are defined in tracking_providers.<PlatformName> in the config struct/YAML file
+        % Any other root level fields in the config YAML are preserved and returned, wrapped in their original struct form, e.g., configs.preferences, configs.arena_grid
 
         % If there are obj.Props related to the config, they should be set here as well, immediately after loading the config
 
