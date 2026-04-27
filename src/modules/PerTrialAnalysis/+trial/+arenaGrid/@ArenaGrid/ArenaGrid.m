@@ -42,6 +42,23 @@ classdef ArenaGrid
             triToTileRC = double(arenaGrid.lookup.triangle_to_tile_rc);
             nTilesXY = double(arenaGrid.grid.n_tiles_xy);
 
+            % Always recompute score from stored nodes + midline + gradient config so the
+            % score stays consistent with the actual midline position, regardless of what
+            % value was frozen in the file.
+            [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(arenaGrid);
+            if ~isempty(pointA) && ~isempty(pointB) && ...
+                    isfield(arenaGrid.grid, 'nodes_x_px') && isfield(arenaGrid.grid, 'nodes_y_px')
+                if ~isfield(arenaGrid, 'gradient')
+                    warning('trial:arenaGrid:ArenaGrid:MissingGradientConfig', ...
+                        ['Gradient config (function/values) not found in arena grid export. ' ...
+                        'Falling back to default gradient values for score computation. ' ...
+                        'Re-run the reference line UI to persist the correct gradient config.']);
+                end
+                [recomputedScore, ~] = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(arenaGrid, pointA, pointB);
+                arenaGrid.score = recomputedScore;
+                arenaGrid.score_vector = recomputedScore(:);
+            end
+
             obj.arena_grid = arenaGrid;
             obj.triangulationObj = triangulation(triangles, vertices);
             obj.scoreMatrix = double(arenaGrid.score);
@@ -70,7 +87,7 @@ classdef ArenaGrid
             end
         end
 
-        function score = queryScore(obj, xy)
+        function score = queryScore(obj, xy, args)
             %QUERYSCORE Return score only for each XY.
             [~, ~, score] = obj.query(xy);
         end
@@ -97,6 +114,11 @@ classdef ArenaGrid
         function arenaGrid = export(obj)
             %EXPORT Return the validated arena_grid struct held by this object.
             arenaGrid = obj.arena_grid;
+        end
+
+        function [pointA, pointB] = refMidline(obj)
+            %REFMIDLINE Return midline points from ref.midline if available.
+            [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(obj.arena_grid);
         end
 
         function xyCartesian = crt2cartesian(obj, xyCrt)
@@ -214,6 +236,22 @@ classdef ArenaGrid
                     end
                 end
             end
+
+            if isfield(gradientExport, 'ref') && isstruct(gradientExport.ref) && ...
+                    isfield(gradientExport.ref, 'midline')
+                midline = gradientExport.ref.midline;
+                if ~isstruct(midline) || ~isfield(midline, 'x') || ~isfield(midline, 'y')
+                    error('trial:arenaGrid:ArenaGrid:InvalidMidlineRef', ...
+                        'ref.midline must contain x and y fields.');
+                end
+
+                x = double(midline.x);
+                y = double(midline.y);
+                if numel(x) ~= 2 || numel(y) ~= 2 || any(~isfinite(x), 'all') || any(~isfinite(y), 'all')
+                    error('trial:arenaGrid:ArenaGrid:InvalidMidlineRef', ...
+                        'ref.midline.x and ref.midline.y must be finite 1x2 vectors.');
+                end
+            end
         end
 
         function xyCartesian = convertCrtToCartesian(xyCrt, videoHeight)
@@ -228,6 +266,30 @@ classdef ArenaGrid
             xyCartesian = trial.arenaGrid.ArenaGrid.normalizeXY(xyCartesian);
             videoHeight = trial.arenaGrid.ArenaGrid.normalizeVideoHeight(videoHeight);
             xyCrt = [xyCartesian(:,1), videoHeight - xyCartesian(:,2)];
+        end
+
+        function [pointA, pointB] = extractMidline(gradientExport)
+            %EXTRACTMIDLINE Return [x y] points from ref.midline when present.
+            pointA = [];
+            pointB = [];
+            if ~isstruct(gradientExport) || ~isfield(gradientExport, 'ref') || ...
+                    ~isstruct(gradientExport.ref) || ~isfield(gradientExport.ref, 'midline')
+                return;
+            end
+
+            midline = gradientExport.ref.midline;
+            if ~isstruct(midline) || ~isfield(midline, 'x') || ~isfield(midline, 'y')
+                return;
+            end
+
+            x = double(midline.x);
+            y = double(midline.y);
+            if numel(x) < 2 || numel(y) < 2 || any(~isfinite(x(1:2)), 'all') || any(~isfinite(y(1:2)), 'all')
+                return;
+            end
+
+            pointA = [x(1), y(1)];
+            pointB = [x(2), y(2)];
         end
     end
 
@@ -257,19 +319,234 @@ classdef ArenaGrid
 
             if isfield(S, 'arena_grid') && isstruct(S.arena_grid)
                 gradientExport = S.arena_grid;
-                return;
-            end
-            if isfield(S, 'gradientExport') && isstruct(S.gradientExport)
+                matVarName = 'arena_grid';
+            elseif isfield(S, 'gradientExport') && isstruct(S.gradientExport)
                 gradientExport = S.gradientExport;
-                return;
-            end
-            if isfield(S, 'uiselectReferenceLine_gradientExport') && isstruct(S.uiselectReferenceLine_gradientExport)
+                matVarName = 'gradientExport';
+            elseif isfield(S, 'uiselectReferenceLine_gradientExport') && isstruct(S.uiselectReferenceLine_gradientExport)
                 gradientExport = S.uiselectReferenceLine_gradientExport;
+                matVarName = 'uiselectReferenceLine_gradientExport';
+            else
+                error('trial:arenaGrid:ArenaGrid:MissingExport', ...
+                    'Could not find a valid export struct in MAT file (expected arena_grid or gradientExport).');
+            end
+
+            % If ref.midline is already present, nothing to upgrade.
+            [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(gradientExport);
+            if ~isempty(pointA) && ~isempty(pointB)
                 return;
             end
 
-            error('trial:arenaGrid:ArenaGrid:MissingExport', ...
-                'Could not find a valid export struct in MAT file (expected arena_grid or gradientExport).');
+            % Older files: backfill ref.midline from the sibling .ref.json.
+            [pointA, pointB] = trial.arenaGrid.ArenaGrid.loadMidlineFromSiblingRefJson(matFilePath);
+            if isempty(pointA) || isempty(pointB)
+                warning('trial:arenaGrid:ArenaGrid:MidlineFallbackFailed', ...
+                    ['No midline found in arena grid MAT or sibling .ref.json: %s\n' ...
+                    'Score gradient may not reflect the correct midline position.'], matFilePath);
+                return;
+            end
+
+            if ~isfield(gradientExport, 'ref') || ~isstruct(gradientExport.ref)
+                gradientExport.ref = struct();
+            end
+            gradientExport.ref.midline = struct(...
+                'x', [double(pointA(1)), double(pointB(1))], ...
+                'y', [double(pointA(2)), double(pointB(2))]);
+
+            % Persist the midline upgrade so future loads skip this fallback path.
+            % Score recomputation is always done in the constructor, not here.
+            try
+                upgradedStruct = gradientExport; %#ok<NASGU>
+                switch matVarName
+                    case 'arena_grid'
+                        arena_grid = upgradedStruct; %#ok<NASGU>
+                        save(matFilePath, 'arena_grid', '-append');
+                    case 'gradientExport'
+                        gradientExport = upgradedStruct; %#ok<NASGU>
+                        save(matFilePath, 'gradientExport', '-append');
+                    case 'uiselectReferenceLine_gradientExport'
+                        uiselectReferenceLine_gradientExport = upgradedStruct; %#ok<NASGU>
+                        save(matFilePath, 'uiselectReferenceLine_gradientExport', '-append');
+                end
+            catch ME
+                warning('trial:arenaGrid:ArenaGrid:MatUpgradeWriteFailed', ...
+                    'Could not persist upgraded arena grid MAT file: %s\n%s', matFilePath, ME.message);
+            end
+        end
+
+        function [pointA, pointB] = loadMidlineFromSiblingRefJson(matFilePath)
+            pointA = [];
+            pointB = [];
+
+            [refDir, refBaseName, ~] = fileparts(matFilePath);
+            jsonBaseName = regexprep(refBaseName, '(?i)\.arenagrid$', '');
+            jsonPath = fullfile(refDir, strcat(jsonBaseName, '.json'));
+            if ~isfile(jsonPath)
+                return;
+            end
+
+            try
+                jsonData = jsondecode(fileread(jsonPath));
+            catch ME
+                warning('trial:arenaGrid:ArenaGrid:RefJsonReadError', ...
+                    'Could not read sibling ref JSON for midline fallback: %s\n%s', jsonPath, ME.message);
+                return;
+            end
+
+            if ~isstruct(jsonData) || ~isfield(jsonData, 'midline') || ~isstruct(jsonData.midline) || ...
+                    ~isfield(jsonData.midline, 'x') || ~isfield(jsonData.midline, 'y')
+                return;
+            end
+
+            x = double(jsonData.midline.x);
+            y = double(jsonData.midline.y);
+            if numel(x) < 2 || numel(y) < 2 || any(~isfinite(x(1:2)), 'all') || any(~isfinite(y(1:2)), 'all')
+                return;
+            end
+
+            pointA = [x(1), y(1)];
+            pointB = [x(2), y(2)];
+        end
+
+        function [scoreMatrix, gradientMeta] = regenerateScoreFromMidline(gradientExport, pointA, pointB)
+            nTilesXY = round(double(gradientExport.grid.n_tiles_xy(:)'));
+            nX = max(1, nTilesXY(1));
+            nY = max(1, nTilesXY(2));
+
+            nodeX = [];
+            nodeY = [];
+            if isfield(gradientExport.grid, 'nodes_x_px') && isfield(gradientExport.grid, 'nodes_y_px')
+                nodeX = double(gradientExport.grid.nodes_x_px);
+                nodeY = double(gradientExport.grid.nodes_y_px);
+            end
+
+            validNodes = ~isempty(nodeX) && ~isempty(nodeY) && ...
+                isequal(size(nodeX), [nY + 1, nX + 1]) && isequal(size(nodeY), [nY + 1, nX + 1]) && ...
+                all(isfinite(nodeX), 'all') && all(isfinite(nodeY), 'all');
+            if ~validNodes
+                error('trial:arenaGrid:ArenaGrid:MissingGridNodes', ...
+                    'Cannot regenerate score without valid grid.nodes_x_px and grid.nodes_y_px.');
+            end
+
+            centers = trial.arenaGrid.ArenaGrid.calculateCellCenters(nodeX, nodeY);
+            allNodes = [nodeX(:), nodeY(:)];
+            xNorm = trial.arenaGrid.ArenaGrid.normalizeXByMidline(centers, pointA, pointB, allNodes);
+
+            [xFunction, yFunction, xValues, yValues] = trial.arenaGrid.ArenaGrid.resolveGradientConfig(gradientExport);
+            xScores = trial.arenaGrid.ArenaGrid.evaluateGradientByFunction(xValues, xFunction, xNorm(:)');
+
+            yNormGrid = repmat((1 - linspace(0, 1, nY + 1))', 1, nX + 1);
+            yNormCenters = 0.25 * ( ...
+                yNormGrid(1:end-1, 1:end-1) + ...
+                yNormGrid(1:end-1, 2:end) + ...
+                yNormGrid(2:end, 2:end) + ...
+                yNormGrid(2:end, 1:end-1));
+            yNormRowMajor = reshape(yNormCenters.', 1, []);
+            yScores = trial.arenaGrid.ArenaGrid.evaluateGradientByFunction(yValues, yFunction, yNormRowMajor);
+
+            scoreVector = xScores(:) .* yScores(:);
+            scoreMatrix = reshape(scoreVector, [nX, nY])';
+            gradientMeta = struct(...
+                'x_function', xFunction, ...
+                'y_function', yFunction, ...
+                'x_values', xValues, ...
+                'y_values', yValues);
+        end
+
+        function centers = calculateCellCenters(nodeX, nodeY)
+            nY = size(nodeX, 1) - 1;
+            nX = size(nodeX, 2) - 1;
+            centers = zeros(nX * nY, 2);
+            idx = 1;
+            for iy = 1:nY
+                for ix = 1:nX
+                    centers(idx, 1) = mean([nodeX(iy, ix), nodeX(iy, ix + 1), nodeX(iy + 1, ix + 1), nodeX(iy + 1, ix)]);
+                    centers(idx, 2) = mean([nodeY(iy, ix), nodeY(iy, ix + 1), nodeY(iy + 1, ix + 1), nodeY(iy + 1, ix)]);
+                    idx = idx + 1;
+                end
+            end
+        end
+
+        function xNorm = normalizeXByMidline(points, pointA, pointB, domainPts)
+            xNorm = 0.5 * ones(size(points, 1), 1);
+
+            direction = pointB - pointA;
+            normDir = norm(direction);
+            if normDir < 1e-9
+                return;
+            end
+
+            normal = [-direction(2), direction(1)] / normDir;
+            if normal(1) < 0
+                normal = -normal;
+            end
+
+            signedD = (points - pointA) * normal';
+            domainD = (domainPts - pointA) * normal';
+
+            maxPos = max(domainD);
+            maxNeg = min(domainD);
+            posDen = max(maxPos, eps);
+            negDen = max(abs(maxNeg), eps);
+
+            posMask = signedD >= 0;
+            xNorm(posMask) = 0.5 + 0.5 * (signedD(posMask) / posDen);
+            xNorm(~posMask) = 0.5 + 0.5 * (signedD(~posMask) / negDen);
+            xNorm = min(max(xNorm, 0), 1);
+        end
+
+        function y = evaluateGradientByFunction(values, methodName, x)
+            values = double(values(:)');
+            if numel(values) < 2
+                values = [values, values];
+            end
+
+            method = lower(string(methodName));
+            xi = linspace(0, 1, numel(values));
+            x = min(max(x, 0), 1);
+
+            switch method
+                case "linear"
+                    y = interp1(xi, values, x, 'linear', 'extrap');
+                case "quadratic"
+                    if numel(values) >= 3
+                        p = polyfit(xi, values, 2);
+                        y = polyval(p, x);
+                    else
+                        y = interp1(xi, values, x, 'linear', 'extrap');
+                    end
+                case "cubic"
+                    y = interp1(xi, values, x, 'pchip', 'extrap');
+                case "spline"
+                    y = interp1(xi, values, x, 'spline', 'extrap');
+                case "makima"
+                    y = interp1(xi, values, x, 'makima', 'extrap');
+                otherwise
+                    y = interp1(xi, values, x, 'linear', 'extrap');
+            end
+        end
+
+        function [xFunction, yFunction, xValues, yValues] = resolveGradientConfig(gradientExport)
+            xFunction = 'linear';
+            yFunction = 'linear';
+            xValues = [-1, 0, 1];
+            yValues = [0.5, 1, 0.5];
+
+            if isfield(gradientExport, 'gradient') && isstruct(gradientExport.gradient)
+                g = gradientExport.gradient;
+                if isfield(g, 'x_function') && ~isempty(g.x_function)
+                    xFunction = char(string(g.x_function));
+                end
+                if isfield(g, 'y_function') && ~isempty(g.y_function)
+                    yFunction = char(string(g.y_function));
+                end
+                if isfield(g, 'x_values') && isnumeric(g.x_values) && numel(g.x_values) >= 2
+                    xValues = double(g.x_values(:)');
+                end
+                if isfield(g, 'y_values') && isnumeric(g.y_values) && numel(g.y_values) >= 2
+                    yValues = double(g.y_values(:)');
+                end
+            end
         end
 
         function xy = normalizeXY(xy)
