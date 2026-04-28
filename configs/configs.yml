@@ -20,7 +20,7 @@ defaults:
 
 arena_grid:
   # Number of vertices for the arena grid polygon when arena_grid_mode is set to "manual". In "auto" or "FOV" modes, n_vertices will always be 4.
-  n_vertices: 6
+  n_vertices: 4
   n_tiles: [100, 60] # Number of tiles along x and y dimensions, respectively. Default is [100, 100].
   score_x_gradient_function: "linear"
   score_x_gradient: [-1, 0, 1]

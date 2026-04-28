@@ -24,6 +24,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %               * 'X center' - The corrected (via config) X center position of the animal in cm 
     %               * 'Y center' - The corrected (via config) Y center position of the animal in cm
     %               * 'Stimulus name' - The name of the stimulus being played at that time
+    %           + arenaGridScore - An array of size [height(data), 1] with the arena grid score (0-1) for each frame/timepoint during the stimulus period, calculated based on the center position and the arena grid defined for this trial in *.ref.arenagrid.mat. If the file for this trial doesn't exist or fail to load, this will be an empty array.
     %           + midline_x_px - The X coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
     %           + midline_y_px - The Y coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
     %           + px2cm - Conversion factor from pixels to centimeters (such that cm = px * px2cm)
@@ -232,6 +233,10 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     end
     [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
     graphics.migrateLegacyCSVRefs2JSON(videoDir);
+    
+    referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+    referenceSeedFilePath = referenceFilePath;
+
     switch refmode
         % Note that in any condition, at this point centerPos already has been converted to image coordinates (top-left is (0,0)) AND adjusted by CenterOffset_px from config
         % Any offset for midpoint/midline is relative to the size of the video frame itself
@@ -239,8 +244,6 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
             % Default values: midpoint is at center of video frame
             midlineX = vidWidth / 2;
             midlineY = vidHeight / 2;
-            referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
-            referenceSeedFilePath = referenceFilePath;
             if ~isfile(referenceSeedFilePath)
                 referenceFiles = dir(fullfile(videoDir, '*.ref.json'));
                 if ~isempty(referenceFiles)
@@ -294,8 +297,6 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
             % Default values: midline is vertical line at center of video frame
             midlineX = [vidWidth/2, vidWidth/2];
             midlineY = [0, vidHeight];
-            referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
-            referenceSeedFilePath = referenceFilePath;
             if ~isfile(referenceSeedFilePath)
                 referenceFiles = dir(fullfile(videoDir, '*.ref.json'));
                 if ~isempty(referenceFiles)
@@ -338,6 +339,31 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     end
 
 
+    % Check and load .ref.arenagrid.mat if exists
+    referenceArenaFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.arenagrid.mat'));
+    if ~isfile(referenceArenaFilePath)
+        arenaGridScore = [];
+    else
+        try
+            % Init ArenaGrid for score query
+            arenaGrid = trial.arenaGrid.ArenaGrid.fromFile(referenceArenaFilePath);
+
+            % ArenaGrid expects pixel coordinates in CRT/image convention:
+            % top-left origin with units in pixels.
+            centerPosPx = centerPos / pixelsize;
+            arenaGridScore = nan(size(centerPosPx, 1), 1);
+            validXY = all(isfinite(centerPosPx), 2);
+            if any(validXY)
+                arenaGridScore(validXY) = arenaGrid.queryScore(centerPosPx(validXY, :));
+            end
+        catch ME
+            warning('trial:stats:trialSummary:arenaGridFile:LoadError', 'Error loading arena grid file: %s\n%s', referenceArenaFilePath, ME.message);
+            arenaGridScore = [];
+        end
+    end
+
+
+
 
     speakerFlipped = stimPeriodTable{1,'Speaker Channels Flipped'}; % should be the same for the whole trial
     stimKeys = string(stimKeys);
@@ -353,6 +379,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     centerpointData = struct(...
         'fps', mean(diff(stimPeriodTable{:,'Trial time'}))^-1, ...
         'data', cpdata, ...
+        'arenaGridScore', arenaGridScore, ...
         'midline_x_px', midlineX, ...
         'midline_y_px', midlineY, ...
         'px2cm', pixelsize, ... % conversion factor such that cm = px * px2cm

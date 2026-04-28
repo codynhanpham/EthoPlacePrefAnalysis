@@ -8,6 +8,7 @@ classdef ArenaGrid
     %
     % Main methods are vectorized for Nx2 XY inputs:
     %   [tileRC, tileLinear, score] = query(xy)
+    %   [tileRC, tileLinear, score] = query(xy, invertXGradient=true, invertYGradient=true)
     %   score = queryScore(xy)
     %   [tileRC, tileLinear] = queryTile(xy)
     %   tf = contains(xy) returns true for points inside the arena grid/mesh
@@ -67,8 +68,14 @@ classdef ArenaGrid
             obj.triangleToTileLinear = sub2ind([nTilesXY(2), nTilesXY(1)], triToTileRC(:,1), triToTileRC(:,2));
         end
 
-        function [tileRC, tileLinear, score] = query(obj, xy)
+        function [tileRC, tileLinear, score] = query(obj, xy, args)
             %QUERY Return tile row/col, tile linear index, and score for each XY.
+            arguments
+                obj trial.arenaGrid.ArenaGrid
+                xy (:,2) {mustBeNumeric}
+                args.invertXGradient (1,1) logical = false
+                args.invertYGradient (1,1) logical = false
+            end
             xy = trial.arenaGrid.ArenaGrid.normalizeXY(xy);
 
             triId = pointLocation(obj.triangulationObj, xy(:,1), xy(:,2));
@@ -83,13 +90,23 @@ classdef ArenaGrid
                 triIdx = triId(valid);
                 tileRC(valid, :) = obj.triangleToTileRC(triIdx, :);
                 tileLinear(valid) = obj.triangleToTileLinear(triIdx);
-                score(valid) = obj.scoreMatrix(tileLinear(valid));
+                queryScoreMatrix = obj.resolveQueryScoreMatrix(args.invertXGradient, args.invertYGradient);
+                score(valid) = queryScoreMatrix(tileLinear(valid));
             end
         end
 
         function score = queryScore(obj, xy, args)
             %QUERYSCORE Return score only for each XY.
-            [~, ~, score] = obj.query(xy);
+            % Optional args to invert the gradient direction along X and/or Y while still taking into account the mesh shape and reference line/point - these do not modify the underlying score matrix, just the returned score values.
+            arguments
+                obj trial.arenaGrid.ArenaGrid
+                xy (:,2) {mustBeNumeric}
+                args.invertXGradient (1,1) logical = false
+                args.invertYGradient (1,1) logical = false
+            end
+            [~, ~, score] = obj.query(xy, ...
+                invertXGradient=args.invertXGradient, ...
+                invertYGradient=args.invertYGradient);
         end
 
         function [tileRC, tileLinear] = queryTile(obj, xy)
@@ -104,9 +121,17 @@ classdef ArenaGrid
             tf = ~isnan(triId);
         end
 
-        function T = queryTable(obj, xy)
+        function T = queryTable(obj, xy, args)
             %QUERYTABLE Convenience table output for batch queries.
-            [tileRC, tileLinear, score] = obj.query(xy);
+            arguments
+                obj trial.arenaGrid.ArenaGrid
+                xy (:,2) {mustBeNumeric}
+                args.invertXGradient (1,1) logical = false
+                args.invertYGradient (1,1) logical = false
+            end
+            [tileRC, tileLinear, score] = obj.query(xy, ...
+                invertXGradient=args.invertXGradient, ...
+                invertYGradient=args.invertYGradient);
             T = table(xy(:,1), xy(:,2), tileRC(:,1), tileRC(:,2), tileLinear, score, ...
                 'VariableNames', {'x', 'y', 'tile_row', 'tile_col', 'tile_linear', 'score'});
         end
@@ -293,6 +318,35 @@ classdef ArenaGrid
         end
     end
 
+    methods (Access = private)
+        function scoreMatrix = resolveQueryScoreMatrix(obj, invertXGradient, invertYGradient)
+            if ~invertXGradient && ~invertYGradient
+                scoreMatrix = obj.scoreMatrix;
+                return;
+            end
+
+            gradientExport = trial.arenaGrid.ArenaGrid.applyGradientInversionToExport(...
+                obj.arena_grid, invertXGradient, invertYGradient);
+            [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(gradientExport);
+
+            canRegenerate = ~isempty(pointA) && ~isempty(pointB) && ...
+                isfield(gradientExport, 'grid') && isstruct(gradientExport.grid) && ...
+                isfield(gradientExport.grid, 'nodes_x_px') && isfield(gradientExport.grid, 'nodes_y_px');
+            if canRegenerate
+                scoreMatrix = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(gradientExport, pointA, pointB);
+                return;
+            end
+
+            scoreMatrix = obj.scoreMatrix;
+            if invertXGradient
+                scoreMatrix = fliplr(scoreMatrix);
+            end
+            if invertYGradient
+                scoreMatrix = flipud(scoreMatrix);
+            end
+        end
+    end
+
     methods (Static, Access = private)
         function gradientExport = resolveSourceToStruct(source)
             if ischar(source) || (isstring(source) && isscalar(source))
@@ -356,16 +410,16 @@ classdef ArenaGrid
             % Persist the midline upgrade so future loads skip this fallback path.
             % Score recomputation is always done in the constructor, not here.
             try
-                upgradedStruct = gradientExport; %#ok<NASGU>
+                upgradedStruct = gradientExport;
                 switch matVarName
                     case 'arena_grid'
-                        arena_grid = upgradedStruct; %#ok<NASGU>
+                        arena_grid = upgradedStruct;
                         save(matFilePath, 'arena_grid', '-append');
                     case 'gradientExport'
-                        gradientExport = upgradedStruct; %#ok<NASGU>
+                        gradientExport = upgradedStruct;
                         save(matFilePath, 'gradientExport', '-append');
                     case 'uiselectReferenceLine_gradientExport'
-                        uiselectReferenceLine_gradientExport = upgradedStruct; %#ok<NASGU>
+                        uiselectReferenceLine_gradientExport = upgradedStruct;
                         save(matFilePath, 'uiselectReferenceLine_gradientExport', '-append');
                 end
             catch ME
@@ -451,6 +505,25 @@ classdef ArenaGrid
                 'y_function', yFunction, ...
                 'x_values', xValues, ...
                 'y_values', yValues);
+        end
+
+        function gradientExport = applyGradientInversionToExport(gradientExport, invertXGradient, invertYGradient)
+            [xFunction, yFunction, xValues, yValues] = trial.arenaGrid.ArenaGrid.resolveGradientConfig(gradientExport);
+
+            if invertXGradient
+                xValues = fliplr(xValues);
+            end
+            if invertYGradient
+                yValues = fliplr(yValues);
+            end
+
+            if ~isfield(gradientExport, 'gradient') || ~isstruct(gradientExport.gradient)
+                gradientExport.gradient = struct();
+            end
+            gradientExport.gradient.x_function = char(string(xFunction));
+            gradientExport.gradient.y_function = char(string(yFunction));
+            gradientExport.gradient.x_values = xValues;
+            gradientExport.gradient.y_values = yValues;
         end
 
         function centers = calculateCellCenters(nodeX, nodeY)
