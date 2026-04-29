@@ -43,19 +43,25 @@ classdef ArenaGrid
             triToTileRC = double(arenaGrid.lookup.triangle_to_tile_rc);
             nTilesXY = double(arenaGrid.grid.n_tiles_xy);
 
-            % Always recompute score from stored nodes + midline + gradient config so the
-            % score stays consistent with the actual midline position, regardless of what
+            % Always recompute score from stored nodes + reference geometry + gradient config so the
+            % score stays consistent with the actual midpoint/midline position, regardless of what
             % value was frozen in the file.
             [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(arenaGrid);
-            if ~isempty(pointA) && ~isempty(pointB) && ...
-                    isfield(arenaGrid.grid, 'nodes_x_px') && isfield(arenaGrid.grid, 'nodes_y_px')
+            midpoint = trial.arenaGrid.ArenaGrid.extractMidpoint(arenaGrid);
+            hasGridNodes = isfield(arenaGrid.grid, 'nodes_x_px') && isfield(arenaGrid.grid, 'nodes_y_px');
+            usePointMode = trial.arenaGrid.ArenaGrid.isPointReferenceMode(arenaGrid, midpoint);
+            if hasGridNodes && (usePointMode || (~isempty(pointA) && ~isempty(pointB)))
                 if ~isfield(arenaGrid, 'gradient')
                     warning('trial:arenaGrid:ArenaGrid:MissingGradientConfig', ...
                         ['Gradient config (function/values) not found in arena grid export. ' ...
                         'Falling back to default gradient values for score computation. ' ...
                         'Re-run the reference line UI to persist the correct gradient config.']);
                 end
-                [recomputedScore, ~] = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(arenaGrid, pointA, pointB);
+                if usePointMode
+                    [recomputedScore, ~] = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidpoint(arenaGrid, midpoint);
+                else
+                    [recomputedScore, ~] = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(arenaGrid, pointA, pointB);
+                end
                 arenaGrid.score = recomputedScore;
                 arenaGrid.score_vector = recomputedScore(:);
             end
@@ -316,6 +322,28 @@ classdef ArenaGrid
             pointA = [x(1), y(1)];
             pointB = [x(2), y(2)];
         end
+
+        function midpoint = extractMidpoint(gradientExport)
+            %EXTRACTMIDPOINT Return [x y] from ref.midpoint when present.
+            midpoint = [];
+            if ~isstruct(gradientExport) || ~isfield(gradientExport, 'ref') || ...
+                    ~isstruct(gradientExport.ref) || ~isfield(gradientExport.ref, 'midpoint')
+                return;
+            end
+
+            midpointRef = gradientExport.ref.midpoint;
+            if ~isstruct(midpointRef) || ~isfield(midpointRef, 'x') || ~isfield(midpointRef, 'y')
+                return;
+            end
+
+            x = double(midpointRef.x);
+            y = double(midpointRef.y);
+            if ~isscalar(x) || ~isscalar(y) || ~isfinite(x) || ~isfinite(y)
+                return;
+            end
+
+            midpoint = [x, y];
+        end
     end
 
     methods (Access = private)
@@ -328,13 +356,21 @@ classdef ArenaGrid
             gradientExport = trial.arenaGrid.ArenaGrid.applyGradientInversionToExport(...
                 obj.arena_grid, invertXGradient, invertYGradient);
             [pointA, pointB] = trial.arenaGrid.ArenaGrid.extractMidline(gradientExport);
+            midpoint = trial.arenaGrid.ArenaGrid.extractMidpoint(gradientExport);
 
-            canRegenerate = ~isempty(pointA) && ~isempty(pointB) && ...
+            canRegenerate = ...
                 isfield(gradientExport, 'grid') && isstruct(gradientExport.grid) && ...
                 isfield(gradientExport.grid, 'nodes_x_px') && isfield(gradientExport.grid, 'nodes_y_px');
             if canRegenerate
-                scoreMatrix = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(gradientExport, pointA, pointB);
-                return;
+                usePointMode = trial.arenaGrid.ArenaGrid.isPointReferenceMode(gradientExport, midpoint);
+                if usePointMode
+                    scoreMatrix = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidpoint(gradientExport, midpoint);
+                    return;
+                end
+                if ~isempty(pointA) && ~isempty(pointB)
+                    scoreMatrix = trial.arenaGrid.ArenaGrid.regenerateScoreFromMidline(gradientExport, pointA, pointB);
+                    return;
+                end
             end
 
             scoreMatrix = obj.scoreMatrix;
@@ -507,6 +543,45 @@ classdef ArenaGrid
                 'y_values', yValues);
         end
 
+        function [scoreMatrix, gradientMeta] = regenerateScoreFromMidpoint(gradientExport, midpoint)
+            nTilesXY = round(double(gradientExport.grid.n_tiles_xy(:)'));
+            nX = max(1, nTilesXY(1));
+            nY = max(1, nTilesXY(2));
+
+            nodeX = [];
+            nodeY = [];
+            if isfield(gradientExport.grid, 'nodes_x_px') && isfield(gradientExport.grid, 'nodes_y_px')
+                nodeX = double(gradientExport.grid.nodes_x_px);
+                nodeY = double(gradientExport.grid.nodes_y_px);
+            end
+
+            validNodes = ~isempty(nodeX) && ~isempty(nodeY) && ...
+                isequal(size(nodeX), [nY + 1, nX + 1]) && isequal(size(nodeY), [nY + 1, nX + 1]) && ...
+                all(isfinite(nodeX), 'all') && all(isfinite(nodeY), 'all');
+            if ~validNodes
+                error('trial:arenaGrid:ArenaGrid:MissingGridNodes', ...
+                    'Cannot regenerate score without valid grid.nodes_x_px and grid.nodes_y_px.');
+            end
+
+            centers = trial.arenaGrid.ArenaGrid.calculateCellCenters(nodeX, nodeY);
+            allNodes = [nodeX(:), nodeY(:)];
+
+            xNorm = trial.arenaGrid.ArenaGrid.normalizeByMidpointAxis(centers(:,1), midpoint(1), allNodes(:,1));
+            yNorm = trial.arenaGrid.ArenaGrid.normalizeByMidpointAxis(centers(:,2), midpoint(2), allNodes(:,2));
+
+            [xFunction, yFunction, xValues, yValues] = trial.arenaGrid.ArenaGrid.resolveGradientConfig(gradientExport);
+            xScores = trial.arenaGrid.ArenaGrid.evaluateGradientByFunction(xValues, xFunction, xNorm(:)');
+            yScores = trial.arenaGrid.ArenaGrid.evaluateGradientByFunction(yValues, yFunction, yNorm(:)');
+
+            scoreVector = xScores(:) .* yScores(:);
+            scoreMatrix = reshape(scoreVector, [nX, nY])';
+            gradientMeta = struct(...
+                'x_function', xFunction, ...
+                'y_function', yFunction, ...
+                'x_values', xValues, ...
+                'y_values', yValues);
+        end
+
         function gradientExport = applyGradientInversionToExport(gradientExport, invertXGradient, invertYGradient)
             [xFunction, yFunction, xValues, yValues] = trial.arenaGrid.ArenaGrid.resolveGradientConfig(gradientExport);
 
@@ -566,6 +641,41 @@ classdef ArenaGrid
             xNorm(posMask) = 0.5 + 0.5 * (signedD(posMask) / posDen);
             xNorm(~posMask) = 0.5 + 0.5 * (signedD(~posMask) / negDen);
             xNorm = min(max(xNorm, 0), 1);
+        end
+
+        function axisNorm = normalizeByMidpointAxis(values, midpointValue, domainValues)
+            axisNorm = 0.5 * ones(size(values));
+
+            signedD = values - midpointValue;
+            domainD = domainValues - midpointValue;
+            maxPos = max(domainD);
+            maxNeg = min(domainD);
+
+            posDen = max(maxPos, eps);
+            negDen = max(abs(maxNeg), eps);
+
+            posMask = signedD >= 0;
+            axisNorm(posMask) = 0.5 + 0.5 * (signedD(posMask) / posDen);
+            axisNorm(~posMask) = 0.5 + 0.5 * (signedD(~posMask) / negDen);
+            axisNorm = min(max(axisNorm, 0), 1);
+        end
+
+        function tf = isPointReferenceMode(gradientExport, midpoint)
+            tf = false;
+            if isempty(midpoint)
+                return;
+            end
+            if ~isstruct(gradientExport) || ~isfield(gradientExport, 'ref') || ~isstruct(gradientExport.ref)
+                return;
+            end
+
+            if isfield(gradientExport.ref, 'mode') && ~isempty(gradientExport.ref.mode)
+                tf = strcmpi(string(gradientExport.ref.mode), "point");
+                return;
+            end
+
+            % Backward compatibility: midpoint present with no explicit mode implies point semantics.
+            tf = true;
         end
 
         function y = evaluateGradientByFunction(values, methodName, x)

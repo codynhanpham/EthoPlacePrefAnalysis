@@ -22,7 +22,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     %               - stimfileName: Name of the stimulus file
     %               - stimuliSorted: Formatted-name of the stimuli pair in the trials of the same kind, sorted alphabetically. If stim name contains "normal" (case-insensitive), that stim is listed first.
     %               - animalMetadata: A dictionary (string-struct) in the order of columns in centerpointData, where each key is a hash key corresponding to a trial's centerpointData, and each value is the animal metadata struct for that trial.
-    %               - centerpointData: A table with columns 'Trial time', 'X center', 'Y center', 'Distance from Midline', 'Stimulus name', standardized across trials.
+    %               - centerpointData: A table with columns 'Trial time', 'Stimulus name', 'X center', 'Y center', 'Distance from Midline', 'Arena Grid Score', standardized across trials.
     %                   Note that 'X center', 'Y center', and 'Distance from Midline' are multi-column variables in the table, with each column representing a trial aligned to stimulus onset and interpolated to the target framerate.
     %                   The coordinates here are flipped such that negative values are towards stimuliSorted(1) and positive values are towards stimuliSorted(2), according to the speaker flip information in the trial metadata.
     %
@@ -154,18 +154,26 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         thisTrialTime = centerpointData.data{:, 'Trial time'};
         thisX = centerpointData.data{:, 'X center'};
         thisY = centerpointData.data{:, 'Y center'};
+        thisArenaGridScore = centerpointData.arenaGridScore;
         % Interpolate to the standardized timepoints
         standardizedTime = stimtables(stimfileName).centerpointData{:, 'Trial time'};
         standardizedStims = stimtables(stimfileName).centerpointData{:, 'Stimulus name'};
         warning('off', 'MATLAB:interp1:NaNstrip');
         interpX = interp1(thisTrialTime, thisX, standardizedTime, kvargs.Interpolation, 'extrap');
         interpY = interp1(thisTrialTime, thisY, standardizedTime, kvargs.Interpolation, 'extrap');
+        % Interpolate Arena Grid Score if available
+        if ~isempty(thisArenaGridScore)
+            interpArenaGridScore = interp1(thisTrialTime, thisArenaGridScore, standardizedTime, kvargs.Interpolation, 'extrap');
+        else
+            interpArenaGridScore = nan(length(standardizedTime), 1);
+        end
         warning('on', 'MATLAB:interp1:NaNstrip');
         centerpointData.data = table();
         centerpointData.data.('Trial time') = standardizedTime;
         centerpointData.data.('Stimulus name') = standardizedStims;
         centerpointData.data.('X center') = interpX;
         centerpointData.data.('Y center') = interpY;
+        centerpointData.data.('Arena Grid Score') = interpArenaGridScore;
 
 
         % If stimKeys(1) is not the same as stimuliSorted(1), mirror the relevant axis by the midline_*offset_px
@@ -289,6 +297,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         centerpointData.data.Properties.VariableNames{'X center'} = sprintf('X center |> %s', colkey);
         centerpointData.data.Properties.VariableNames{'Y center'} = sprintf('Y center |> %s', colkey);
         centerpointData.data.Properties.VariableNames{'Distance from Midline'} = sprintf('Distance from Midline |> %s', colkey);
+        centerpointData.data.Properties.VariableNames{'Arena Grid Score'} = sprintf('Arena Grid Score |> %s', colkey);
 
         % If the table is empty, just assign
         if isempty(stimtables(stimfileName).centerpointData)
@@ -329,6 +338,10 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         tbl = mergevars(tbl, tbl.Properties.VariableNames(yCenterCols), 'NewVariableName', 'Y center');
         distanceCols = startsWith(tbl.Properties.VariableNames, 'Distance from Midline |> ');
         tbl = mergevars(tbl, tbl.Properties.VariableNames(distanceCols), 'NewVariableName', 'Distance from Midline');
+        arenaGridScoreCols = startsWith(tbl.Properties.VariableNames, 'Arena Grid Score |> ');
+        if any(arenaGridScoreCols)
+            tbl = mergevars(tbl, tbl.Properties.VariableNames(arenaGridScoreCols), 'NewVariableName', 'Arena Grid Score');
+        end
 
         stimtables(stimfileName).centerpointData = tbl;
         stimtables(stimfileName).animalMetadata = animalMetadataSubDict;
