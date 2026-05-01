@@ -23,7 +23,7 @@ arena_grid:
   n_vertices: 4
   n_tiles: [100, 60] # Number of tiles along x and y dimensions, respectively. Default is [100, 100].
   score_x_gradient_function: "linear"
-  score_x_gradient: [-1, 0, 1]
+  score_x_gradient: [1, 0, -1]
   score_y_gradient_function: "linear"
   score_y_gradient: [0.4, 1, 0.4]
 

@@ -1,0 +1,19 @@
+[package]
+name = "trigger-extract"
+version = "0.1.0"
+description = "Extract trigger timestamps from various sources."
+authors = ["Cody Nhan Pham <nhanp@wustl.edu>"]
+readme = "README.md"
+keywords = []
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opencv = "0.98.2"
+
+
+
+[build-dependencies]
+cbindgen = "0.29.2"
