@@ -175,7 +175,6 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
             );
         end
 
-
         for strainIdx = 1:nstrains
             strain = animalStrains{strainIdx};
             strainMask = strcmp(columnByStrainOrder, strain);
