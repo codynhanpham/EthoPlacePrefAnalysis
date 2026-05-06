@@ -617,6 +617,7 @@ name = "trigger-extract"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "clap",
  "opencv",
 ]
 

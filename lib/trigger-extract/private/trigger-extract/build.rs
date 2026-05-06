@@ -9,6 +9,7 @@ fn main() {
         .with_crate(crate_dir)
         .with_language(cbindgen::Language::C)
         .with_no_includes()
+        .with_sys_include("stdint.h")
         .with_sys_include("stddef.h")
         .generate()
         .expect("Unable to generate bindings")

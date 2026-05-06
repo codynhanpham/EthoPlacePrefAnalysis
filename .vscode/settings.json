@@ -1,6 +1,6 @@
 {
   "rust-analyzer.linkedProjects": [
-    "lib/umap-rs/private/umap-rs/Cargo.toml",
+    "lib/trigger-extract/private/trigger-extract/Cargo.toml",
   ],
   "svg.preview.background": "transparent"
 }
