@@ -82,6 +82,132 @@ classdef (Abstract) TrackingProvider < handle
 
             str = DataHash(char(filePath), 'SHA-256', 'file');
         end
+
+        function extractAndSaveTriggerEvents(videoFilePath, kvargs)
+            %%EXTRACTANDSAVETRIGGEREVENTS Extract LED trigger pulses and persist to sibling .ref.json.
+            arguments
+                videoFilePath {mustBeTextScalar, mustBeFile}
+                kvargs.ProgressDialogHandle {progressDlgHandleOrEmpty} = []
+            end
+
+            [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+            referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+
+            refData = struct();
+            if isfile(referenceFilePath)
+                try
+                    refData = jsondecode(fileread(referenceFilePath));
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
+                        ['Could not parse reference JSON, skipping trigger extraction to avoid ' ...
+                        'overwriting existing fields: %s\n%s'], referenceFilePath, ME.message);
+                    return;
+                end
+            end
+
+            function [pairsCell, isCanonical, isUsable] = canonicalizeTriggerEvents(triggerEvents)
+                % Returns trigger events as a 1xN cell array of [on off] numeric vectors.
+                pairsCell = cell(1, 0);
+                isCanonical = true;
+                isUsable = false;
+
+                if isempty(triggerEvents)
+                    return;
+                end
+
+                if isnumeric(triggerEvents)
+                    vals = double(triggerEvents);
+                    if isvector(vals) && numel(vals) == 2 && all(isfinite(vals))
+                        pairsCell = {reshape(vals, 1, 2)};
+                        isCanonical = false; % legacy flat [on, off]
+                        isUsable = true;
+                        return;
+                    end
+                    if ismatrix(vals) && size(vals, 2) == 2 && all(isfinite(vals), 'all')
+                        nEvents = size(vals, 1);
+                        pairsCell = cell(1, nEvents);
+                        for ii = 1:nEvents
+                            pairsCell{ii} = vals(ii, :);
+                        end
+                        isCanonical = nEvents ~= 1;
+                        isUsable = true;
+                        return;
+                    end
+                    return;
+                end
+
+                if iscell(triggerEvents)
+                    if isempty(triggerEvents)
+                        return;
+                    end
+                    nEvents = numel(triggerEvents);
+                    tempPairs = cell(1, nEvents);
+                    for ii = 1:nEvents
+                        row = triggerEvents{ii};
+                        if ~(isnumeric(row) && numel(row) == 2 && all(isfinite(row)))
+                            return;
+                        end
+                        tempPairs{ii} = double(reshape(row, 1, 2));
+                    end
+                    pairsCell = tempPairs;
+                    isCanonical = true;
+                    isUsable = true;
+                end
+            end
+
+            function writeRefJson(referenceFilePath, refData)
+                jsonText = jsonencode(refData);
+                fileID = fopen(referenceFilePath, 'w');
+                if fileID == -1
+                    error('ui:trackingPlatforms:TrackingProvider:RefJsonWriteOpenFailed', ...
+                        'Could not open reference JSON for writing: %s', referenceFilePath);
+                end
+
+                cleaner = onCleanup(@() fclose(fileID));
+                fwrite(fileID, jsonText, 'char');
+            end
+
+            if isstruct(refData) && isfield(refData, 'trigger_events') && ~isempty(refData.trigger_events)
+                [existingPairsCell, isCanonical, isUsable] = canonicalizeTriggerEvents(refData.trigger_events);
+                if isUsable
+                    if ~isCanonical
+                        refData.trigger_events = existingPairsCell;
+                        writeRefJson(referenceFilePath, refData);
+                    end
+                    return;
+                end
+                % Requirement: skip detection whenever trigger_events is present and non-empty.
+                return;
+            end
+
+            % Update the progress dialog if provided
+            if ~isempty(kvargs.ProgressDialogHandle)
+                currentIndeterminateState = kvargs.ProgressDialogHandle.Indeterminate;
+                kvargs.ProgressDialogHandle.Indeterminate = true;
+                kvargs.ProgressDialogHandle.Message = 'Extracting trigger events...';
+            end
+
+            eventTable = triggerExtract.ledPulses(videoFilePath);
+            if isempty(eventTable)
+                triggerEvents = cell(1, 0);
+            else
+                requiredCols = {'onFrame', 'offFrame'};
+                if ~all(ismember(requiredCols, eventTable.Properties.VariableNames))
+                    error('ui:trackingPlatforms:TrackingProvider:InvalidLedEventsTable', ...
+                        'LED event table is missing required columns: onFrame, offFrame.');
+                end
+                [triggerEvents, ~, ~] = canonicalizeTriggerEvents(double([eventTable.onFrame, eventTable.offFrame]));
+            end
+
+            refData.trigger_events = triggerEvents;
+            writeRefJson(referenceFilePath, refData);
+            
+            % Restore the progress dialog state if it was modified
+            if ~isempty(kvargs.ProgressDialogHandle)
+                kvargs.ProgressDialogHandle.Indeterminate = currentIndeterminateState;
+                kvargs.ProgressDialogHandle.Message = 'Trigger events extracted, saved to ' + referenceFilePath;
+            end
+        end
     end
 
     methods
@@ -237,4 +363,20 @@ classdef (Abstract) TrackingProvider < handle
 
     end
 
+end
+
+
+%% OTHER HELPER FUNCTIONS
+
+function progressDlgHandleOrEmpty(input)
+    if isempty(input)
+        return;
+    end
+
+    if ~isa(input, 'matlab.ui.dialog.ProgressDialog')
+        error('ProgressDialogHandle must be a valid uiprogressdlg handle.');
+    end
+    if numel(input) ~= 1
+        error('ProgressDialogHandle must be a scalar uiprogressdlg handle.');
+    end
 end

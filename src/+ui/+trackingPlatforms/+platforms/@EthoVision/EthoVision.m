@@ -166,14 +166,13 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
                 trackingDataFilePath {mustBeFile}
                 masterMetadata {validator.mustBeFileOrTable}
 
-                % kvargs.ExpectedNumVariables (1, 1) double = 50
-                % kvargs.ProgressDialogHandle {progressDlgHandleOrEmpty} = []
                 kvargs.Options (1,1) struct = struct();
             end
 
             defaultOptions = struct( ...
                 'ExpectedNumVariables', 50, ...
-                'ProgressDialogHandle', [] ...
+                'ProgressDialogHandle', [], ...
+                'ExtractLEDStimEvents', true ...
             );
             for field = fieldnames(kvargs.Options)'
                 defaultOptions.(field{1}) = kvargs.Options.(field{1});
@@ -181,8 +180,28 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             kvargs.Options = defaultOptions;
             validateattributes(kvargs.Options.ExpectedNumVariables, {'numeric'}, {'scalar'});
 
-            args = namedargs2cell(kvargs.Options);
+            preprocessArgs.ExpectedNumVariables = kvargs.Options.ExpectedNumVariables;
+            preprocessArgs.ProgressDialogHandle = kvargs.Options.ProgressDialogHandle;
+            args = namedargs2cell(preprocessArgs);
             updates = io.ethovision.multipleArena.preprocess(trackingDataFilePath, masterMetadata, obj.userConfig, args{:});
+
+            % If chosen to extract LED stim events, also extract the stim events and save to {mediaBaseName}.ref.json next to the media file
+            newsplitfiles = cellstr(updates.media.processed);
+            if kvargs.Options.ExtractLEDStimEvents
+                for i = 1:length(newsplitfiles)
+                    splitfile = newsplitfiles{i}; % the newly split single-arena video file path
+                    if ~isfile(splitfile)
+                        continue; % skip if the split file doesn't exist for some reason, just in case
+                    end
+
+                    try
+                        obj.extractAndSaveTriggerEvents(splitfile, ProgressDialogHandle=kvargs.Options.ProgressDialogHandle);
+                    catch ME
+                        warning('ui:trackingPlatforms:EthoVision:TriggerExtractFailed', ...
+                            'Failed to extract LED trigger events for %s\n%s', splitfile, ME.message);
+                    end
+                end
+            end
         end
 
 
@@ -431,5 +450,6 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
         end
         
     end
+
 end
 

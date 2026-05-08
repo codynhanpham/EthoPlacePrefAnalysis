@@ -1,1 +1,7 @@
-target/
+target/*
+!target/release
+target/release/*
+# Allow the dll/so/dylib build for easy deployment
+!target/release/*.dll
+!target/release/*.so
+!target/release/*.dylib
