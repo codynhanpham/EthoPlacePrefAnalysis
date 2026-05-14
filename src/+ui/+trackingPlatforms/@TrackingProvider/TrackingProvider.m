@@ -93,6 +93,14 @@ classdef (Abstract) TrackingProvider < handle
             [videoDir, videoBaseName, ~] = fileparts(videoFilePath);
             referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
 
+            % Keep reference metadata in a single JSON format before trigger I/O.
+            try
+                graphics.migrateLegacyCSVRefs2JSON(videoDir);
+            catch ME
+                warning('ui:trackingPlatforms:TrackingProvider:LegacyRefMigrationFailed', ...
+                    'Could not auto-migrate legacy CSV reference files in "%s":\n%s', videoDir, ME.message);
+            end
+
             refData = struct();
             if isfile(referenceFilePath)
                 try

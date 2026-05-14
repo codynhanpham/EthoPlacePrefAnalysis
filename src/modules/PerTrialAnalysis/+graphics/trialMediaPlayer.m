@@ -29,6 +29,14 @@ else
     fullPath = fullfile(pathName, fileName);
 end
 
+% Upgrade legacy midpoint/midline CSV refs before any .ref.json interactions.
+try
+    graphics.migrateLegacyCSVRefs2JSON(fileparts(fullPath));
+catch ME
+    warning('graphics:trialMediaPlayer:LegacyRefMigrationFailed', ...
+        'Could not auto-migrate legacy CSV reference files in "%s":\n%s', fileparts(fullPath), ME.message);
+end
+
 % Try to load tracking data if TrackingDataFile is provided
 trackData = [];
 trackDataTime = [];
@@ -131,6 +139,7 @@ refJsonPath = fullfile(fileparts(fullPath), [videoBaseName, '.ref.json']);
 % Try to load STIM_START_FRAME from metadata (highest priority)
 metadataStimStartFrame = [];
 metadataTable = table();
+trackingDataHeader = [];
 if isfield(kvargs, 'MasterMetadataTable') && ~isempty(kvargs.MasterMetadataTable)
     try
         if istable(kvargs.MasterMetadataTable)
@@ -144,9 +153,20 @@ if isfield(kvargs, 'MasterMetadataTable') && ~isempty(kvargs.MasterMetadataTable
         elseif ~isempty(kvargs.MasterMetadataTable)
             metadataTable = io.metadata.loadMasterMetadata(kvargs.MasterMetadataTable);
         end
+
+        % Metadata matching requires tracking header information from
+        % the parent function context.
+        if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && isfile(kvargs.TrackingDataFile) && ...
+                isfield(kvargs, 'TrackingProvider') && ~isempty(kvargs.TrackingProvider)
+            try
+                [trackingDataHeader, ~, ~] = kvargs.TrackingProvider.loadTrackingData(kvargs.TrackingDataFile, Options=struct('HeaderOnly', true));
+            catch
+                trackingDataHeader = [];
+            end
+        end
         
         if ~isempty(metadataTable) && istable(metadataTable)
-            metadataStimStartFrame = extractMetadataStimStartFrame(fullPath, metadataTable);
+            metadataStimStartFrame = extractMetadataStimStartFrame(trackingDataHeader, metadataTable);
         end
     catch ME
         % Silently fail - will fall back to ref.json
@@ -984,12 +1004,8 @@ end
 
 %% Helper Functions for Metadata-based Trigger Synchronization
 
-function stimStartFrame = extractMetadataStimStartFrame(videoFilePath, metadataTable)
-    %%EXTRACTMETADATASTIMSTARTFRAME Extract STIM_START_FRAME from metadata for a given video
-    %   Attempts to match the video file to a row in the metadata table
-    %   and extracts the STIM_START_FRAME value if available.
-    %   Uses the same matching logic as alignEthovisionRawToStim.m
-    %   Returns the frame number if found, otherwise returns empty/NaN
+function stimStartFrame = extractMetadataStimStartFrame(trackingDataHeader, metadataTable)
+    %%EXTRACTMETADATASTIMSTARTFRAME Extract STIM_START_FRAME from metadata for a given video with is tracking data file header info
     
     stimStartFrame = [];
     
@@ -1002,25 +1018,15 @@ function stimStartFrame = extractMetadataStimStartFrame(videoFilePath, metadataT
     if ~all(ismember(requiredColumns, metadataTable.Properties.VariableNames))
         return;
     end
+
+    if isempty(trackingDataHeader)
+        return;
+    end
     
     try
-        % Try to find xlsx file in the video directory
-        [videoDir, ~, ~] = fileparts(videoFilePath);
-        xlsxFiles = dir(fullfile(videoDir, '*.xlsx'));
-        
-        if isempty(xlsxFiles)
-            return;
-        end
-        
-        % Try the first xlsx file found
-        xlsxPath = fullfile(videoDir, xlsxFiles(1).name);
-        
-        % Extract trial info from xlsx using the same method as alignEthovisionRawToStim
-        [header, ~, ~] = io.ethovision.loadEthovisionXlsx(xlsxPath, HeaderOnly=true);
-        
-        trialName = header("Trial name");
-        experimentName = header("Experiment");
-        arenaName = header("Arena name");
+        trialName = trackingDataHeader("Trial name");
+        experimentName = trackingDataHeader("Experiment");
+        arenaName = trackingDataHeader("Arena name");
         
         % Extract trial number
         trialParts = split(trialName, ' ');
