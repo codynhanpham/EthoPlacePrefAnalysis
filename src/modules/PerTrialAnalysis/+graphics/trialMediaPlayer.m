@@ -889,14 +889,10 @@ end
 
 function markStartFrame()
     %%MARKSTARTFRAME Mark the current frame as the stimulus start frame and validate it
-    % Updates ref.json trigger_events first element to the current frame number
+    % Updates/creates canonical ref.json trigger_events as [[start,end], ...]
+    % and sets the first event's start frame to the current frame number
     % Sets trigger_events_start_validated to true
     % Copies the frame number to clipboard
-    
-    if isempty(triggerStartFrame)
-        uialert(fig, 'No trigger event to mark. Please ensure a trigger event was detected first.', 'No Trigger Event');
-        return;
-    end
     
     currentFrameNum = appData.currentFrame;
     
@@ -905,55 +901,75 @@ function markStartFrame()
         if isfile(refJsonPath)
             refData = jsondecode(fileread(refJsonPath));
         else
-            uialert(fig, 'Reference JSON file does not exist.', 'Error');
-            return;
+            refData = struct();
         end
     catch ME
         uialert(fig, sprintf('Error reading ref.json:\n%s', ME.message), 'Error');
         return;
     end
-    
-    % Ensure trigger_events exists and is not empty
-    if ~isfield(refData, 'trigger_events') || isempty(refData.trigger_events)
-        uialert(fig, 'No trigger events in ref.json.', 'Error');
-        return;
-    end
-    
-    triggerEventsLocal = refData.trigger_events;
-    
-    % Update the first event's start frame in the appropriate format
+
+    % Canonicalize trigger events to a 1xN cell array of [start end] rows.
     try
-        if isnumeric(triggerEventsLocal)
-            vals = double(triggerEventsLocal);
-            if isvector(vals) && numel(vals) == 2
-                % Legacy format: [on off]
-                vals(1) = currentFrameNum;
-                refData.trigger_events = vals;
-            elseif ismatrix(vals) && size(vals, 2) == 2
-                % Matrix format: Nx2
-                vals(1, 1) = currentFrameNum;
-                refData.trigger_events = vals;
-            else
-                error('Unexpected trigger_events format (numeric but not vector or Nx2 matrix)');
-            end
-        elseif iscell(triggerEventsLocal) && ~isempty(triggerEventsLocal)
-            % Cell array format
-            firstEvent = triggerEventsLocal{1};
-            if isnumeric(firstEvent)
-                firstEvent = double(firstEvent);
-                if numel(firstEvent) >= 1
-                    firstEvent(1) = currentFrameNum;
-                    triggerEventsLocal{1} = firstEvent;
-                    refData.trigger_events = triggerEventsLocal;
+        triggerEventsCanonical = cell(1, 0);
+        if isfield(refData, 'trigger_events') && ~isempty(refData.trigger_events)
+            triggerEventsLocal = refData.trigger_events;
+
+            if isnumeric(triggerEventsLocal)
+                vals = double(triggerEventsLocal);
+                if isvector(vals) && numel(vals) == 2
+                    triggerEventsCanonical = {reshape(vals, 1, 2)};
+                elseif ismatrix(vals) && size(vals, 2) == 2
+                    nEvents = size(vals, 1);
+                    triggerEventsCanonical = cell(1, nEvents);
+                    for ii = 1:nEvents
+                        triggerEventsCanonical{ii} = vals(ii, :);
+                    end
                 else
-                    error('First event has invalid format (empty numeric array)');
+                    error('Unexpected trigger_events format (numeric but not vector or Nx2 matrix)');
+                end
+            elseif iscell(triggerEventsLocal)
+                nEvents = numel(triggerEventsLocal);
+                triggerEventsCanonical = cell(1, nEvents);
+                for ii = 1:nEvents
+                    row = triggerEventsLocal{ii};
+                    if isnumeric(row)
+                        rowVals = double(row);
+                    elseif iscell(row) && ~isempty(row) && isnumeric(row{1})
+                        rowVals = double(row{1});
+                    else
+                        error('Unexpected event format at index %d (not numeric pair)', ii);
+                    end
+
+                    rowVals = rowVals(:)';
+                    if numel(rowVals) ~= 2 || ~all(isfinite(rowVals))
+                        error('Unexpected event format at index %d (must be finite [start end])', ii);
+                    end
+                    triggerEventsCanonical{ii} = rowVals;
                 end
             else
-                error('Unexpected first event format (not numeric)');
+                error('Unexpected trigger_events format (not numeric or cell)');
             end
-        else
-            error('Unexpected trigger_events format (not numeric or cell)');
         end
+
+        % Create a default event if missing and always update first start frame.
+        if isempty(triggerEventsCanonical)
+            triggerEventsCanonical = {[currentFrameNum, currentFrameNum]};
+        else
+            firstEvent = double(triggerEventsCanonical{1});
+            firstEvent = firstEvent(:)';
+            if numel(firstEvent) < 2
+                firstEvent = [currentFrameNum, currentFrameNum];
+            else
+                firstEvent(1) = currentFrameNum;
+                if ~isfinite(firstEvent(2))
+                    firstEvent(2) = currentFrameNum;
+                end
+                firstEvent = firstEvent(1:2);
+            end
+            triggerEventsCanonical{1} = firstEvent;
+        end
+
+        refData.trigger_events = triggerEventsCanonical;
     catch ME
         uialert(fig, sprintf('Error updating trigger_events:\n%s', ME.message), 'Error');
         return;
@@ -1072,41 +1088,65 @@ function synchronizeTriggerEventsWithMetadata(refJsonPath, stimStartFrame)
         
         stimStartFrame = round(double(stimStartFrame));
         
-        % Ensure trigger_events exists and update first event's start frame
-        if ~isfield(refData, 'trigger_events') || isempty(refData.trigger_events)
-            % Create default trigger event with just the start frame
-            % Using the format [start, start] as a simple default
-            refData.trigger_events = [stimStartFrame, stimStartFrame];
-        else
+        % Canonicalize trigger_events to a 1xN cell array of [start end] rows.
+        triggerEventsCanonical = cell(1, 0);
+        if isfield(refData, 'trigger_events') && ~isempty(refData.trigger_events)
             triggerEventsLocal = refData.trigger_events;
-            
-            % Update based on the format
+
             if isnumeric(triggerEventsLocal)
                 vals = double(triggerEventsLocal);
-                if isvector(vals)
-                    % Vector format: update first element
-                    vals(1) = stimStartFrame;
-                    refData.trigger_events = vals;
-                elseif ismatrix(vals)
-                    % Matrix format: update first row, first column
-                    vals(1, 1) = stimStartFrame;
-                    refData.trigger_events = vals;
-                end
-            elseif iscell(triggerEventsLocal) && ~isempty(triggerEventsLocal)
-                % Cell array format: update first event
-                firstEvent = triggerEventsLocal{1};
-                if isnumeric(firstEvent)
-                    firstEvent = double(firstEvent);
-                    if isempty(firstEvent)
-                        firstEvent = [stimStartFrame, stimStartFrame];
-                    else
-                        firstEvent(1) = stimStartFrame;
+                if isvector(vals) && numel(vals) == 2 && all(isfinite(vals))
+                    triggerEventsCanonical = {reshape(vals, 1, 2)};
+                elseif ismatrix(vals) && size(vals, 2) == 2 && all(isfinite(vals), 'all')
+                    nEvents = size(vals, 1);
+                    triggerEventsCanonical = cell(1, nEvents);
+                    for ii = 1:nEvents
+                        triggerEventsCanonical{ii} = vals(ii, :);
                     end
-                    triggerEventsLocal{1} = firstEvent;
-                    refData.trigger_events = triggerEventsLocal;
+                end
+            elseif iscell(triggerEventsLocal)
+                nEvents = numel(triggerEventsLocal);
+                triggerEventsCanonical = cell(1, nEvents);
+                for ii = 1:nEvents
+                    row = triggerEventsLocal{ii};
+                    if isnumeric(row)
+                        rowVals = double(row);
+                    elseif iscell(row) && ~isempty(row) && isnumeric(row{1})
+                        rowVals = double(row{1});
+                    else
+                        triggerEventsCanonical = cell(1, 0);
+                        break;
+                    end
+
+                    rowVals = rowVals(:)';
+                    if numel(rowVals) ~= 2 || ~all(isfinite(rowVals))
+                        triggerEventsCanonical = cell(1, 0);
+                        break;
+                    end
+                    triggerEventsCanonical{ii} = rowVals;
                 end
             end
         end
+
+        % Create default event if missing, then update first start frame.
+        if isempty(triggerEventsCanonical)
+            triggerEventsCanonical = {[stimStartFrame, stimStartFrame]};
+        else
+            firstEvent = double(triggerEventsCanonical{1});
+            firstEvent = firstEvent(:)';
+            if numel(firstEvent) < 2
+                firstEvent = [stimStartFrame, stimStartFrame];
+            else
+                firstEvent(1) = stimStartFrame;
+                if ~isfinite(firstEvent(2))
+                    firstEvent(2) = stimStartFrame;
+                end
+                firstEvent = firstEvent(1:2);
+            end
+            triggerEventsCanonical{1} = firstEvent;
+        end
+
+        refData.trigger_events = triggerEventsCanonical;
         
         % Mark trigger_events_start_validated as true
         refData.trigger_events_start_validated = true;

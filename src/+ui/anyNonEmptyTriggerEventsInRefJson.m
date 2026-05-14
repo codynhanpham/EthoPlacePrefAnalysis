@@ -126,7 +126,7 @@ function writeRefJson(referenceFilePath, refData)
         return;
     end
 
-    cleaner = onCleanup(@() fclose(fileID)); %#ok<NASGU>
+    cleaner = onCleanup(@() fclose(fileID));
     fwrite(fileID, jsonText, 'char');
 end
 
