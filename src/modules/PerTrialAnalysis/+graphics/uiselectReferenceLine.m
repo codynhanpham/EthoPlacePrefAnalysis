@@ -18,6 +18,7 @@ arguments
     kvargs.MasterMetadataTable {validator.mustBeFileTableOrEmpty} = []
 end
 
+speakerFlipped = false;
 videoFrameNumber = 1; % Default to first frame unless Metadata exists, then select the first frame with stim
 if ~isempty(kvargs.MasterMetadataTable) && ~isempty(kvargs.TrackingDataFile) && ~isempty(kvargs.TrackingProvider)
     masterMetadata = table();
@@ -50,6 +51,9 @@ if ~isempty(kvargs.MasterMetadataTable) && ~isempty(kvargs.TrackingDataFile) && 
             if isnumeric(stimStartVal) && ~isnan(stimStartVal) && stimStartVal > 0
                 videoFrameNumber = stimStartVal;
             end
+        end
+        if ismember('SPEAKER_FLIPPED', masterMetadata.Properties.VariableNames)
+            speakerFlipped = parseSpeakerFlippedValue(metadataRow.('SPEAKER_FLIPPED'));
         end
     end
 end
@@ -96,6 +100,8 @@ end
 
 gradientConfig = struct('xFunction', lower(string(xGradientFn)), 'yFunction', lower(string(yGradientFn)), ...
     'xValues', xGradientVals(:)', 'yValues', yGradientVals(:)');
+invertGradientMode = resolveInvertGradientMode(kvargs.TrackingProvider);
+displayGradientConfig = applyVisualizationGradientInversion(gradientConfig, speakerFlipped, invertGradientMode);
 
 includeDetailedArenaGridExport = false;
 if isfield(arenaGridConfig, 'export_detailed') && ~isempty(arenaGridConfig.export_detailed)
@@ -222,7 +228,7 @@ if isManualArenaGrid
     if ~isempty(meshVerticesSeed)
         meshVertices = meshVerticesSeed;
     end
-    meshGradientHandle = drawManualMeshGradient(ax, meshVertices, nTilesValidated, gradientConfig, pointA, pointB);
+    meshGradientHandle = drawManualMeshGradient(ax, meshVertices, nTilesValidated, displayGradientConfig, pointA, pointB);
     meshLineHandles = gobjects(0); % Use interpolated patch edges instead of separate line overlays.
     meshMarkerHandles = gobjects(size(meshVertices, 1), 1);
     for k = 1:size(meshVertices, 1)
@@ -252,6 +258,7 @@ figData = struct('pointA', pointA, 'pointB', pointB, 'userInteracted', false, ..
     'dragging', false, 'draggedPoint', '', 'vidWidth', vidWidth, 'vidHeight', vidHeight, ...
     'dragStartPos', [], 'isManualArenaGrid', isManualArenaGrid, ...
     'meshVertices', meshVertices, 'nTiles', nTilesValidated, 'gradientConfig', gradientConfig, ...
+    'displayGradientConfig', displayGradientConfig, ...
     'includeDetailedArenaGridExport', includeDetailedArenaGridExport);
 set(fig, 'UserData', figData);
 
@@ -424,7 +431,7 @@ function dragPoint(~, ~, ax, markerA, markerB, lineHandle, textA, textB, meshMar
         set(lineHandle, 'XData', lineX, 'YData', lineY);
 
         if figData.isManualArenaGrid && ~isempty(meshGradientHandle) && all(isgraphics(meshGradientHandle))
-            updateManualMeshGradient(meshGradientHandle, figData.meshVertices, figData.nTiles, figData.gradientConfig, figData.pointA, figData.pointB);
+            updateManualMeshGradient(meshGradientHandle, figData.meshVertices, figData.nTiles, figData.displayGradientConfig, figData.pointA, figData.pointB);
         end
         
         % Update title with current coordinates
@@ -1078,4 +1085,73 @@ function scrollWheelCallback(~, event, ax)
     % Set new limits
     xlim(ax, newXLims);
     ylim(ax, newYLims);
+end
+
+
+function tf = parseSpeakerFlippedValue(inValue)
+    tf = false;
+    if isempty(inValue)
+        return;
+    end
+
+    if iscell(inValue)
+        if isempty(inValue)
+            return;
+        end
+        inValue = inValue{1};
+    end
+
+    if islogical(inValue)
+        tf = logical(inValue(1));
+        return;
+    end
+
+    if isnumeric(inValue)
+        tf = logical(inValue(1));
+        return;
+    end
+
+    s = char(strtrim(string(inValue)));
+    tf = ~isempty(regexpi(s, '^(1|true|yes|y|t)$', 'once'));
+end
+
+
+function mode = resolveInvertGradientMode(trackingProvider)
+    mode = "none";
+    if isempty(trackingProvider)
+        return;
+    end
+
+    try
+        if isprop(trackingProvider, 'arena_grid') && isstruct(trackingProvider.arena_grid) && ...
+                isfield(trackingProvider.arena_grid, 'invert_gradient_score_on_speaker_flip')
+            mode = string(trackingProvider.arena_grid.invert_gradient_score_on_speaker_flip);
+        elseif isprop(trackingProvider, 'userConfig') && isstruct(trackingProvider.userConfig) && ...
+                isfield(trackingProvider.userConfig, 'arena_grid') && isstruct(trackingProvider.userConfig.arena_grid) && ...
+                isfield(trackingProvider.userConfig.arena_grid, 'invert_gradient_score_on_speaker_flip')
+            mode = string(trackingProvider.userConfig.arena_grid.invert_gradient_score_on_speaker_flip);
+        end
+    catch
+        mode = "none";
+    end
+
+    mode = lower(strtrim(mode));
+    if ~ismember(mode, ["x", "y", "both", "none"])
+        mode = "none";
+    end
+end
+
+
+function outConfig = applyVisualizationGradientInversion(inConfig, speakerFlipped, invertMode)
+    outConfig = inConfig;
+    if ~speakerFlipped
+        return;
+    end
+
+    if invertMode == "x" || invertMode == "both"
+        outConfig.xValues = fliplr(outConfig.xValues);
+    end
+    if invertMode == "y" || invertMode == "both"
+        outConfig.yValues = fliplr(outConfig.yValues);
+    end
 end

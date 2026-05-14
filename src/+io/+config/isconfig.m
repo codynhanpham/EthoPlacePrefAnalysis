@@ -46,6 +46,7 @@ function bool = isconfig(config)
 
     % in arena_grid:
     % - n_tiles must be a 1D, 2-element numeric vector
+    % - invert_gradient_score_on_speaker_flip must be either "x", "y", "both" or "none" if it exists: err if not valid, or default to "none" if empty/missing
     if isfield(config, 'arena_grid')
         if ~isfield(config.arena_grid, 'n_tiles')
             bool = false;
@@ -55,6 +56,13 @@ function bool = isconfig(config)
         if ~isnumeric(n_tiles) || ~isvector(n_tiles) || length(n_tiles) ~= 2
             bool = false;
             return;
+        end
+        if isfield(config.arena_grid, 'invert_gradient_score_on_speaker_flip') && ~isempty(char(config.arena_grid.invert_gradient_score_on_speaker_flip))
+            validFlipModes = {'x', 'y', 'both', 'none'};
+            if ~any(strcmp(config.arena_grid.invert_gradient_score_on_speaker_flip, validFlipModes))
+                bool = false;
+                return;
+            end
         end
     end
 

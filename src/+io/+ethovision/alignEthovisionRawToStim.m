@@ -152,6 +152,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 
     % Extract metadata parameters if available from the matching row in master metadata
     sex = ''; genotype = ''; strain = ''; age = ''; dob = NaT; cagecode = ''; id = ''; source = '';
+    stimStartFrameFromMetadata = false; % Flag to track if StimStartFrame came from metadata
     if ~isempty(metadataRow)
         sex = char(metadataRow.('ANIMAL_SEX'));
         genotype = char(metadataRow.('ANIMAL_GENOTYPE'));
@@ -179,20 +180,40 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
             end
             kvargs.StimStartFrame = stimStartVal;
             
-            if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
-                habitdur = metadataRow.('HABITUATION_DURATION_SEC');
-                if ~isnumeric(habitdur)
-                    habitdur = str2double(string(habitdur));
-                end
-                if isempty(habitdur) || isnan(habitdur)
-                    habitdur = 0; % Default to start of trial
-                end
+            if ~isempty(kvargs.StimStartFrame) && ~isnan(kvargs.StimStartFrame)
+                % STIM_START_FRAME is defined in metadata - this has priority
+                stimStartFrameFromMetadata = true;
+                kvargs.StimStartFrame = round(kvargs.StimStartFrame);
+            else
+                % STIM_START_FRAME is not defined in metadata, try to use trigger_events from ref.json
                 mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
                 if isfile(mediafile)
-                    v = VideoReader(mediafile);
-                    fps = v.FrameRate;
-                    kvargs.StimStartFrame = habitdur * fps + 1;
-                    clear v;
+                    [~, videoBaseName, ~] = fileparts(mediafile);
+                    refJsonPath = fullfile(fileparts(mediafile), [videoBaseName, '.ref.json']);
+                    
+                    % Try to read trigger_events from ref.json
+                    refStartFrameFromJson = readTriggerEventsStartFrame(refJsonPath);
+                    if ~isempty(refStartFrameFromJson) && ~isnan(refStartFrameFromJson)
+                        kvargs.StimStartFrame = refStartFrameFromJson;
+                    end
+                end
+                
+                % If still not set, fall back to habituation duration
+                if isempty(kvargs.StimStartFrame) || isnan(kvargs.StimStartFrame)
+                    habitdur = metadataRow.('HABITUATION_DURATION_SEC');
+                    if ~isnumeric(habitdur)
+                        habitdur = str2double(string(habitdur));
+                    end
+                    if isempty(habitdur) || isnan(habitdur)
+                        habitdur = 0; % Default to start of trial
+                    end
+                    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+                    if isfile(mediafile)
+                        v = VideoReader(mediafile);
+                        fps = v.FrameRate;
+                        kvargs.StimStartFrame = habitdur * fps + 1;
+                        clear v;
+                    end
                 end
             end
             
@@ -203,6 +224,16 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         end
         if isempty(kvargs.SpeakerFlipped)
             kvargs.SpeakerFlipped = logical(metadataRow.('SPEAKER_FLIPPED'));
+        end
+    end
+    
+    % If STIM_START_FRAME was from metadata, update ref.json to synchronize trigger_events
+    if stimStartFrameFromMetadata
+        mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+        if isfile(mediafile)
+            [~, videoBaseName, ~] = fileparts(mediafile);
+            refJsonPath = fullfile(fileparts(mediafile), [videoBaseName, '.ref.json']);
+            synchronizeTriggerEventsWithMetadata(refJsonPath, kvargs.StimStartFrame);
         end
     end
     animalMetadata = struct('sex', sex, 'genotype', genotype, 'strain', strain, 'age', age, 'dob', dob, 'cagecode', cagecode, 'id', id, 'source', source);
@@ -536,5 +567,129 @@ function bool = matchedZoneName(input, matchedTo, method)
             bool = contains(input, matchedTo);
         otherwise
             error('Unknown zone match method: %s', method);
+    end
+end
+
+function triggerStartFrame = readTriggerEventsStartFrame(refJsonPath)
+    %%READTRIGGEREVENTSSSTARTFRAME Read the start frame of the first trigger event from ref.json
+    %   Returns the start frame number if found, otherwise returns empty/NaN
+    
+    triggerStartFrame = [];
+    if ~isfile(refJsonPath)
+        return;
+    end
+    
+    try
+        refData = jsondecode(fileread(refJsonPath));
+        
+        if ~isfield(refData, 'trigger_events') || isempty(refData.trigger_events)
+            return;
+        end
+        
+        triggerEventsLocal = refData.trigger_events;
+        
+        % Handle different trigger_events formats
+        if isnumeric(triggerEventsLocal)
+            vals = double(triggerEventsLocal);
+            if isvector(vals) && numel(vals) >= 1
+                % Vector format: [on, off, ...] - take first element
+                triggerStartFrame = vals(1);
+            elseif ismatrix(vals) && size(vals, 1) >= 1
+                % Matrix format: Nx2 (or more columns) - take first row, first column
+                triggerStartFrame = vals(1, 1);
+            end
+        elseif iscell(triggerEventsLocal) && ~isempty(triggerEventsLocal)
+            % Cell array format
+            firstEvent = triggerEventsLocal{1};
+            if isnumeric(firstEvent)
+                firstEvent = double(firstEvent);
+                if numel(firstEvent) >= 1
+                    triggerStartFrame = firstEvent(1);
+                end
+            end
+        end
+        
+        % Validate the frame number
+        if ~isempty(triggerStartFrame) && isnumeric(triggerStartFrame)
+            triggerStartFrame = round(double(triggerStartFrame));
+            if triggerStartFrame < 1
+                triggerStartFrame = [];
+            end
+        end
+        
+    catch
+        % Silently fail if unable to read or parse ref.json
+    end
+end
+
+function synchronizeTriggerEventsWithMetadata(refJsonPath, stimStartFrame)
+    %%SYNCHRONIZETRIGGEREVENTSSWITHMETADATA Update trigger_events in ref.json to match STIM_START_FRAME from metadata
+    %   Sets the first trigger event's start frame to stimStartFrame,
+    %   creates default trigger event if missing, and marks as validated
+    
+    if isempty(stimStartFrame) || isnan(stimStartFrame)
+        return;
+    end
+    
+    try
+        % Load existing ref.json if it exists, otherwise create new structure
+        if isfile(refJsonPath)
+            refData = jsondecode(fileread(refJsonPath));
+        else
+            refData = struct();
+        end
+        
+        stimStartFrame = round(double(stimStartFrame));
+        
+        % Ensure trigger_events exists and update first event's start frame
+        if ~isfield(refData, 'trigger_events') || isempty(refData.trigger_events)
+            % Create default trigger event with just the start frame
+            % Using the format [start, start] as a simple default
+            refData.trigger_events = [stimStartFrame, stimStartFrame];
+        else
+            triggerEventsLocal = refData.trigger_events;
+            
+            % Update based on the format
+            if isnumeric(triggerEventsLocal)
+                vals = double(triggerEventsLocal);
+                if isvector(vals)
+                    % Vector format: update first element
+                    vals(1) = stimStartFrame;
+                    refData.trigger_events = vals;
+                elseif ismatrix(vals)
+                    % Matrix format: update first row, first column
+                    vals(1, 1) = stimStartFrame;
+                    refData.trigger_events = vals;
+                end
+            elseif iscell(triggerEventsLocal) && ~isempty(triggerEventsLocal)
+                % Cell array format: update first event
+                firstEvent = triggerEventsLocal{1};
+                if isnumeric(firstEvent)
+                    firstEvent = double(firstEvent);
+                    if isempty(firstEvent)
+                        firstEvent = [stimStartFrame, stimStartFrame];
+                    else
+                        firstEvent(1) = stimStartFrame;
+                    end
+                    triggerEventsLocal{1} = firstEvent;
+                    refData.trigger_events = triggerEventsLocal;
+                end
+            end
+        end
+        
+        % Mark trigger_events_start_validated as true
+        refData.trigger_events_start_validated = true;
+        
+        % Write back to ref.json
+        jsonText = jsonencode(refData);
+        fid = fopen(refJsonPath, 'w');
+        if fid == -1
+            return; % Silently fail if cannot write
+        end
+        fwrite(fid, jsonText, 'char');
+        fclose(fid);
+        
+    catch
+        % Silently fail if unable to read/write/process ref.json
     end
 end

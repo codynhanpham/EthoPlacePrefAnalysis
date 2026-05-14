@@ -26,6 +26,7 @@ arena_grid:
   score_x_gradient: [1, 0, -1]
   score_y_gradient_function: "linear"
   score_y_gradient: [0.4, 1, 0.4]
+  invert_gradient_score_on_speaker_flip: x
 
 
 tracking_providers:

@@ -9,8 +9,10 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %       masterMetadataTable - The master metadata table loaded from an Excel file with io.metadata.loadMasterMetadata
     %
     %   Name-Value Pair Arguments:
-    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml()
-    %       - 'InvertArenaGradientScoreOnSpeakerFlip': must be one of {'x', 'y', 'both', 'none'}, default 'x'. If the speaker positions were flipped for this trial, whether to also invert the arena grid score along the x and/or y axis. This is useful if the arena grid was designed with the assumption of a certain speaker configuration, and flipping the speakers would logically also flip the arena grid in the same way.
+    %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml().
+    %         IMPORTANT: Arena-grid speaker-flip behavior is read from:
+    %         Config.arena_grid.invert_gradient_score_on_speaker_flip
+    %         which must be one of {'x', 'y', 'both', 'none'} (default: 'x').
     %
     %   Outputs:
     %       summary - A struct containing the analysis results:
@@ -46,7 +48,6 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct() % The full configuration struct loaded with io.config.loadConfigYaml()
-        kvargs.InvertArenaGradientScoreOnSpeakerFlip {mustBeTextScalar, mustBeMember(kvargs.InvertArenaGradientScoreOnSpeakerFlip, {'x', 'y', 'both', 'none'})} = 'x' % If the speaker positions were flipped for this trial, whether to also invert the arena grid score along the x and/or y axis. This is useful if the arena grid was designed with the assumption of a certain speaker configuration, and flipping the speakers would logically also flip the arena grid in the same way.
     end
 
     [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
@@ -343,6 +344,26 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     
     speakerFlipped = stimPeriodTable{1,'Speaker Channels Flipped'}; % should be the same for the whole trial
 
+    % Infer arena-grid gradient inversion behavior from config.
+    invertOnSpeakerFlip = 'x'; % default for compatibility
+    invertOnSpeakerFlipPath = {'arena_grid', 'invert_gradient_score_on_speaker_flip'};
+    if validator.nestedStructFieldExists(configs, invertOnSpeakerFlipPath)
+        invertOnSpeakerFlip = getfield(configs, invertOnSpeakerFlipPath{:});
+        if iscell(invertOnSpeakerFlip)
+            invertOnSpeakerFlip = invertOnSpeakerFlip{1};
+        end
+        invertOnSpeakerFlip = string(invertOnSpeakerFlip);
+        validInvertModes = ["x", "y", "both", "none"];
+        if ~isscalar(invertOnSpeakerFlip) || ~ismember(lower(invertOnSpeakerFlip), validInvertModes)
+            warning('trial:stats:trialSummary:InvalidConfig', ...
+                "Invalid config value for 'arena_grid.invert_gradient_score_on_speaker_flip': %s. Falling back to 'x'.", ...
+                string(invertOnSpeakerFlip));
+            invertOnSpeakerFlip = "x";
+        else
+            invertOnSpeakerFlip = lower(invertOnSpeakerFlip);
+        end
+    end
+
 
     % Check and load .ref.arenagrid.mat if exists
     referenceArenaFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.arenagrid.mat'));
@@ -363,7 +384,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
             invertXGradient = false;
             invertYGradient = false;
             if speakerFlipped
-                switch kvargs.InvertArenaGradientScoreOnSpeakerFlip
+                switch invertOnSpeakerFlip
                     case 'x'
                         invertXGradient = true;
                     case 'y'

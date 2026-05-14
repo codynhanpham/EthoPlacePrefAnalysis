@@ -200,6 +200,7 @@ classdef (Abstract) TrackingProvider < handle
             end
 
             refData.trigger_events = triggerEvents;
+            refData.trigger_events_start_validated = false;  % Auto-detected, not yet manually validated
             writeRefJson(referenceFilePath, refData);
             
             % Restore the progress dialog state if it was modified

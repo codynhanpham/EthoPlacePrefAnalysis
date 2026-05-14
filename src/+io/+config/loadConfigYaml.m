@@ -58,6 +58,16 @@ function configs = loadConfigYaml(configFile)
             error('Invalid value for arena_grid.n_tiles: must be a 1D numeric vector with 2 elements (e.g., [5, 3]).');
         end
         configs.arena_grid.n_tiles = n_tiles; % Ensure n_tiles is stored as a numeric vector
+
+        % Validate and default invert_gradient_score_on_speaker_flip
+        validFlipModes = {'x', 'y', 'both', 'none'};
+        if ~isfield(configs.arena_grid, 'invert_gradient_score_on_speaker_flip') || isempty(char(configs.arena_grid.invert_gradient_score_on_speaker_flip))
+            configs.arena_grid.invert_gradient_score_on_speaker_flip = "x"; % Default
+        else
+            if ~any(strcmp(configs.arena_grid.invert_gradient_score_on_speaker_flip, validFlipModes))
+                error('Invalid value for arena_grid.invert_gradient_score_on_speaker_flip: %s. Valid options are: %s', configs.arena_grid.invert_gradient_score_on_speaker_flip, strjoin(validFlipModes, ', '));
+            end
+        end
     end
 
     fromConfigKey = {'tracking_providers', 'EthoVision', 'arena'};
