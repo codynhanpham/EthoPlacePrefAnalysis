@@ -18,6 +18,10 @@ arguments
     kvargs.MasterMetadataTable {validator.mustBeFileTableOrEmpty} = []
 end
 
+videoFilePath = kvargs.VideoFile;
+[videoDir, videoBaseName, ~] = fileparts(videoFilePath);
+referencePointFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+
 arenaGridMode = "FOV";
 n_tiles = [50, 50];
 xGradientFn = "linear";
@@ -71,7 +75,7 @@ gradientConfig = struct('xFunction', lower(string(xGradientFn)), 'yFunction', lo
     'xValues', xGradientVals(:)', 'yValues', yGradientVals(:)');
 
 speakerFlipped = false;
-videoFrameNumber = 1; % Default to first frame unless Metadata exists, then select the first frame with stim
+videoFrameNumber = []; % Priority: metadata STIM_START_FRAME, then ref.json trigger_events(1,1), then 1
 if ~isempty(kvargs.MasterMetadataTable) && ~isempty(kvargs.TrackingDataFile) && ~isempty(kvargs.TrackingProvider)
     masterMetadata = table();
     if istable(kvargs.MasterMetadataTable)
@@ -101,7 +105,7 @@ if ~isempty(kvargs.MasterMetadataTable) && ~isempty(kvargs.TrackingDataFile) && 
                 stimStartVal = str2double(string(stimStartVal));
             end
             if isnumeric(stimStartVal) && ~isnan(stimStartVal) && stimStartVal > 0
-                videoFrameNumber = stimStartVal;
+                videoFrameNumber = round(double(stimStartVal));
             end
         end
         if ismember('SPEAKER_FLIPPED', masterMetadata.Properties.VariableNames)
@@ -110,13 +114,16 @@ if ~isempty(kvargs.MasterMetadataTable) && ~isempty(kvargs.TrackingDataFile) && 
     end
 end
 
+if isempty(videoFrameNumber)
+    videoFrameNumber = extractFirstTriggerEventStartFrame(referencePointFilePath);
+end
+if isempty(videoFrameNumber)
+    videoFrameNumber = 1;
+end
+
 invertGradientMode = resolveInvertGradientMode(kvargs.TrackingProvider);
 displayGradientConfig = applyVisualizationGradientInversion(gradientConfig, speakerFlipped, invertGradientMode);
 
-
-videoFilePath = kvargs.VideoFile;
-[videoDir, videoBaseName, ~] = fileparts(videoFilePath);
-referencePointFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
 
 % Upgrade any legacy .midpoint.csv files in the folder to per-video .ref.json files.
 graphics.migrateLegacyCSVRefs2JSON(videoDir);
@@ -263,6 +270,61 @@ end
 
 end
 
+
+
+function frameNum = extractFirstTriggerEventStartFrame(referenceFilePath)
+    frameNum = [];
+    if ~isfile(referenceFilePath)
+        return;
+    end
+
+    try
+        jsonData = jsondecode(fileread(referenceFilePath));
+    catch
+        return;
+    end
+
+    if ~isfield(jsonData, 'trigger_events') || isempty(jsonData.trigger_events)
+        return;
+    end
+
+    try
+        triggerEvents = jsonData.trigger_events;
+        firstEvent = [];
+
+        if isnumeric(triggerEvents)
+            vals = double(triggerEvents);
+            if isvector(vals) && numel(vals) >= 2
+                firstEvent = vals(1:2);
+            elseif ismatrix(vals) && size(vals, 2) >= 2
+                firstEvent = vals(1, 1:2);
+            end
+        elseif iscell(triggerEvents) && ~isempty(triggerEvents)
+            row = triggerEvents{1};
+            if isnumeric(row)
+                rowVals = double(row);
+            elseif iscell(row) && ~isempty(row) && isnumeric(row{1})
+                rowVals = double(row{1});
+            else
+                rowVals = [];
+            end
+
+            rowVals = rowVals(:)';
+            if numel(rowVals) >= 2
+                firstEvent = rowVals(1:2);
+            end
+        end
+
+        if ~isempty(firstEvent)
+            startCandidate = firstEvent(1);
+            if isfinite(startCandidate) && startCandidate > 0
+                frameNum = round(double(startCandidate));
+            end
+        end
+    catch
+        frameNum = [];
+    end
+end
 
 
 function axesClickCallback(~, ~, ax, markerHandle, meshGradientHandle, referencePointFilePath, fig, name, isManualArenaGrid)
