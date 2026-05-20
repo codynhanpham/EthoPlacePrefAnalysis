@@ -1,11 +1,11 @@
 function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
-    %%STATEMETRICSBYBUTBINNED Plot state metrics (Arena Grid Score) grouped by bout, binned across the session
+    %%STATEMETRICSBYBUTBINNED Plot state metrics (Arena Grid Score) by bout bin as mean +/- SEM lines
     %
     %   For each bout, computes the mean 'Arena Grid Score' across all frames in that bout.
     %   A bout is defined as a contiguous sequence from a stimulus onset up to the next stimulus onset
     %   in the same stimset (i.e., stim duration + post-stim ISI). Bouts are then grouped into bins
-    %   of BinWidth bouts each and displayed as grouped box-and-whisker plots, with one group of boxes
-    %   per bin on the x-axis.
+    %   of BinWidth bouts each and displayed as stacked lines (stimulus by line style, sex by color)
+    %   with SEM shading.
     %
     %   f = graphics.stateMetricsByBoutBinned(standardizedTable, kvargs)
     %
@@ -52,8 +52,8 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
     nsexes = length(animalSexes);
 
 
-    % Plot tiles grouped by StimSet x Strain x Genotype.
-    % Within each tile, boxes are grouped by bin on the x-axis, and colored by Sex x Stimulus.
+    % Each plot is grouped by StimSet x Strain x Genotype.
+    % Within each plot, stimulus is represented by line style and sex by color.
 
     nplots = nstrains * nstimsets * ngenotypes;
 
@@ -150,94 +150,121 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                 a = nexttile(t);
                 hold(a, 'on');
 
-                % Build data arrays for boxchart
-                allYData = [];
-                allXGroup = {};    % bin label (x-axis position)
-                allColorGroup = {}; % "sex stimName" (GroupByColor)
-                orderedXLabels = {}; % track x label insertion order for reordercats
-                orderedColorGroups = {};
-
+                % Build a consistent x-axis label order across all stimuli in this stimset.
+                orderedXLabels = {};
                 for stimIdx = 1:length(thisStimSet)
                     stimName = thisStimSet{stimIdx};
                     boutInfo = stimsBouts(stimName);
-                    nBouts = boutInfo.nBouts;
-                    boutStartIdx = boutInfo.boutStartIdx;
-                    boutEndIdx = boutInfo.boutEndIdx;
-                    nBins = boutInfo.nBins;
-                    binLabels = boutInfo.binLabels;
-
-                    % Track x-label order (first occurrence wins)
-                    for binIdx = 1:nBins
-                        if ~ismember(binLabels{binIdx}, orderedXLabels)
-                            orderedXLabels{end+1} = binLabels{binIdx}; %#ok<AGROW>
+                    for binIdx = 1:boutInfo.nBins
+                        if ~ismember(boutInfo.binLabels{binIdx}, orderedXLabels)
+                            orderedXLabels{end+1} = boutInfo.binLabels{binIdx}; %#ok<AGROW>
                         end
                     end
+                end
 
-                    for sexIdx = 1:nsexes
-                        sex = animalSexes{sexIdx};
-                        sexMask = strcmp(columnBySexOrder, sex);
-                        combinedMask = strainMask & genotypeMask & sexMask;
-                        if ~any(combinedMask)
+                lineStyles = {'-', '-.', '--', ':'};
+                lineHandles = [];
+                lineLabels = {};
+
+                for sexIdx = 1:nsexes
+                    sex = animalSexes{sexIdx};
+                    sexMask = strcmp(columnBySexOrder, sex);
+                    combinedMask = strainMask & genotypeMask & sexMask;
+                    if ~any(combinedMask)
+                        continue;
+                    end
+
+                    animalScores = arenaGridScoreMatrix(:, combinedMask); % time x nAnimals
+                    lineColor = resolveSexColor(sex);
+
+                    for stimIdx = 1:length(thisStimSet)
+                        stimName = thisStimSet{stimIdx};
+                        boutInfo = stimsBouts(stimName);
+                        nBouts = boutInfo.nBouts;
+                        boutStartIdx = boutInfo.boutStartIdx;
+                        boutEndIdx = boutInfo.boutEndIdx;
+                        nBins = boutInfo.nBins;
+                        binLabels = boutInfo.binLabels;
+
+                        if nBouts == 0
                             continue;
                         end
 
-                        animalScores = arenaGridScoreMatrix(:, combinedMask); % time x nAnimals
-
-                        % Compute per-bout mean Arena Grid Score per animal: nBouts x nAnimals
+                        % Compute per-bout mean Arena Grid Score per animal (excluding NaN time points): nBouts x nAnimals
                         perBoutMean = NaN(nBouts, sum(combinedMask));
                         for boutIdx = 1:nBouts
                             boutData = animalScores(boutStartIdx(boutIdx):boutEndIdx(boutIdx), :);
-                            perBoutMean(boutIdx, :) = mean(boutData, 1, 'omitnan');
+                            perBoutMean(boutIdx, :) = mean(boutData, 1, 'omitnan'); % This is the same as sum(stateValue each timepoint in bout)/number of timepoints, but ensure removing NaN from being included
                         end
 
-                        % Aggregate into bins: average bouts within each bin per animal
-                        groupLabel = sprintf('%s %s', sex, stimName);
-                        if ~ismember(groupLabel, orderedColorGroups)
-                            orderedColorGroups{end+1} = groupLabel; %#ok<AGROW>
-                        end
+                        meanByBin = NaN(nBins, 1);
+                        semByBin = NaN(nBins, 1);
+                        nByBin = zeros(nBins, 1);
+                        xNumeric = NaN(nBins, 1);
+
                         for binIdx = 1:nBins
                             bStart = (binIdx - 1) * kvargs.BinWidth + 1;
                             bEnd = min(binIdx * kvargs.BinWidth, nBouts);
                             binMeans = mean(perBoutMean(bStart:bEnd, :), 1, 'omitnan'); % 1 x nAnimals
-                            nAnimals = numel(binMeans);
-                            allYData = [allYData; binMeans(:)]; %#ok<AGROW>
-                            allXGroup = [allXGroup; repmat({binLabels{binIdx}}, nAnimals, 1)]; %#ok<AGROW>
-                            allColorGroup = [allColorGroup; repmat({groupLabel}, nAnimals, 1)]; %#ok<AGROW>
+                            validVals = binMeans(~isnan(binMeans));
+
+                            nByBin(binIdx) = numel(validVals);
+                            if ~isempty(validVals)
+                                meanByBin(binIdx) = mean(validVals, 'omitnan'); % mean of animal means
+                                semByBin(binIdx) = std(validVals, 0, 'omitnan') / sqrt(numel(validVals));
+                            end
+
+                            xNumeric(binIdx) = find(strcmp(orderedXLabels, binLabels{binIdx}), 1);
                         end
+
+                        validPlotMask = ~isnan(xNumeric) & ~isnan(meanByBin);
+                        if ~any(validPlotMask)
+                            continue;
+                        end
+
+                        xVals = xNumeric(validPlotMask);
+                        yVals = meanByBin(validPlotMask);
+                        semVals = semByBin(validPlotMask);
+                        semVals(isnan(semVals)) = 0;
+
+                        fill(a, [xVals; flipud(xVals)], ...
+                            [yVals + semVals; flipud(yVals - semVals)], ...
+                            lineColor, ...
+                            'FaceAlpha', 0.10, ...
+                            'EdgeColor', 'none', ...
+                            'HandleVisibility', 'off');
+
+                        lineStyle = lineStyles{mod(stimIdx - 1, numel(lineStyles)) + 1};
+                        lineHandle = plot(a, xVals, yVals, ...
+                            'Color', lineColor, ...
+                            'LineStyle', lineStyle, ...
+                            'LineWidth', 2, ...
+                            'Marker', 'o', ...
+                            'MarkerFaceColor', lineColor, ...
+                            'DisplayName', sprintf('%s - %s', stimName, sex));
+
+                        lineHandles = [lineHandles; lineHandle]; %#ok<AGROW>
+                        lineLabels{end+1} = sprintf('%s - %s (n=%d)', stimName, sex, max(nByBin)); %#ok<AGROW>
                     end
                 end
 
-                if ~isempty(allYData)
-                    xCat = reordercats(categorical(allXGroup), orderedXLabels);
-                    colorCat = categorical(allColorGroup, orderedColorGroups, 'Ordinal', true);
-                    bc = boxchart(a, xCat, allYData, 'GroupByColor', colorCat, 'BoxWidth', 0.7, 'MarkerStyle', '.');
-
-                    % Apply sex-based colors and lighten successive stimuli within a stimset.
-                    colorCategories = categories(colorCat);
-                    for bcIdx = 1:numel(bc)
-                        categoryLabel = colorCategories{min(bcIdx, numel(colorCategories))};
-                        tokens = strsplit(categoryLabel, ' ');
-                        sexLabel = tokens{1};
-                        stimLabel = strjoin(tokens(2:end), ' ');
-                        stimOrderIdx = find(strcmp(thisStimSet, stimLabel), 1);
-                        if isempty(stimOrderIdx)
-                            stimOrderIdx = 1;
-                        end
-
-                        c = resolveStimSexColor(sexLabel, stimOrderIdx);
-                        bc(bcIdx).BoxFaceColor = c;
-                        bc(bcIdx).MarkerColor = c;
-                        bc(bcIdx).WhiskerLineColor = c;
-                    end
-
-                    legend(a, 'Location', 'best', 'Interpreter', 'none');
+                if ~isempty(orderedXLabels)
+                    xticks(a, 1:numel(orderedXLabels));
+                    xticklabels(a, orderedXLabels);
+                    xtickangle(a, 35);
+                    xlim(a, [0.5, numel(orderedXLabels) + 0.5]);
                 end
 
-                yline(a, 0.5, ':k', 'LineWidth', 0.5);
+                if ~isempty(lineHandles)
+                    lgd = legend(a, lineHandles, lineLabels, 'Location', 'best', 'Interpreter', 'none');
+                    lgd.AutoUpdate = 'off';
+                end
+
+                yline(a, 0, ':k', 'LineWidth', 0.5, 'HandleVisibility', 'off');
                 hold(a, 'off');
                 title(a, sprintf('[%s]\n%s  %s\n(Bin = %d bouts, Mean per Animal)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth), 'Interpreter', 'none');
                 xlabel(a, 'Bouts (% of session)');
-                ylabel(a, 'Arena Grid Score');
+                ylabel(a, sprintf('State Metric\n(Positive = Closer to Normal USV;\n\tNegative = Farther from Normal USV)'));
                 grid(a, 'on');
             end
         end
@@ -266,25 +293,12 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
 
 end
 
-function color = resolveStimSexColor(sexLabel, stimOrderIdx)
+function color = resolveSexColor(sexLabel)
     if strcmpi(sexLabel, 'M') || strcmpi(sexLabel, 'Male')
-        baseColor = [0 0.447 0.741];
+        color = [0 0.447 0.741];
     elseif strcmpi(sexLabel, 'F') || strcmpi(sexLabel, 'Female')
-        baseColor = [0.850 0.325 0.098];
+        color = [0.850 0.325 0.098];
     else
-        baseColor = [0.5 0.5 0.5];
+        color = [0.5 0.5 0.5];
     end
-
-    if stimOrderIdx <= 1
-        color = baseColor;
-        return;
-    end
-
-    lightenStep = 0.38;
-    maxLighten = 0.9;
-    color = lightenColor(baseColor, min(maxLighten, (stimOrderIdx - 1) * lightenStep));
-end
-
-function color = lightenColor(baseColor, amount)
-    color = baseColor + (1 - baseColor) * amount;
 end

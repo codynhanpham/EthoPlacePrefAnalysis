@@ -61,9 +61,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % SCRIPT_VERSION = '1.1.1'; % Also store script version and the full metadata row in saved aligned file for future reference
     % SCRIPT_VERSION = '1.2.0'; % Store stimuli metadata extracted from stimulus file in the aligned file output for convenience
     % SCRIPT_VERSION = '1.2.1'; % Fix logic for end-of-stimulus frame calculation
+    % SCRIPT_VERSION = '1.2.2'; % Also save dob and source cage code in animalMetadata output struct
+    % SCRIPT_VERSION = '1.2.3'; % Include companion ref.json content in cache hash to invalidate stale aligned files when trigger metadata changes
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.2.2'; % Also save dob and source cage code in animalMetadata output struct
+    SCRIPT_VERSION = '1.2.3'; % Include companion ref.json content in cache hash to invalidate stale aligned files when trigger metadata changes
 
 
 
@@ -119,7 +121,20 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     metadatarowHash = DataHash(metadataRow, 'SHA-256');
     stimFileHash = DataHash(stimFile, 'SHA-256', 'file'); % io.stimuli.extractMetadata should have verified file exists
 
-    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(metadatarowHash), char(stimFileHash), char(SCRIPT_VERSION)];
+    % Include the companion ref.json content/state in cache key so alignment is re-run when trigger metadata changes.
+    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+    refJsonPath = "";
+    if isfile(mediafile)
+        [~, videoBaseName, ~] = fileparts(mediafile);
+        refJsonPath = fullfile(fileparts(mediafile), [videoBaseName, '.ref.json']);
+    end
+    refJsonExists = isfile(refJsonPath);
+    refJsonHash = '';
+    if refJsonExists
+        refJsonHash = DataHash(refJsonPath, 'SHA-256', 'file');
+    end
+
+    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(metadatarowHash), char(stimFileHash), char(refJsonPath), char(string(refJsonExists)), char(refJsonHash), char(SCRIPT_VERSION)];
     ethovisionXlsxHash = DataHash(composite, 'SHA-256');
 
     [filedir, filename] = fileparts(ethovisionXlsx);
