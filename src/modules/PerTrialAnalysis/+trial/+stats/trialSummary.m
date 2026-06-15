@@ -65,9 +65,16 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
 
     % Animal position is in the "active" speaker/stim zone
     animalMatchedStim = stimPeriodTable{:,'Animal Matched Stim Name'};
-    cats = categories(categorical(animalMatchedStim));
-    animalMatchedStimCounts = countcats(categorical(animalMatchedStim));
-    animalMatchedStimFrameFreq = dictionary(string(cats), animalMatchedStimCounts);
+    animalMatchedStimFrameFreq = configureDictionary("string", "double");
+
+    % Real data may contain no valid matched stim labels (animal is not ever in the stim zone); keep an empty typed dictionary.
+    animalMatchedStimStr = string(animalMatchedStim);
+    validMatchedStim = ~ismissing(animalMatchedStimStr) & strlength(strtrim(animalMatchedStimStr)) > 0;
+    if any(validMatchedStim)
+        cats = categories(categorical(animalMatchedStimStr(validMatchedStim)));
+        animalMatchedStimCounts = countcats(categorical(animalMatchedStimStr(validMatchedStim)));
+        animalMatchedStimFrameFreq = dictionary(string(cats), animalMatchedStimCounts);
+    end
     missingStims = setdiff(allstims, keys(animalMatchedStimFrameFreq));
     for i = 1:length(missingStims)
         animalMatchedStimFrameFreq(missingStims{i}) = 0;
@@ -75,9 +82,14 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
 
     % Left/Right speaker position of the matched stimulus frames
     stimspeakerMatched = stimPeriodTable{:,'Matched Speaker Position'};
-    speakerCats = categories(categorical(stimspeakerMatched));
-    speakerCounts = countcats(categorical(stimspeakerMatched));
-    stimspeakerMatchedFrameFreq = dictionary(string(speakerCats), speakerCounts);
+    stimspeakerMatchedFrameFreq = configureDictionary("string", "double");
+    stimspeakerMatchedStr = string(stimspeakerMatched);
+    validMatchedSpeaker = ~ismissing(stimspeakerMatchedStr) & strlength(strtrim(stimspeakerMatchedStr)) > 0;
+    if any(validMatchedSpeaker)
+        speakerCats = categories(categorical(stimspeakerMatchedStr(validMatchedSpeaker)));
+        speakerCounts = countcats(categorical(stimspeakerMatchedStr(validMatchedSpeaker)));
+        stimspeakerMatchedFrameFreq = dictionary(string(speakerCats), speakerCounts);
+    end
     missingSpeakers = setdiff(["Left Speaker", "Right Speaker"], keys(stimspeakerMatchedFrameFreq));
     for i = 1:length(missingSpeakers)
         stimspeakerMatchedFrameFreq(missingSpeakers{i}) = 0;
@@ -85,9 +97,14 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
 
     % Count the frequency of stim speaker positions extended (available/original, no match by animal position)
     stimspeakerExtended = stimPeriodTable{:,'Stim Speaker Corrected'};
-    speakerCatsExtended = categories(categorical(stimspeakerExtended));
-    speakerCountsExtended = countcats(categorical(stimspeakerExtended));
-    stimspeakerOriginalFrameFreq = dictionary(string(speakerCatsExtended), speakerCountsExtended);
+    stimspeakerOriginalFrameFreq = configureDictionary("string", "double");
+    stimspeakerExtendedStr = string(stimspeakerExtended);
+    validExtendedSpeaker = ~ismissing(stimspeakerExtendedStr) & strlength(strtrim(stimspeakerExtendedStr)) > 0;
+    if any(validExtendedSpeaker)
+        speakerCatsExtended = categories(categorical(stimspeakerExtendedStr(validExtendedSpeaker)));
+        speakerCountsExtended = countcats(categorical(stimspeakerExtendedStr(validExtendedSpeaker)));
+        stimspeakerOriginalFrameFreq = dictionary(string(speakerCatsExtended), speakerCountsExtended);
+    end
     missingSpeakersExtended = setdiff(["Left Speaker", "Right Speaker"], keys(stimspeakerOriginalFrameFreq));
     for i = 1:length(missingSpeakersExtended)
         stimspeakerOriginalFrameFreq(missingSpeakersExtended{i}) = 0;

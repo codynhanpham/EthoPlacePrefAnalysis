@@ -20,6 +20,8 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     %
     %       'Title' : Text scalar for the overall figure title. Default is '' (no title).
     %       'SameYLim' : Logical scalar indicating whether to harmonize y-limits across all subplots for direct comparability. Default is true.
+    %       'YLim' : 1x2 double array specifying manual y-limits [min, max]. Default is [] (auto). Overrides SameYLim.
+    %       'ShowDataPoints' : Logical scalar indicating whether to overlay jittered scatter of per-animal bin means. Default is true.
     %
     %   Outputs:
     %       f : Figure handle of the generated plot
@@ -36,7 +38,11 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
 
         kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
         kvargs.SameYLim (1,1) logical = true % whether to harmonize y-limits across all subplots for direct comparability
+        kvargs.YLim double {validateYLim} = [] % manual y-limits [min, max]; empty = auto
+        kvargs.ShowDataPoints (1,1) logical = true % whether to overlay jittered scatter of per-animal bin means
     end
+
+    kvargs.YLim = validateYLim(kvargs.YLim);
 
     % Make sure response window is valid: end > start
     if kvargs.ResponseWindow(2) <= kvargs.ResponseWindow(1)
@@ -52,14 +58,6 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     stimSets = {standardizedTable.stimuliSorted};
     nstimsets = length(stimSets);
 
-    animalStrains = cellfun(@(x) {x.values().strain}, {standardizedTable.animalMetadata}, 'UniformOutput', false);
-    animalStrains = unique([animalStrains{:}]);
-    nstrains = length(animalStrains);
-
-    animalGenotypes = cellfun(@(x) {x.values().genotype}, {standardizedTable.animalMetadata}, 'UniformOutput', false);
-    animalGenotypes = unique([animalGenotypes{:}]);
-    ngenotypes = length(animalGenotypes);
-
     animalSexes = cellfun(@(x) {x.values().sex}, {standardizedTable.animalMetadata}, 'UniformOutput', false);
     animalSexes = unique([animalSexes{:}]);
     nsexes = length(animalSexes);
@@ -68,6 +66,23 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     % Each plot will be by Per StimSet x Strain x Genotype
     % Within each plot, the stimulus (within the set) will be represented by line style, and Sex by color within each plot
     % With 2 stimuli per set, there will be 2 line styles (e.g., solid for stim that includes 'normal', dashed for the other stimulus --> 4 lines per plot
+    % Only plot combinations that actually exist in the data.
+
+    % Pre-scan: collect (stimsetIdx, strain, genotype) tuples that have data
+    existingCombos = {};
+    for si = 1:nstimsets
+        thisMeta = standardizedTable(si).animalMetadata;
+        theseStrains = {thisMeta.values().strain};
+        theseGenotypes = {thisMeta.values().genotype};
+        for ai = 1:length(theseStrains)
+            existingCombos{end+1} = {si, theseStrains{ai}, theseGenotypes{ai}}; %#ok<AGROW>
+        end
+    end
+    % De-duplicate
+    [~, uniqueIdx] = unique(cellfun(@(c) sprintf('%d|%s|%s', c{1}, c{2}, c{3}), existingCombos, 'UniformOutput', false), 'stable');
+    existingCombos = existingCombos(uniqueIdx);
+
+    nplots = length(existingCombos);
 
     % At the onset of each bout, start tracking the distance of the subject from midline over time
     % Using the current position at bout onset as the zero point (i.e., how the animal displaces from its initial position due to stimulus)
@@ -78,8 +93,6 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
     NORMAL_LINE_STYLE = {'-'}; % stimuliSorted should place 'normal' stimulus first
     OTHER_LINE_STYLE = {'-.', '--', ':'}; % for additional stimuli, each gets a different non-solid line style
     knownOtherStimLineStyles = configureDictionary('char', 'char'); % Map known non-normal stimulus keywords to specific line styles (e.g., 'inverted' -> '-.', 'white noise' -> '--', etc.)
-
-    nplots = nstrains * nstimsets * ngenotypes;
 
     ncols = ceil(sqrt(nplots));
     nrows = ceil(nplots / ncols);
@@ -175,14 +188,17 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
             );
         end
 
-        for strainIdx = 1:nstrains
-            strain = animalStrains{strainIdx};
-            strainMask = strcmp(columnByStrainOrder, strain);
+        for comboIdx = 1:length(existingCombos)
+            combo = existingCombos{comboIdx};
+            if combo{1} ~= stimsetIdx
+                continue;
+            end
+            strain = combo{2};
+            genotype = combo{3};
 
-            for genotypeIdx = 1:ngenotypes
-                genotype = animalGenotypes{genotypeIdx};
-                genotypeMask = strcmp(columnByGenotypeOrder, genotype);
-                genotypeSexData = dictionary(); % Use dictionary to handle stimulus names with spaces
+            strainMask = strcmp(columnByStrainOrder, strain);
+            genotypeMask = strcmp(columnByGenotypeOrder, genotype);
+            genotypeSexData = dictionary(); % Use dictionary to handle stimulus names with spaces
 
                 % One tile per StimSet x Strain x Genotype combination.
                 a = nexttile(t);
@@ -318,6 +334,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                             'mean', meanAcrossReplicates, ...
                             'sem', semAcrossReplicates, ...
                             'binTimeCenters', binTimeCenters, ...
+                            'replicateMeans', meanDisplacement, ...
                             'nreplicates', nreplicates ...
                         );
                     end
@@ -365,6 +382,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                             binTimeCenters = data.binTimeCenters;
                             meanDisplacement = data.mean;
                             semDisplacement = data.sem;
+                            replicateMeans = data.replicateMeans;
                             
                             % Ensure vectors are column vectors for fill function
                             binTimeCenters = binTimeCenters(:);
@@ -396,6 +414,26 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                                 'Color', lineColor, ...
                                 'LineWidth', 2, ...
                                 'DisplayName', sprintf('%s - %s', stimName, sex));
+
+                            if kvargs.ShowDataPoints
+                                scatterMarker = resolveStimulusMarker(stimIdx);
+                                jitterWidth = resolveTimeJitterWidth(binTimeCenters, kvargs.ResponseWindow);
+                                for binIdx = 1:length(binTimeCenters)
+                                    vals = replicateMeans(binIdx, :);
+                                    vals = vals(isfinite(vals));
+                                    if isempty(vals)
+                                        continue;
+                                    end
+
+                                    jitter = (rand(numel(vals), 1) - 0.5) * 2 * jitterWidth;
+                                    scatter(a, binTimeCenters(binIdx) + jitter, vals(:), 16, ...
+                                        'Marker', scatterMarker, ...
+                                        'MarkerFaceColor', lineColor, ...
+                                        'MarkerEdgeColor', 'none', ...
+                                        'MarkerFaceAlpha', 0.25, ...
+                                        'HandleVisibility', 'off');
+                                end
+                            end
                             
                             % Collect line handle for legend
                             lineHandles = [lineHandles; lineHandle]; %#ok<AGROW>
@@ -416,13 +454,15 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                 grid(a, 'on');
                 hold(a, 'off');
 
-            end
-
         end
 
     end
-
-    if kvargs.SameYLim
+    if ~isempty(kvargs.YLim)
+        allAxes = findall(t, 'Type', 'Axes');
+        if ~isempty(allAxes)
+            ylim(allAxes, kvargs.YLim);
+        end
+    elseif kvargs.SameYLim
         % Harmonize y-limits across all tile axes so subplots are directly comparable.
         allAxes = findall(t, 'Type', 'Axes');
         if ~isempty(allAxes)
@@ -443,4 +483,40 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
         end
     end
     
+end
+
+function yLim = validateYLim(yLim)
+    if isempty(yLim)
+        return;
+    end
+
+    if ~(isnumeric(yLim) && isreal(yLim) && numel(yLim) == 2)
+        error('YLim must be empty or a numeric 2-element vector [min, max].');
+    end
+
+    if ~(isequal(size(yLim), [1, 2]) || isequal(size(yLim), [2, 1]))
+        error('YLim must be shape (1,2) or (2,1).');
+    end
+
+    yLim = reshape(yLim, 1, 2);
+    if ~all(isfinite(yLim))
+        error('YLim values must be finite.');
+    end
+    if yLim(2) <= yLim(1)
+        error('YLim upper bound must be greater than lower bound.');
+    end
+end
+
+function marker = resolveStimulusMarker(stimIdx)
+    markerOptions = {'o', '^', 's', 'd'};
+    marker = markerOptions{mod(stimIdx - 1, numel(markerOptions)) + 1};
+end
+
+function jitterWidth = resolveTimeJitterWidth(binTimeCenters, responseWindow)
+    validCenters = binTimeCenters(isfinite(binTimeCenters));
+    if numel(validCenters) >= 2
+        jitterWidth = 0.15 * min(diff(validCenters));
+    else
+        jitterWidth = 0.02 * max(diff(responseWindow), eps);
+    end
 end

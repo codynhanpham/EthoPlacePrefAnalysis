@@ -1,13 +1,17 @@
-function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
-    %%STATEMETRICSBYBUTBINNED Plot state metrics (Arena Grid Score) by bout bin as mean +/- SEM lines
+function f = distFromMidlineByBoutBinned(standardizedTable, kvargs)
+    %%DISTFROMMIDLINEBYBOUTBINNED Plot distance from midline by bout bin as mean +/- SEM lines with jittered scatter
     %
-    %   For each bout, computes the mean 'Arena Grid Score' across all frames in that bout.
+    %   For each bout, computes the mean 'Distance from Midline' across all frames in that bout.
     %   A bout is defined as a contiguous sequence from a stimulus onset up to the next stimulus onset
     %   in the same stimset (i.e., stim duration + post-stim ISI). Bouts are then grouped into bins
     %   of BinWidth bouts each and displayed as stacked lines (stimulus by line style, sex by color)
-    %   with SEM shading.
+    %   with SEM shading, plus jittered scatter points showing per-animal bin means.
     %
-    %   f = graphics.stateMetricsByBoutBinned(standardizedTable, kvargs)
+    %   The Y-axis is signed such that positive = toward the bout's currently active stimulus (whichever
+    %   stimulus in the set is playing), and negative = away from the active stimulus (toward the opposite side).
+    %   Stimulus identity is shown by line style, sex by color.
+    %
+    %   f = graphics.distFromMidlineByBoutBinned(standardizedTable, kvargs)
     %
     %   Inputs:
     %       standardizedTable : Struct array in standardized format, as output by population.stats.populationPositionOverTime()
@@ -22,15 +26,15 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
     %   Outputs:
     %       f : Figure handle of the generated plot
     %
-    %   See also: population.stats.populationPositionOverTime, graphics.distFromMidlineByBout, graphics.cumulativeDisplacementByBout
+    %   See also: population.stats.populationPositionOverTime, graphics.stateMetricsByBoutBinned, graphics.distFromMidlineByTimeBinned, graphics.cumulativeDisplacementByBout
 
     arguments
         standardizedTable struct {mustBeNonempty}
 
         kvargs.BinWidth (1,1) {mustBePositive, mustBeInteger} = 1 % number of bouts per bin
         kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
-        kvargs.YLim double {validateYLim} = [] % manual y-limits [min, max]; empty = auto
         kvargs.SameYLim (1,1) logical = true % whether to harmonize y-limits across all subplots for direct comparability
+        kvargs.YLim double {validateYLim} = [] % manual y-limits [min, max]; empty = auto
         kvargs.ShowDataPoints (1,1) logical = true % whether to overlay jittered scatter of per-animal bin means
     end
 
@@ -79,7 +83,7 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
     % Center the figure on the primary screen
     figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
 
-    f = figure('Name', sprintf("State Metrics By Bout (Bin Width: %d bouts)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
+    f = figure('Name', sprintf("Distance From Midline By Bout (Bin Width: %d bouts)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
     t = tiledlayout(f, nrows, ncols, 'Padding', 'compact', 'TileSpacing', 'compact');
     t.Title.String = kvargs.Title;
     t.Title.FontWeight = 'bold';
@@ -89,23 +93,41 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
         thisStdTable = standardizedTable(stimsetIdx);
         stimPeriodTable = thisStdTable.centerpointData;
 
-        if ~ismember('Arena Grid Score', stimPeriodTable.Properties.VariableNames)
-            error('stateMetricsByBoutBinned:missingArenaGridScore', ...
-                'centerpointData for stimset [%s] does not contain ''Arena Grid Score''.', ...
+        if ~ismember('Distance from Midline', stimPeriodTable.Properties.VariableNames)
+            error('distFromMidlineByBoutBinned:missingDistanceFromMidline', ...
+                'centerpointData for stimset [%s] does not contain ''Distance from Midline''.', ...
                 strjoin(thisStimSet, '/'));
         end
 
-        stimPeriodTable = stimPeriodTable(:, ismember(stimPeriodTable.Properties.VariableNames, {'Trial time', 'Stimulus name', 'Arena Grid Score'}));
+        stimPeriodTable = stimPeriodTable(:, ismember(stimPeriodTable.Properties.VariableNames, {'Trial time', 'Stimulus name', 'Distance from Midline'}));
         stimSequence = stimPeriodTable{:, 'Stimulus name'};
-        arenaGridScoreMatrix = stimPeriodTable{:, 'Arena Grid Score'}; % time x nAnimals
-        if isempty(arenaGridScoreMatrix) || all(isnan(arenaGridScoreMatrix), 'all')
-            error('stateMetricsByBoutBinned:allArenaGridScoreNaN', ...
-                'Arena Grid Score for stimset [%s] is empty or entirely NaN.', ...
+        distanceFromMidlineMatrix = stimPeriodTable{:, 'Distance from Midline'}; % time x nAnimals
+        if isempty(distanceFromMidlineMatrix) || all(isnan(distanceFromMidlineMatrix), 'all')
+            error('distFromMidlineByBoutBinned:allDistanceFromMidlineNaN', ...
+                'Distance from Midline for stimset [%s] is empty or entirely NaN.', ...
                 strjoin(thisStimSet, '/'));
         end
         columnByStrainOrder = {thisStdTable.animalMetadata.values().strain};
         columnByGenotypeOrder = {thisStdTable.animalMetadata.values().genotype};
         columnBySexOrder = {thisStdTable.animalMetadata.values().sex};
+
+        % Normalize each replicate to (-1,1) — same as distFromMidlineByTimeBinned
+        for replicateIdx = 1:size(distanceFromMidlineMatrix, 2)
+            colData = distanceFromMidlineMatrix(:, replicateIdx);
+            maxVal = max(colData, [], 'omitnan');
+            minVal = min(colData, [], 'omitnan');
+
+            if maxVal > 0 && ~isnan(maxVal)
+                posMask = colData > 0;
+                colData(posMask) = colData(posMask) / maxVal;
+            end
+
+            if minVal < 0 && ~isnan(minVal)
+                negMask = colData < 0;
+                colData(negMask) = colData(negMask) / abs(minVal);
+            end
+            distanceFromMidlineMatrix(:, replicateIdx) = colData;
+        end
 
         % Collect all stim start indices across the entire stimset.
         % Used to define bout end boundaries: a bout ends just before the next stim onset in the set.
@@ -116,7 +138,12 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
         end
         allStimStartsInSet = sort(allStimStartsInSet);
 
-        % Compute bout [startIdx, endIdx] for each stimulus in the set
+        % Compute bout [startIdx, endIdx] and direction sign for each stimulus in the set
+        % Sign convention (see cumulativeDisplacementByBout for reference):
+        %   - stimuliSorted{1} is on the negative side of midline, stimuliSorted{2} on the positive side
+        %   - For stim{1} (active on negative side): flip sign so that negative distance → positive (toward active stim)
+        %   - For stim{2} (active on positive side): keep sign so that positive distance → positive (toward active stim)
+        %   Result: positive Y always = toward the currently active stimulus, negative Y = away from it
         stimsBouts = configureDictionary("char", "struct");
         for stimIdx = 1:length(thisStimSet)
             stimName = thisStimSet{stimIdx};
@@ -144,14 +171,25 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                 binLabels{binIdx} = sprintf('%.0f-%.0f%%', (bStart - 1) / nBouts * 100, bEnd / nBouts * 100);
             end
 
+            % Direction sign: positive = toward active stimulus
+            % stimIdx==1 => active stim on negative side => flip sign (neg*neg=pos)
+            % stimIdx==2 => active stim on positive side => keep sign (pos*pos=pos)
+            if stimIdx == 1
+                directionSign = -1; % flip so that negative distance → positive (toward stim{1})
+            else
+                directionSign = +1; % keep so that positive distance → positive (toward stim{2})
+            end
+
             stimsBouts(stimName) = struct(...
                 'nBouts', nBouts, ...
                 'boutStartIdx', boutStartIdx, ...
                 'boutEndIdx', boutEndIdx, ...
                 'nBins', nBins, ...
-                'binLabels', {binLabels} ...
+                'binLabels', {binLabels}, ...
+                'directionSign', directionSign ...
             );
         end
+
         for comboIdx = 1:length(existingCombos)
             combo = existingCombos{comboIdx};
             if combo{1} ~= stimsetIdx
@@ -178,11 +216,13 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                     end
                 end
 
+                % Store per-bin per-animal means for scatter, keyed by composite key "stimName:sex"
+                scatterData = struct();
+                scatterKeys = {};
+
                 lineStyles = {'-', '-.', '--', ':'};
                 lineHandles = [];
                 lineLabels = {};
-                scatterData = struct();
-                scatterKeys = {};
 
                 for sexIdx = 1:nsexes
                     sex = animalSexes{sexIdx};
@@ -192,7 +232,7 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                         continue;
                     end
 
-                    animalScores = arenaGridScoreMatrix(:, combinedMask); % time x nAnimals
+                    animalDistances = distanceFromMidlineMatrix(:, combinedMask); % time x nAnimals
                     lineColor = resolveSexColor(sex);
 
                     for stimIdx = 1:length(thisStimSet)
@@ -203,30 +243,28 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                         boutEndIdx = boutInfo.boutEndIdx;
                         nBins = boutInfo.nBins;
                         binLabels = boutInfo.binLabels;
+                        dirSign = boutInfo.directionSign;
 
                         if nBouts == 0
                             continue;
                         end
 
-                        % Compute per-bout mean Arena Grid Score per animal (excluding NaN time points): nBouts x nAnimals
+                        % Compute per-bout mean distance per animal (excluding NaN): nBouts x nAnimals
+                        % Apply direction sign so positive = toward active stimulus
                         perBoutMean = NaN(nBouts, sum(combinedMask));
                         for boutIdx = 1:nBouts
-                            boutData = animalScores(boutStartIdx(boutIdx):boutEndIdx(boutIdx), :);
-                            perBoutMean(boutIdx, :) = mean(boutData, 1, 'omitnan'); % This is the same as sum(stateValue each timepoint in bout)/number of timepoints, but ensure removing NaN from being included
+                            boutData = animalDistances(boutStartIdx(boutIdx):boutEndIdx(boutIdx), :);
+                            perBoutMean(boutIdx, :) = dirSign * mean(boutData, 1, 'omitnan');
                         end
 
-                        % Sign the score so that POSITIVE always means "toward the active stimulus side"
-                        % Arena Grid Score max is already oriented toward stimuliSorted(1).
-                        % For stimuliSorted(2) bouts: negate so positive means toward that side.
-                        % Of course this does assume the range is symmetric and the midline is actually at zero AND center of arena
-                        if stimIdx ~= 1
-                            perBoutMean = -perBoutMean;
-                        end
-
+                        % Bin the per-bout means
                         meanByBin = NaN(nBins, 1);
                         semByBin = NaN(nBins, 1);
                         nByBin = zeros(nBins, 1);
                         xNumeric = NaN(nBins, 1);
+
+                        % Store per-bin per-animal means for scatter
+                        animalMeansByBin = cell(nBins, 1);
 
                         for binIdx = 1:nBins
                             bStart = (binIdx - 1) * kvargs.BinWidth + 1;
@@ -238,13 +276,14 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
 
                             nByBin(binIdx) = numel(validVals);
                             if ~isempty(validVals)
-                                meanByBin(binIdx) = mean(validVals, 'omitnan'); % mean of animal means
+                                meanByBin(binIdx) = mean(validVals, 'omitnan');
                                 semByBin(binIdx) = std(validVals, 0, 'omitnan') / sqrt(numel(validVals));
                             end
 
                             xNumeric(binIdx) = find(strcmp(orderedXLabels, binLabels{binIdx}), 1);
                         end
 
+                        % Store scatter data
                         compositeKey = sprintf('%s:%s', stimName, sex);
                         scatterKeys{end+1} = compositeKey; %#ok<AGROW>
                         scatterData.(matlab.lang.makeValidName(compositeKey)) = struct(...
@@ -252,6 +291,7 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                             'animalMeansByBin', {animalMeansByBin} ...
                         );
 
+                        % Plot line + SEM shading
                         validPlotMask = ~isnan(xNumeric) & ~isnan(meanByBin);
                         if ~any(validPlotMask)
                             continue;
@@ -283,21 +323,35 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                     end
                 end
 
+                % --- Add jittered scatter for per-animal bin means ---
+                % Each composite key gets its own jitter offset so scatter clouds don't overlap vertically
                 if kvargs.ShowDataPoints && ~isempty(scatterKeys)
                     nScatterGroups = length(scatterKeys);
-                    jitterWidth = 0.15;
-                    totalSpan = jitterWidth * 2;
+                    jitterWidth = 0.15; % half-width of jitter range
+                    % Offset each group so they fan out horizontally around the x-tick
+                    totalSpan = jitterWidth * 2; % total horizontal spread
                     groupOffsets = linspace(-totalSpan/2, totalSpan/2, max(nScatterGroups, 1));
 
                     for scIdx = 1:nScatterGroups
                         cKey = scatterKeys{scIdx};
-                        sd = scatterData.(matlab.lang.makeValidName(cKey));
+                        vname = matlab.lang.makeValidName(cKey);
+                        sd = scatterData.(vname);
+
+                        % Parse stimName:sex from composite key
                         parts = strsplit(cKey, ':');
                         scStimName = parts{1};
                         scSex = parts{2};
                         scColor = resolveSexColor(scSex);
+
+                        % Determine marker style based on stimulus
                         stimIdxForScatter = find(strcmp(thisStimSet, scStimName), 1);
-                        scMarker = resolveStimulusMarker(stimIdxForScatter);
+                        if isempty(stimIdxForScatter)
+                            scMarker = 'o';
+                        elseif stimIdxForScatter == 1
+                            scMarker = 'o';
+                        else
+                            scMarker = '^';
+                        end
 
                         for binIdx = 1:length(sd.xNumeric)
                             xc = sd.xNumeric(binIdx);
@@ -305,9 +359,10 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                             if isnan(xc) || isempty(vals)
                                 continue;
                             end
-
-                            jitter = groupOffsets(scIdx) + jitterWidth * (2 * rand(numel(vals), 1) - 1);
-                            scatter(a, xc + jitter, vals(:), 18, ...
+                            npts = length(vals);
+                            % Jitter around the group offset
+                            jitter = groupOffsets(scIdx) + jitterWidth * (2*rand(npts, 1) - 1);
+                            scatter(a, xc + jitter, vals, 18, ...
                                 'Marker', scMarker, ...
                                 'MarkerFaceColor', scColor, ...
                                 'MarkerEdgeColor', 'none', ...
@@ -333,10 +388,14 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                 hold(a, 'off');
                 title(a, sprintf('[%s]\n%s  %s\n(Bin = %d bouts, Mean per Animal)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth), 'Interpreter', 'none');
                 xlabel(a, 'Bouts (% of session)');
-                ylabel(a, sprintf('State Metric Score\n(Positive = toward active stimulus;\n\tNegative = away from active stimulus)'));
+
+                % Annotate Y-axis: positive = toward whichever stimulus is active in the bout
+                ylabel(a, sprintf('Distance from Midline\n(Positive = Toward active stimulus;\n\tNegative = Away from active stimulus)'));
+
                 grid(a, 'on');
         end
     end
+
     if ~isempty(kvargs.YLim)
         allAxes = findall(t, 'Type', 'Axes');
         if ~isempty(allAxes)
@@ -365,16 +424,6 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
 
 end
 
-function color = resolveSexColor(sexLabel)
-    if strcmpi(sexLabel, 'M') || strcmpi(sexLabel, 'Male')
-        color = [0 0.447 0.741];
-    elseif strcmpi(sexLabel, 'F') || strcmpi(sexLabel, 'Female')
-        color = [0.850 0.325 0.098];
-    else
-        color = [0.5 0.5 0.5];
-    end
-end
-
 function yLim = validateYLim(yLim)
     if isempty(yLim)
         return;
@@ -397,12 +446,12 @@ function yLim = validateYLim(yLim)
     end
 end
 
-function marker = resolveStimulusMarker(stimIdx)
-    if isempty(stimIdx)
-        marker = 'o';
-        return;
+function color = resolveSexColor(sexLabel)
+    if strcmpi(sexLabel, 'M') || strcmpi(sexLabel, 'Male')
+        color = [0 0.447 0.741];
+    elseif strcmpi(sexLabel, 'F') || strcmpi(sexLabel, 'Female')
+        color = [0.850 0.325 0.098];
+    else
+        color = [0.5 0.5 0.5];
     end
-
-    markerOptions = {'o', '^', 's', 'd'};
-    marker = markerOptions{mod(stimIdx - 1, numel(markerOptions)) + 1};
 end
