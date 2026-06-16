@@ -11,6 +11,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     %
     %   Name-Value Pair Arguments:
     %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
+    %       - 'PreStimDurationSec': Duration (seconds) to include before stimulus onset in each trial's centerpoint output. Default is 480.
+    %       - 'PostStimDurationSec': Duration (seconds) to include after stimulus offset in each trial's centerpoint output. Default is 0.
     %       - 'TargetFPS': Target common framerate (in frames per second) to which position data will be interpolated. Default is 30.
     %       - 'SpeakerFlipAxes': Axis along which to flip when speakers are marked as flipped in the experiment. Options are 'x' or 'y'. Default is 'x'.
     %       - 'Interpolation': Interpolation method to use when interpolating position data to the target framerate. Options are 'linear', 'nearest', 'spline', 'pchip', or 'cubic'. Default is 'spline'.
@@ -35,6 +37,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct()
+        kvargs.PreStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 480;
+        kvargs.PostStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 0;
         kvargs.TargetFPS (1,1) double {mustBePositive, mustBeFinite} = 30;
         kvargs.SpeakerFlipAxes {mustBeMember(kvargs.SpeakerFlipAxes, {'x', 'y'}), mustBeTextScalar} = 'x';
         % https://www.mathworks.com/help/matlab/ref/double.interp1.html#btwp6lt-1-method
@@ -101,7 +105,10 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
             drawnow;
         end
         
-        [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
+        [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, ...
+            Config=kvargs.Config, ...
+            PreStimDurationSec=kvargs.PreStimDurationSec, ...
+            PostStimDurationSec=kvargs.PostStimDurationSec);
         % Regardless of what is in config for refmode, we should prioritize what was used in trialSummary by inferring from the size() of centerpointData.midline_x_px and midline_x_px
         if isfield(centerpointData, 'midline_x_px') && ~isempty(centerpointData.midline_x_px)
             % Assert the size of midline_x_px and midline_y_px is the same
@@ -146,7 +153,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 'centerpointData', table() ...
             );
 
-            t = makeTemplateTableByStim(stimmeta, kvargs.TargetFPS);
+            t = makeTemplateTableByStim(stimmeta, kvargs.TargetFPS, kvargs.PreStimDurationSec, kvargs.PostStimDurationSec);
             stimtables(stimfileName).centerpointData = t;
         end
 
@@ -379,24 +386,42 @@ end
 
 
 
-function t = makeTemplateTableByStim(stimuliMetadata, targetFPS)
+function t = makeTemplateTableByStim(stimuliMetadata, targetFPS, preStimDurationSec, postStimDurationSec)
     arguments
         stimuliMetadata (1,1) struct
         targetFPS (1,1) double {mustBePositive, mustBeFinite}
+        preStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite}
+        postStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite}
     end
 
 
     duration = stimuliMetadata.duration; % in seconds
-    
-    % number of frames that is within the duration at targetFPS
-    nframes = ceil(duration * targetFPS);
-    frametime = (0:(nframes-1))' / targetFPS;
+
+    % Build full window timeline: pre + stimulus + post, aligned to 0s at stimulus onset.
+    nPreFrames = round(preStimDurationSec * targetFPS);
+    nStimFrames = max(1, ceil(duration * targetFPS));
+    nPostFrames = round(postStimDurationSec * targetFPS);
+
+    nframes = nPreFrames + nStimFrames + nPostFrames;
+    frametime = ((-nPreFrames):(nframes - nPreFrames - 1))' / targetFPS;
+
+    stimStartIdx = nPreFrames + 1;
+    stimEndIdx = nPreFrames + nStimFrames;
+
     t = table();
     t.('Trial time') = frametime;
-    
-    
+
+    t.('Stimulus name') = strings(height(t), 1);
+    t.('Stimulus name')(:) = "NONE | Stimulus";
+    if nPreFrames > 0
+        t.('Stimulus name')(1:nPreFrames) = "NONE | Pre-Stimulus";
+    end
+    if nPostFrames > 0
+        t.('Stimulus name')((stimEndIdx+1):end) = "NONE | Post-Stimulus";
+    end
+
     if ~isfield(stimuliMetadata, 'chapters') || isempty(stimuliMetadata.chapters) || ~isfield(stimuliMetadata.chapters, 'timestamp') || isempty([stimuliMetadata.chapters.timestamp])
-        % Maybe show a warning here that no stimuli columns are created?
+        % If chapters are missing, keep default pre/stim/post labels.
         return;
     end
 
@@ -404,9 +429,11 @@ function t = makeTemplateTableByStim(stimuliMetadata, targetFPS)
     chapterTimestamps = [chapters.timestamp]; % in seconds
     chapterTitles = {chapters.title};
 
+    stimFrametime = (0:(nStimFrames-1))' / targetFPS;
+
     % Match each frametime to a corresponding chapter
     % Use discretize for efficient chapter assignment than looping over each frame
-    chapterIndices = discretize(frametime, [-inf, chapterTimestamps, inf]);
+    chapterIndices = discretize(stimFrametime, [-inf, chapterTimestamps, inf]);
     
     % Adjust indices (discretize returns bin number, we want the last valid chapter)
     chapterIndices = max(1, chapterIndices - 1);
@@ -419,8 +446,9 @@ function t = makeTemplateTableByStim(stimuliMetadata, targetFPS)
     validChapterIndices = chapterIndices(validMask);
     assignedTitles = chapterTitles(validChapterIndices)';
 
-    t.('Stimulus name') = strings(height(t), 1);
-    t.('Stimulus name')(validMask) = assignedTitles;
+    stimIndices = stimStartIdx:stimEndIdx;
+    validStimIndices = stimIndices(validMask);
+    t.('Stimulus name')(validStimIndices) = assignedTitles;
 end
 
 

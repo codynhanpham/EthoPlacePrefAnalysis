@@ -17,6 +17,7 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 	%
 	%   Name-Value Pair Arguments:
 	%       'BinWidth' : Positive integer specifying number of bouts per bin. Default is 1.
+	%		'MeanWindowFrames' : Positive integer number of frames to average at the start and end of each bout for progression calculation. Default is 15 frames (0.5s at 30fps). For onset, this is frames right after stimulus start; for offset, this is frames right before stimulus end. If this is < 1, non-finite, or empty, no averaging is done and single frames at start and end are used.
 	%       'Title' : Text scalar for overall figure title. Default is ''.
 	%       'SameYLim' : Logical scalar for harmonized y-limits across subplots. Default is true.
 	%       'YLim' : 1x2 double array [min, max]. Default is [] (auto). Overrides SameYLim.
@@ -29,12 +30,14 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 		standardizedTable struct {mustBeNonempty}
 
 		kvargs.BinWidth (1,1) {mustBePositive, mustBeInteger} = 1
+		kvargs.MeanWindowFrames {validateMeanWindowFrames(kvargs.MeanWindowFrames, 15)} = 15
 		kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
 		kvargs.YLim double {validateYLim} = []
 		kvargs.SameYLim (1,1) logical = true
 		kvargs.ShowDataPoints (1,1) logical = true
 	end
 
+	kvargs.MeanWindowFrames = validateMeanWindowFrames(kvargs.MeanWindowFrames, 15);
 	kvargs.YLim = validateYLim(kvargs.YLim);
 
 	requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
@@ -64,6 +67,11 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 	existingCombos = existingCombos(uniqueIdx);
 
 	nplots = length(existingCombos);
+
+	NORMAL_LINE_STYLE = {'-'}; % stimuliSorted should place 'normal' stimulus first
+	OTHER_LINE_STYLE = {'-.', '--', ':'}; % for additional stimuli, each gets a different non-solid line style
+	knownOtherStimLineStyles = configureDictionary('char', 'char'); % Map known non-normal stimulus keywords to specific line styles (e.g., 'inverted' -> '-.', 'white noise' -> '--', etc.)
+
 	ncols = ceil(sqrt(nplots));
 	nrows = ceil(nplots / ncols);
 
@@ -80,6 +88,7 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 		thisStimSet = stimSets{stimsetIdx};
 		thisStdTable = standardizedTable(stimsetIdx);
 		stimPeriodTable = thisStdTable.centerpointData;
+		stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
 
 		if ~ismember('Arena Grid Score', stimPeriodTable.Properties.VariableNames)
 			error('stateProgressionMetricsByBoutBinned:missingArenaGridScore', ...
@@ -217,7 +226,6 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 				end
 			end
 
-			lineStyles = {'-', '-.', '--', ':'};
 			lineHandles = [];
 			lineLabels = {};
 			scatterData = struct();
@@ -250,11 +258,21 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 
 					arenaTowardStim1Sign = arenaTowardStim1SignByAnimal(combinedMask);
 
-					% Per-bout progression for each animal: end - start (signed to active stimulus)
+					% Per-bout progression for each animal: end - start (signed to active stimulus).
+					% Uses MeanWindowFrames to average frames at start and end of each bout.
 					perBoutProgress = NaN(nBouts, sum(combinedMask));
 					for boutIdx = 1:nBouts
-						startVals = animalScores(boutStartIdx(boutIdx), :);
-						endVals = animalScores(boutEndIdx(boutIdx), :);
+						startIdx = boutStartIdx(boutIdx);
+						endIdx = boutEndIdx(boutIdx);
+
+						% Start window: frames right after stimulus onset
+						startWindowEnd = min(startIdx + kvargs.MeanWindowFrames - 1, size(animalScores, 1));
+						startVals = mean(animalScores(startIdx:startWindowEnd, :), 1, 'omitnan');
+
+						% End window: frames right before stimulus offset
+						endWindowStart = max(endIdx - kvargs.MeanWindowFrames + 1, 1);
+						endVals = mean(animalScores(endWindowStart:endIdx, :), 1, 'omitnan');
+
 						perBoutProgress(boutIdx, :) = progressionSign .* arenaTowardStim1Sign .* (endVals - startVals);
 					end
 
@@ -305,7 +323,21 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 						'EdgeColor', 'none', ...
 						'HandleVisibility', 'off');
 
-					lineStyle = lineStyles{mod(stimIdx - 1, numel(lineStyles)) + 1};
+					% Determine line style for this stimulus
+					if stimIdx == 1
+						lineStyle = NORMAL_LINE_STYLE{1};
+					else
+						assignedStyle = false;
+						if isKey(knownOtherStimLineStyles, stimName)
+							lineStyle = knownOtherStimLineStyles(stimName);
+							assignedStyle = true;
+						end
+						if ~assignedStyle
+							currentKnownOtherStimIndex = length(knownOtherStimLineStyles.keys()) + 1;
+							lineStyle = OTHER_LINE_STYLE{mod(currentKnownOtherStimIndex-1, length(OTHER_LINE_STYLE)) + 1};
+							knownOtherStimLineStyles(stimName) = lineStyle;
+						end
+					end
 					lineHandle = plot(a, xVals, yVals, ...
 						'Color', lineColor, ...
 						'LineStyle', lineStyle, ...
@@ -367,7 +399,7 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 
 			yline(a, 0, ':k', 'LineWidth', 0.5, 'HandleVisibility', 'off');
 			hold(a, 'off');
-			title(a, sprintf('[%s]\n%s  %s\n(Bin = %d bouts, End-Start per Animal per Bout)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth), 'Interpreter', 'none');
+			title(a, sprintf('[%s]\n%s  %s\n(Bin = %d bouts, MeanWindowFrames = %d)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth, kvargs.MeanWindowFrames), 'Interpreter', 'none');
 			xlabel(a, 'Bouts (% of session)');
 			ylabel(a, sprintf('State Progression Score\n(Positive = net moved toward active stimulus;\n\tNegative = net moved away from active stimulus)'));
 			grid(a, 'on');
@@ -407,6 +439,29 @@ function color = resolveSexColor(sexLabel)
 	else
 		color = [0.5 0.5 0.5];
 	end
+end
+
+function w = validateMeanWindowFrames(x, default)
+	if ~isscalar(default)
+		error('Default value for MeanWindowFrames must be a scalar.');
+	end
+	if ~isnumeric(default) || ~isfinite(default) || default < 1 || floor(default) ~= default
+		error('Default value for MeanWindowFrames must be a positive integer.');
+	end
+
+	if isempty(x)
+		w = default;
+		return;
+	end
+	if ~isscalar(x)
+		error('MeanWindowFrames must be a scalar.');
+	end
+	if ~isnumeric(x) || ~isfinite(x) || x < 1 || floor(x) ~= x
+		warning('MeanWindowFrames must be a positive integer. Using default value of %d.', default);
+		w = default;
+		return;
+	end
+	w = x;
 end
 
 function yLim = validateYLim(yLim)

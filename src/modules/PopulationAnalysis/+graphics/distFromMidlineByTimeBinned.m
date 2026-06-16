@@ -86,6 +86,7 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
     for stimIdx = 1:nstims
         thisStdTable = standardizedTable(stimIdx);
         stimPeriodTable = thisStdTable.centerpointData;
+        stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
         stimPeriodTable = stimPeriodTable(:, ismember(stimPeriodTable.Properties.VariableNames, {'Trial time', 'Stimulus name', 'Distance from Midline'} ));
         distanceFromMidlineMatrix = stimPeriodTable{:, 'Distance from Midline'};
         columnByStrainOrder = {thisStdTable.animalMetadata.values().strain};

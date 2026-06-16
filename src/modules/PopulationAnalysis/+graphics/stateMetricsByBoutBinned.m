@@ -70,6 +70,10 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
 
     nplots = length(existingCombos);
 
+    NORMAL_LINE_STYLE = {'-'}; % stimuliSorted should place 'normal' stimulus first
+    OTHER_LINE_STYLE = {'-.', '--', ':'}; % for additional stimuli, each gets a different non-solid line style
+    knownOtherStimLineStyles = configureDictionary('char', 'char'); % Map known non-normal stimulus keywords to specific line styles (e.g., 'inverted' -> '-.', 'white noise' -> '--', etc.)
+
     ncols = ceil(sqrt(nplots));
     nrows = ceil(nplots / ncols);
 
@@ -88,6 +92,7 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
         thisStimSet = stimSets{stimsetIdx};
         thisStdTable = standardizedTable(stimsetIdx);
         stimPeriodTable = thisStdTable.centerpointData;
+        stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
 
         if ~ismember('Arena Grid Score', stimPeriodTable.Properties.VariableNames)
             error('stateMetricsByBoutBinned:missingArenaGridScore', ...
@@ -178,7 +183,6 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                     end
                 end
 
-                lineStyles = {'-', '-.', '--', ':'};
                 lineHandles = [];
                 lineLabels = {};
                 scatterData = struct();
@@ -269,7 +273,21 @@ function f = stateMetricsByBoutBinned(standardizedTable, kvargs)
                             'EdgeColor', 'none', ...
                             'HandleVisibility', 'off');
 
-                        lineStyle = lineStyles{mod(stimIdx - 1, numel(lineStyles)) + 1};
+                        % Determine line style for this stimulus
+                        if stimIdx == 1
+                            lineStyle = NORMAL_LINE_STYLE{1};
+                        else
+                            assignedStyle = false;
+                            if isKey(knownOtherStimLineStyles, stimName)
+                                lineStyle = knownOtherStimLineStyles(stimName);
+                                assignedStyle = true;
+                            end
+                            if ~assignedStyle
+                                currentKnownOtherStimIndex = length(knownOtherStimLineStyles.keys()) + 1;
+                                lineStyle = OTHER_LINE_STYLE{mod(currentKnownOtherStimIndex-1, length(OTHER_LINE_STYLE)) + 1};
+                                knownOtherStimLineStyles(stimName) = lineStyle;
+                            end
+                        end
                         lineHandle = plot(a, xVals, yVals, ...
                             'Color', lineColor, ...
                             'LineStyle', lineStyle, ...

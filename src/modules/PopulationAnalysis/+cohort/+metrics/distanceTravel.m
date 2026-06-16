@@ -1,9 +1,11 @@
 function t = distanceTravel(standardizedTables, kvargs)
     %%DISTANCETRAVEL
     %
+    % - distance during prestim (if prestim period exists, otherwise NaN)
     % - distance during stim
     % - distance during stimuliSorted(1) only, normalized by total duration of stimuliSorted(1)
     % - distance during stimuliSorted(2) only, normalized by total duration of stimuliSorted(2)
+    % - distance during poststim (if poststim period exists, otherwise NaN)
 
 
     arguments
@@ -55,21 +57,48 @@ function t = distanceTravel(standardizedTables, kvargs)
     [mouseIdCol, geneCol, cageCodeCol, geneIdCol, sexCol, genotypeCol, litterCol, toeIdCol, dobCol, ageCol, stimProtocolCol] = cohort.metrics.utils.initCommonColumns(nRowsEstimate);
 
     distDuringStimCol = nan(nRowsEstimate, 1);
+    distDuringPreStimCol = nan(nRowsEstimate, 1);
+    distDuringPostStimCol = nan(nRowsEstimate, 1);
     distByStimNormCols = nan(nRowsEstimate, nOutputStims);
     distByStimFirstBoutNormCols = nan(nRowsEstimate, nOutputStims);
     distByStimLastBoutNormCols = nan(nRowsEstimate, nOutputStims);
     distByStimDeltaLastFirstNormCols = nan(nRowsEstimate, nOutputStims);
 
+    preStimTables = sdTable.subsetByStimBlock(standardizedTables, 'pre-stimulus');
+    postStimTables = sdTable.subsetByStimBlock(standardizedTables, 'post-stimulus');
+
     rowIdx = 0;
     for i = 1:length(standardizedTables)
         stdTable = standardizedTables(i);
         cp = stdTable.centerpointData;
+        preCp = preStimTables(i).centerpointData;
+        postCp = postStimTables(i).centerpointData;
 
         trialTime = cp{:, 'Trial time'};
         stimSequence = string(cp{:, 'Stimulus name'});
         xData = cp{:, 'X center'};
         yData = cp{:, 'Y center'};
         nAnimals = size(xData, 2);
+
+        if ~isempty(preCp)
+            preTrialTime = preCp{:, 'Trial time'};
+            preXData = preCp{:, 'X center'};
+            preYData = preCp{:, 'Y center'};
+        else
+            preTrialTime = [];
+            preXData = [];
+            preYData = [];
+        end
+
+        if ~isempty(postCp)
+            postTrialTime = postCp{:, 'Trial time'};
+            postXData = postCp{:, 'X center'};
+            postYData = postCp{:, 'Y center'};
+        else
+            postTrialTime = [];
+            postXData = [];
+            postYData = [];
+        end
 
         localStimNames = string(stdTable.stimuliSorted);
         localStimNames = localStimNames(:);
@@ -123,6 +152,16 @@ function t = distanceTravel(standardizedTables, kvargs)
             % Distance metrics for this animal (column)
             thisX = xData(:, col);
             thisY = yData(:, col);
+
+            if ~isempty(preTrialTime)
+                [distPre, ~] = distanceWithinMask(preXData(:, col), preYData(:, col), preTrialTime, true(size(preTrialTime)));
+                distDuringPreStimCol(rowIdx) = distPre;
+            end
+
+            if ~isempty(postTrialTime)
+                [distPost, ~] = distanceWithinMask(postXData(:, col), postYData(:, col), postTrialTime, true(size(postTrialTime)));
+                distDuringPostStimCol(rowIdx) = distPost;
+            end
 
             [distTotal, ~] = distanceWithinMask(thisX, thisY, trialTime, ...
                 allStimMask);
@@ -178,6 +217,8 @@ function t = distanceTravel(standardizedTables, kvargs)
         dobCol = dobCol(keep);
         ageCol = ageCol(keep);
         stimProtocolCol = stimProtocolCol(keep);
+        distDuringPreStimCol = distDuringPreStimCol(keep);
+        distDuringPostStimCol = distDuringPostStimCol(keep);
         distDuringStimCol = distDuringStimCol(keep);
         distByStimNormCols = distByStimNormCols(keep, :);
         distByStimFirstBoutNormCols = distByStimFirstBoutNormCols(keep, :);
@@ -198,7 +239,9 @@ function t = distanceTravel(standardizedTables, kvargs)
     t.('Age') = ageCol;
     t.('Stimulus Protocol') = stimProtocolCol;
 
+    t.('Distance During Pre-Stimulus (cm)') = distDuringPreStimCol;
     t.('Distance During Stimulus (cm)') = distDuringStimCol;
+    t.('Distance During Post-Stimulus (cm)') = distDuringPostStimCol;
     for g = 1:nOutputStims
         stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
         t.(sprintf('Average Distance During %s (cm/s)', stimLabel)) = distByStimNormCols(:, g);

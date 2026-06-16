@@ -32,6 +32,7 @@ function f = populationDistanceFromMidline(standardizedTables, kvargs)
 
     for i = 1:length(stimsets)
         stimPeriodTable = standardizedTables(i).centerpointData;
+        stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
         trialTime = stimPeriodTable{:, 'Trial time'};
         distFromMidline_cm = mean(stimPeriodTable.("Distance from Midline"), 2, 'omitnan'); % average across animals
         stdDist = std(stimPeriodTable.("Distance from Midline"), 0, 2, 'omitnan'); % std across animals

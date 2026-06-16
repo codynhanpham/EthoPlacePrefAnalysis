@@ -106,6 +106,7 @@ function f = distFromMidlineByBout(standardizedTable, kvargs)
         thisStimSet = stimSets{stimsetIdx};
         thisStdTable = standardizedTable(stimsetIdx);
         stimPeriodTable = thisStdTable.centerpointData;
+        stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
         stimPeriodTable = stimPeriodTable(:, ismember(stimPeriodTable.Properties.VariableNames, {'Trial time', 'Stimulus name', 'Distance from Midline'} ));
         trialTime = stimPeriodTable{:, 'Trial time'};
         distanceFromMidlineMatrix = stimPeriodTable{:, 'Distance from Midline'};

@@ -13,6 +13,8 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %         IMPORTANT: Arena-grid speaker-flip behavior is read from:
     %         Config.arena_grid.invert_gradient_score_on_speaker_flip
     %         which must be one of {'x', 'y', 'both', 'none'} (default: 'x').
+    %       - 'PreStimDurationSec': The duration in seconds to include before the first stimulus onset in the trial summary. Default is 480s (8 minutes) to cover typical pre-stimulus periods in place preference experiments. Set this to 0 to only include frames from the first stimulus onset onward. 'Trial time' for pre-stimulus frames will be negative, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
+    %       - 'PostStimDurationSec': The duration in seconds to include after the last stimulus offset in the trial summary. Default is 0s. 'Trial time' for post-stimulus frames will be positive, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
     %
     %   Outputs:
     %       summary - A struct containing the analysis results:
@@ -23,10 +25,10 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %       centerpointData - A brief struct containing animal position over time:
     %           + fps - The framerate of the EthoVision recording in frames per second
     %           + data - A table with distance from midline values for each frame/timepoint during the stimulus period with 3 columns:
-    %               * 'Trial time' - Time in seconds from the start of stimulus period (start at 0s), to get the absolute time relative to the start of trial, add 'stimulusStartTimeOffset'
+    %               * 'Trial time' - Time in seconds from the start of stimulus period (start at 0s), to get the absolute time relative to the start of trial, add 'stimulusStartTimeOffset'. If PreStimDurationSec > 0, this will include negative time values covering the pre-stimulus period; if PostStimDurationSec > 0, this will also include time values after the stimulus end covering the post-stimulus period.
     %               * 'X center' - The corrected (via config) X center position of the animal in cm 
     %               * 'Y center' - The corrected (via config) Y center position of the animal in cm
-    %               * 'Stimulus name' - The name of the stimulus being played at that time
+    %               * 'Stimulus name' - The name of the stimulus being played at that time. In addition, if PreStimDurationSec > 0, the pre-stimulus period will be labeled as 'NONE | Pre-Stimulus'; and/or if PostStimDurationSec > 0, the post-stimulus period will be labeled as 'NONE | Post-Stimulus'.
     %           + arenaGridScore - An array of size [height(data), 1] with the arena grid score (0-1) for each frame/timepoint during the stimulus period, calculated based on the center position and the arena grid defined for this trial in *.ref.arenagrid.mat. If the file for this trial doesn't exist or fail to load, this will be an empty array.
     %           + midline_x_px - The X coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
     %           + midline_y_px - The Y coordinate of the arena midpoint (if scalar) or midline line (if 2-element vector) in pixels
@@ -48,14 +50,75 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct() % The full configuration struct loaded with io.config.loadConfigYaml()
+        kvargs.PreStimDurationSec (1,1) {mustBeNonnegative, mustBeFinite} = 480 % The duration in seconds to include before the first stimulus onset in the trial summary. Default is 480s (8 minutes) to cover typical pre-stimulus periods in place preference experiments. Set this to 0 to only include frames from the first stimulus onset onward. 'Trial time' for pre-stimulus frames will be negative, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
+        kvargs.PostStimDurationSec (1,1) {mustBeNonnegative, mustBeFinite} = 0 % The duration in seconds to include after the last stimulus offset in the trial summary. Default is 0s. 'Trial time' for post-stimulus frames will be positive, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
     end
 
-    [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
+    [header, datatable, ~, stimulusFrameRange, animalMetadata, stimuli] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
         MasterMetadataTable=masterMetadataTable, ...
         Config=kvargs.Config ...
     );
 
-    stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
+    stimStartFrame = stimulusFrameRange(1);
+    stimEndFrame = stimulusFrameRange(2);
+
+    % Keep stimulus-only period for summary metrics (no pre/post contribution).
+    stimPeriodTable = datatable(stimStartFrame:stimEndFrame, :);
+
+    % Build centerpoint output window around stimulus period.
+    % Time 0s must align to stimulus onset, with optional pre/post extension.
+    allTrialTime = datatable{:, 'Trial time'};
+    fpsFromData = mean(diff(allTrialTime), 'omitnan')^-1;
+    if ~isfinite(fpsFromData) || fpsFromData <= 0
+        warning('trial:stats:trialSummary:InvalidFPS', ...
+            'Unable to infer valid FPS from trial time values. Falling back to 30 FPS for pre/post windowing.');
+        fpsFromData = 30;
+    end
+    frameInterval = 1 / fpsFromData;
+
+    preFrames = round(kvargs.PreStimDurationSec * fpsFromData);
+    postFrames = round(kvargs.PostStimDurationSec * fpsFromData);
+
+    windowStartFrame = stimStartFrame - preFrames;
+    windowEndFrame = stimEndFrame + postFrames;
+
+    nRowsTotal = size(datatable, 1);
+    windowIndices = (windowStartFrame:windowEndFrame)';
+    windowLength = numel(windowIndices);
+    inRangeMask = windowIndices >= 1 & windowIndices <= nRowsTotal;
+    inRangePositions = find(inRangeMask);
+    inRangeRows = windowIndices(inRangeMask);
+
+    stimulusStartAbsTime = datatable{stimStartFrame, 'Trial time'};
+    % Relative time from stimulus onset for all desired rows, including padded rows.
+    windowTrialTimeRel = (windowIndices - stimStartFrame) * frameInterval;
+    if ~isempty(inRangeRows)
+        windowTrialTimeRel(inRangePositions) = datatable{inRangeRows, 'Trial time'} - stimulusStartAbsTime;
+    end
+
+    windowXCenter = nan(windowLength, 1);
+    windowYCenter = nan(windowLength, 1);
+    windowStimulusName = strings(windowLength, 1);
+    windowStimulusName(:) = missing;
+    windowDistanceToPoint = [];
+    if ismember("Distance to point", datatable.Properties.VariableNames)
+        windowDistanceToPoint = nan(windowLength, 1);
+    end
+
+    if ~isempty(inRangeRows)
+        windowXCenter(inRangePositions) = datatable{inRangeRows, 'X center'};
+        windowYCenter(inRangePositions) = datatable{inRangeRows, 'Y center'};
+        windowStimulusName(inRangePositions) = string(datatable{inRangeRows, 'Chapter Original'});
+        if ~isempty(windowDistanceToPoint)
+            windowDistanceToPoint(inRangePositions) = datatable{inRangeRows, 'Distance to point'};
+        end
+    end
+
+    % Fill labels for padded rows and any empty labels.
+    missingStimulusNameMask = ismissing(windowStimulusName) | strlength(strtrim(windowStimulusName)) == 0;
+    windowStimulusName(missingStimulusNameMask & windowIndices < stimStartFrame) = "NONE | Pre-Stimulus";
+    windowStimulusName(missingStimulusNameMask & windowIndices > stimEndFrame) = "NONE | Post-Stimulus";
+    windowStimulusName(missingStimulusNameMask & windowIndices >= stimStartFrame & windowIndices <= stimEndFrame) = "NONE | Stimulus";
 
     allstims = stimPeriodTable{:,'Chapter Original'};
     allstims = unique(allstims(~cellfun(@anymissing, allstims)));
@@ -137,7 +200,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         end
     end
 
-    [speakers, sortIdx] = sort(values(stim2speakerMap), 'ascend'); % We know that Left* will be sorted before Right*
+    [~, sortIdx] = sort(values(stim2speakerMap), 'ascend'); % We know that Left* will be sorted before Right*
     stimKeys = keys(stim2speakerMap);
     stimKeys = stimKeys(sortIdx); % Stim in left speaker first, then right speaker, 
 
@@ -199,13 +262,13 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     vidHeight = v.Height;
     pixelsize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
-    centerPos = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+    centerPos = [windowXCenter, windowYCenter];
     centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
     centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
     
     % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
     centerPos(:,2) = vidHeight * pixelsize - centerPos(:,2);
-    trialTime = stimPeriodTable{:,'Trial time'};
+    trialTime = windowTrialTimeRel;
 
 
     fromConfigKey = {'defaults', 'xflip'};
@@ -294,12 +357,12 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
             if ~fromfile_ok
                 % Use Distance to point when available as secondary fallback if loading from file failed
                 % For 'point' mode, this is often much better than just assume the center of the frame
-                if ismember("Distance to point", stimPeriodTable.Properties.VariableNames)
-                    distFromMidline_cm = stimPeriodTable{:,'Distance to point'}; % These are absolute values, need to determine sign based on X position!
+                if ~isempty(windowDistanceToPoint)
+                    distFromMidline_cm = windowDistanceToPoint; % These are absolute values, need to determine sign based on X position!
                     assert(size(distFromMidline_cm,1) == size(trialTime,1), "Size mismatch between distFromMidline_cm and trialTime");
 
                     % Determine sign based on X position relative to the mid-point (X0, Y0)
-                    centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+                    centerPos_cm = [windowXCenter, windowYCenter];
                     % Find the coordinate of the midpoint (where the distance to point was measured from)
                     % EthoVision doesn't provide this directly, so we have to calculate it manually
                     refPoint = findReferencePointLinear(centerPos_cm, distFromMidline_cm);
@@ -433,13 +496,12 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         'left', stimKeys(1), ...
         'right', stimKeys(2) ...
     );
-    offset = trialTime(1);
-    relativeStimTime = trialTime - offset;
-    cpdata = table(relativeStimTime, centerPos(:,1), centerPos(:,2), stimPeriodTable{:,'Chapter Original'}, ...
+    offset = stimulusStartAbsTime;
+    cpdata = table(windowTrialTimeRel, centerPos(:,1), centerPos(:,2), cellstr(windowStimulusName), ...
         'VariableNames', {'Trial time', 'X center', 'Y center', 'Stimulus name'});
 
     centerpointData = struct(...
-        'fps', mean(diff(stimPeriodTable{:,'Trial time'}))^-1, ...
+        'fps', fpsFromData, ...
         'data', cpdata, ...
         'arenaGridScore', arenaGridScore, ...
         'midline_x_px', midlineX, ...

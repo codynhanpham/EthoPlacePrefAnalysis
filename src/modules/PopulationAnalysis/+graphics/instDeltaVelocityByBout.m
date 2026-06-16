@@ -117,6 +117,7 @@ function f = instDeltaVelocityByBout(standardizedTable, kvargs)
         thisStimSet = stimSets{stimsetIdx};
         thisStdTable = standardizedTable(stimsetIdx);
         stimPeriodTable = thisStdTable.centerpointData;
+        stimPeriodTable = graphics.filterStimulusPeriodRows(stimPeriodTable);
         requiredCols = {'Trial time', 'Stimulus name', 'X center', 'Y center'};
         missingCols = setdiff(requiredCols, stimPeriodTable.Properties.VariableNames, 'stable');
         if ~isempty(missingCols)
