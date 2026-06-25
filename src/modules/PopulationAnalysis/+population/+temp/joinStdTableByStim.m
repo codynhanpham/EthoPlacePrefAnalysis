@@ -98,13 +98,17 @@ function joinedStdTable = joinStdTableByStim(stdTableA, stdTableB)
     joinedStdTable = struct();
     joinedStdTable.stimfileName = {stdTableA.stimfileName; stdTableB.stimfileName};
     joinedStdTable.stimuliSorted = stdTableA.stimuliSorted;
-    
+
     % Join Animal Metadata by add keys from A first, then B
     % The metadata here is keyed by the corresponding animal centerPointData table,
     % so there should be no overlapping keys
     joinedStdTable.animalMetadata = stdTableA.animalMetadata;
     keysA = keys(stdTableA.animalMetadata);
     keysB = keys(stdTableB.animalMetadata);
+    % Record the split point so downstream code can recover how many animals
+    % (and therefore how many widened columns) belong to group A vs group B.
+    % Do NOT infer this from numel(stimfileName) — that field concatenates A+B.
+    joinedStdTable.nAnimalsA = length(keysA);
     if ~isempty(intersect(keysA, keysB))
         error('The provided stdTableA (%s) and stdTableB (%s) have overlapping keys in animalMetadata. Cannot merge.', string(stdTableA.stimfileName), string(stdTableB.stimfileName));
     end
