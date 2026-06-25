@@ -44,30 +44,14 @@ function [status, cmdout] = vertSplit(input, outputTop, outputBottom, kvargs)
     input = string(input);
     outputTop = string(outputTop);
     outputBottom = string(outputBottom);
-    args = sprintf("-y -hwaccel auto -i ""%s"" -filter_complex ""[0]crop=iw:ih/2:0:0[top];[0]crop=iw:ih/2:0:oh[bottom]"" -map ""[top]"" ""%s"" -map ""[bottom]"" ""%s""", input, outputTop, outputBottom);
-    cmd = sprintf('"%s" %s', bin, args);
 
-    cmdout = '';
-    
-    function ffmpegProgressUpdate(line, echo)
-        if echo
-            fprintf('[%s] %s\n', string(datetime('now'), 'HH:mm:ss'), line);
-        end
-        
-        % Append line to cmdout with newline
-        cmdout = [cmdout, line, newline];
-        
-        kvargs.UpdateCallbackFcn(line);
-    end
+    % NOTE: do NOT include any -hwaccel flag here; ffmpeg.utils.executeFFmpeg
+    % injects the appropriate one (cuda or auto) based on per-command state.
+    args = sprintf("-y -i ""%s"" -filter_complex ""[0]crop=iw:ih/2:0:0[top];[0]crop=iw:ih/2:0:oh[bottom]"" -map ""[top]"" ""%s"" -map ""[bottom]"" ""%s""", input, outputTop, outputBottom);
 
-    if kvargs.Echo
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, true);
-    else
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
-    end
-
-    [status] = ffmpeg.utils.executeSystemCommandRealTime(cmd, stdoutCallback);
-    
+    [status, cmdout] = ffmpeg.utils.executeFFmpeg(bin, args, ...
+        'CudaArgs', '-hwaccel cuda', ...
+        'Echo', kvargs.Echo, 'UpdateCallbackFcn', kvargs.UpdateCallbackFcn);
 
     if status ~= 0
         error('ffmpeg:vertSplit:ExecutionFailed', 'FFmpeg vertSplit execution failed with exit code %d', status);

@@ -31,31 +31,34 @@ function [status, cmdout] = run(args, kvargs)
     end
 
     args = string(args);
-    cmd = sprintf('"%s" %s', bin, args);
-
     cmdout = '';
-    
-    function ffmpegProgressUpdate(line, echo)
+
+    function onLine(line, echo)
         if echo
             fprintf('[%s] %s\n', string(datetime('now'), 'HH:mm:ss'), line);
         end
-        
-        % Append line to cmdout with newline
         cmdout = [cmdout, line, newline];
-        
         if ~isempty(kvargs.UpdateCallbackFcn)
             kvargs.UpdateCallbackFcn(line);
         end
     end
 
-    if kvargs.Echo
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, true);
+    % If the caller already specified a -hwaccel flag, respect it as-is and
+    % do not inject cuda/auto logic (the user is taking explicit control).
+    if contains(args, "-hwaccel", 'IgnoreCase', true)
+        cmd = sprintf('"%s" %s', bin, args);
+        if kvargs.Echo
+            stdoutCallback = @(line) onLine(line, true);
+        else
+            stdoutCallback = @(line) onLine(line, false);
+        end
+        status = ffmpeg.utils.executeSystemCommandRealTime(cmd, stdoutCallback);
     else
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
+        % No explicit hwaccel: let executeFFmpeg handle cuda/auto with
+        % per-command fallback. Use 'run' as the commandKey.
+        [status, cmdout] = ffmpeg.utils.executeFFmpeg(bin, args, ...
+            'Echo', kvargs.Echo, 'UpdateCallbackFcn', kvargs.UpdateCallbackFcn);
     end
-
-    [status] = ffmpeg.utils.executeSystemCommandRealTime(cmd, stdoutCallback);
-    
 
     if status ~= 0
         error('ffmpeg:run:ExecutionFailed', 'FFmpeg run(_) execution failed with exit code %d', status);

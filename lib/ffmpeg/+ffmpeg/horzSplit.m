@@ -44,31 +44,14 @@ function [status, cmdout] = horzSplit(input, outputLeft, outputRight, kvargs)
     input = string(input);
     outputLeft = string(outputLeft);
     outputRight = string(outputRight);
-    
-    args = sprintf("-y -hwaccel auto -i ""%s"" -filter_complex ""[0]crop=iw/2:ih:0:0[left];[0]crop=iw/2:ih:ow:0[right]"" -map ""[left]"" ""%s"" -map ""[right]"" ""%s""", input, outputLeft, outputRight);
-    cmd = sprintf('"%s" %s', bin, args);
 
-    cmdout = '';
-    
-    function ffmpegProgressUpdate(line, echo)
-        if echo
-            fprintf('[%s] %s\n', string(datetime('now'), 'HH:mm:ss'), line);
-        end
-        
-        % Append line to cmdout with newline
-        cmdout = [cmdout, line, newline];
-        
-        kvargs.UpdateCallbackFcn(line);
-    end
+    % NOTE: do NOT include any -hwaccel flag here; ffmpeg.utils.executeFFmpeg
+    % injects the appropriate one (cuda or auto) based on per-command state.
+    args = sprintf("-y -i ""%s"" -filter_complex ""[0]crop=iw/2:ih:0:0[left];[0]crop=iw/2:ih:ow:0[right]"" -map ""[left]"" ""%s"" -map ""[right]"" ""%s""", input, outputLeft, outputRight);
 
-    if kvargs.Echo
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, true);
-    else
-        stdoutCallback = @(line) ffmpegProgressUpdate(line, false);
-    end
-
-    [status] = ffmpeg.utils.executeSystemCommandRealTime(cmd, stdoutCallback);
-    
+    [status, cmdout] = ffmpeg.utils.executeFFmpeg(bin, args, ...
+        'CudaArgs', '-hwaccel cuda', ...
+        'Echo', kvargs.Echo, 'UpdateCallbackFcn', kvargs.UpdateCallbackFcn);
 
     if status ~= 0
         error('ffmpeg:horzSplit:ExecutionFailed', 'FFmpeg horzSplit execution failed with exit code %d', status);
