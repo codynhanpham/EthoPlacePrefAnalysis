@@ -1,4 +1,4 @@
-function exitCode = x(cmd, kvargs)
+function [exitCode, stdout] = x(cmd, kvargs)
     %%X Alias to uv.cmd('tool run CMD'), in other words, same as 'uvx <CMD>' from CLI
     %
     %   exitCode = uv.x(cmd)
@@ -10,16 +10,26 @@ function exitCode = x(cmd, kvargs)
     %
     %   Outputs:
     %       exitCode (integer): The exit code of the executed command. A value of 0 typically indicates success, while a non-zero value indicates an error.
+    %       stdout (string): Collected stdout/stderr output from the executed command.
 
 
     arguments
         cmd {mustBeTextScalar}
-        
+        kvargs.Project = []
         kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin) []
     end
     uvbin = uv.install();
 
     cmd = strtrim(cmd);
-    fullCmd = sprintf('"%s" tool run %s', uvbin, cmd);
-    exitCode = uv.system.execute(fullCmd, kvargs.UpdateCallbackFcn);
+    fullCmd = sprintf('"%s" %stool run %s', uvbin, buildProjectPrefix(kvargs.Project), cmd);
+    [exitCode, stdout] = uv.system.execute(fullCmd, kvargs.UpdateCallbackFcn);
+end
+
+function prefix = buildProjectPrefix(projectDir)
+    if isempty(projectDir)
+        prefix = "";
+        return;
+    end
+
+    prefix = sprintf('--project "%s" ', char(projectDir));
 end

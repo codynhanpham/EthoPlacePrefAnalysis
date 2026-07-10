@@ -1,4 +1,7 @@
 function plotProgressionFromSummaryProgressionTable()
+    %%PLOTPROGRESSIONFROMSUMMARYPROGRESSIONTABLE Plot a progression over time from a summary progression table CSV.
+    % This is mainly a re-plot/QC/downstream consumer of plotProgressionInTab.m output table
+    % The goal is to replicate the same progression plots as in plotProgressionInTab.m, exactly as it was binned and windowed by plotProgressionInTab.m
 
     CSV = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Male Mecp2 KO vs. C57 WT/outputs/mecp2_pilot_stats_20260625_110826/distance_progression_table.csv";
 

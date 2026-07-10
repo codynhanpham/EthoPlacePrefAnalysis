@@ -1,4 +1,4 @@
-function [exitCode] = execute(command, stdoutCallback)
+function [exitCode, stdout] = execute(command, stdoutCallback)
 %%EXECUTE Executes a system command and prints stdout in real-time.
 %   This function uses the Java Runtime class to launch an external process
 %   and reads its output stream concurrently.
@@ -10,6 +10,7 @@ function [exitCode] = execute(command, stdoutCallback)
 %
 %   OUTPUTS:
 %       exitCode - (integer) The exit code of the executed command.
+%       stdout - (string) Collected stdout/stderr output from the executed command.
 
 arguments
     command {mustBeTextScalar}
@@ -17,6 +18,7 @@ arguments
 end
 
 command = char(command);
+stdoutLines = {};
 
 try
     % Parse command into executable and arguments
@@ -46,6 +48,7 @@ try
         % Convert Java string to MATLAB string
         matlabLine = char(line);
 
+        stdoutLines{end+1} = matlabLine; %#ok<AGROW>
         stdoutCallback(matlabLine);
 
         % Try to read next line (non-blocking)
@@ -54,6 +57,7 @@ try
 
     % Wait for process to complete and get exit code
     exitCode = process.waitFor();
+    stdout = strjoin(string(stdoutLines), newline);
 
     % Clean up
     reader.close();
@@ -63,6 +67,7 @@ catch ME
     errorMsg = getReport(ME);
     warning('Error executing command: %s\n', errorMsg);
     exitCode = -1;
+    stdout = strjoin(string(stdoutLines), newline);
 
     % Clean up if process was created
     if exist('process', 'var') && ~isempty(process)
