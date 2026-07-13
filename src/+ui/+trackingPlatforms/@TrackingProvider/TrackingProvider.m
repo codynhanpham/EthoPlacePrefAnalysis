@@ -85,6 +85,9 @@ classdef (Abstract) TrackingProvider < handle
 
         function extractAndSaveTriggerEvents(videoFilePath, kvargs)
             %%EXTRACTANDSAVETRIGGEREVENTS Extract LED trigger pulses and persist to sibling .ref.json.
+            %
+            % Requires: triggerExtract.ledPulses(videoFilePath) to extract the LED trigger events from the video file
+
             arguments
                 videoFilePath {mustBeTextScalar, mustBeFile}
                 kvargs.ProgressDialogHandle {progressDlgHandleOrEmpty} = []
@@ -101,78 +104,18 @@ classdef (Abstract) TrackingProvider < handle
                     'Could not auto-migrate legacy CSV reference files in "%s":\n%s', videoDir, ME.message);
             end
 
-            refData = struct();
-            if isfile(referenceFilePath)
-                try
-                    refData = jsondecode(fileread(referenceFilePath));
-                catch ME
-                    warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
-                        ['Could not parse reference JSON, skipping trigger extraction to avoid ' ...
-                        'overwriting existing fields: %s\n%s'], referenceFilePath, ME.message);
-                    return;
-                end
+            [refData, isLoaded, parseErrorMessage] = readReferenceJson(referenceFilePath);
+            if ~isLoaded
+                warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
+                    ['Could not parse reference JSON, skipping trigger extraction to avoid ' ...
+                    'overwriting existing fields: %s\n%s'], referenceFilePath, parseErrorMessage);
+                return;
             end
 
-            function [pairsCell, isCanonical, isUsable] = canonicalizeTriggerEvents(triggerEvents)
-                % Returns trigger events as a 1xN cell array of [on off] numeric vectors.
-                pairsCell = cell(1, 0);
-                isCanonical = true;
-                isUsable = false;
-
-                if isempty(triggerEvents)
-                    return;
-                end
-
-                if isnumeric(triggerEvents)
-                    vals = double(triggerEvents);
-                    if isvector(vals) && numel(vals) == 2 && all(isfinite(vals))
-                        pairsCell = {reshape(vals, 1, 2)};
-                        isCanonical = false; % legacy flat [on, off]
-                        isUsable = true;
-                        return;
-                    end
-                    if ismatrix(vals) && size(vals, 2) == 2 && all(isfinite(vals), 'all')
-                        nEvents = size(vals, 1);
-                        pairsCell = cell(1, nEvents);
-                        for ii = 1:nEvents
-                            pairsCell{ii} = vals(ii, :);
-                        end
-                        isCanonical = nEvents ~= 1;
-                        isUsable = true;
-                        return;
-                    end
-                    return;
-                end
-
-                if iscell(triggerEvents)
-                    if isempty(triggerEvents)
-                        return;
-                    end
-                    nEvents = numel(triggerEvents);
-                    tempPairs = cell(1, nEvents);
-                    for ii = 1:nEvents
-                        row = triggerEvents{ii};
-                        if ~(isnumeric(row) && numel(row) == 2 && all(isfinite(row)))
-                            return;
-                        end
-                        tempPairs{ii} = double(reshape(row, 1, 2));
-                    end
-                    pairsCell = tempPairs;
-                    isCanonical = true;
-                    isUsable = true;
-                end
-            end
-
-            function writeRefJson(referenceFilePath, refData)
-                jsonText = jsonencode(refData);
-                fileID = fopen(referenceFilePath, 'w');
-                if fileID == -1
-                    error('ui:trackingPlatforms:TrackingProvider:RefJsonWriteOpenFailed', ...
-                        'Could not open reference JSON for writing: %s', referenceFilePath);
-                end
-
-                cleaner = onCleanup(@() fclose(fileID));
-                fwrite(fileID, jsonText, 'char');
+            if ~isempty(refData) && ~isstruct(refData)
+                warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
+                    'Reference JSON root is not an object, skipping trigger extraction: %s', referenceFilePath);
+                return;
             end
 
             if isstruct(refData) && isfield(refData, 'trigger_events') && ~isempty(refData.trigger_events)
@@ -180,7 +123,7 @@ classdef (Abstract) TrackingProvider < handle
                 if isUsable
                     if ~isCanonical
                         refData.trigger_events = existingPairsCell;
-                        writeRefJson(referenceFilePath, refData);
+                        writeReferenceJson(referenceFilePath, refData);
                     end
                     return;
                 end
@@ -188,11 +131,12 @@ classdef (Abstract) TrackingProvider < handle
                 return;
             end
 
-            % Update the progress dialog if provided
             if ~isempty(kvargs.ProgressDialogHandle)
                 currentIndeterminateState = kvargs.ProgressDialogHandle.Indeterminate;
+                currentProgressMessage = kvargs.ProgressDialogHandle.Message;
                 kvargs.ProgressDialogHandle.Indeterminate = true;
                 kvargs.ProgressDialogHandle.Message = 'Extracting trigger events...';
+                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage)); %#ok<NASGU>
             end
 
             eventTable = triggerExtract.ledPulses(videoFilePath);
@@ -209,12 +153,190 @@ classdef (Abstract) TrackingProvider < handle
 
             refData.trigger_events = triggerEvents;
             refData.trigger_events_start_validated = false;  % Auto-detected, not yet manually validated
-            writeRefJson(referenceFilePath, refData);
-            
-            % Restore the progress dialog state if it was modified
+            writeReferenceJson(referenceFilePath, refData);
+        end
+
+        function extractAndSaveArenaGridVertices(videoFilePath, kvargs)
+            %%EXTRACTANDSAVEARENAGRIDVERTICES Extract arena grid vertices and persist to sibling .ref.json.
+            %
+            % Requires: owlv2-detect lib - owlv2.blackmarks(_)
+            % For optimal performance when running inference on multiple videos, batch the videos into a single list and call the function once with the entire list of video file paths, rather than calling it separately for each video file.
+            % Ideally, this is often called after preprocessing (splitting and trigger event extraction), when all videos are split and ready for batch processing.
+
+            arguments
+                videoFilePath
+                kvargs.ProgressDialogHandle {progressDlgHandleOrEmpty} = []
+            end
+
+            videoFilePaths = string(videoFilePath);
+            videoFilePaths = videoFilePaths(:);
+            videoFilePaths = videoFilePaths(videoFilePaths ~= "");
+            if isempty(videoFilePaths)
+                return;
+            end
+
+            if any(~isfile(videoFilePaths))
+                missingVideoFilePaths = videoFilePaths(~isfile(videoFilePaths));
+                error('ui:trackingPlatforms:TrackingProvider:InvalidVideoFilePath', ...
+                    'One or more video files do not exist: %s', strjoin(missingVideoFilePaths, ', '));
+            end
+
+            videoFilePaths = unique(videoFilePaths, 'stable');
+
+            videoDirs = strings(numel(videoFilePaths), 1);
+            for ii = 1:numel(videoFilePaths)
+                [videoDirs(ii), ~, ~] = fileparts(videoFilePaths(ii));
+            end
+
+            uniqueVideoDirs = unique(videoDirs, 'stable');
+            for ii = 1:numel(uniqueVideoDirs)
+                try
+                    graphics.migrateLegacyCSVRefs2JSON(char(uniqueVideoDirs(ii)));
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:LegacyRefMigrationFailed', ...
+                        'Could not auto-migrate legacy CSV reference files in "%s":\n%s', uniqueVideoDirs(ii), ME.message);
+                end
+            end
+
+            pendingVideoFilePaths = strings(0, 1);
+            pendingReferenceFilePaths = strings(0, 1);
+            pendingReferenceData = cell(0, 1);
+
+            for ii = 1:numel(videoFilePaths)
+                videoFile = videoFilePaths(ii);
+                [videoDir, videoBaseName, ~] = fileparts(videoFile);
+                referenceFilePath = fullfile(videoDir, strcat(videoBaseName, '.ref.json'));
+
+                [refData, isLoaded, parseErrorMessage] = readReferenceJson(referenceFilePath);
+                if ~isLoaded
+                    warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
+                        ['Could not parse reference JSON, skipping arena grid extraction for this video to avoid ' ...
+                        'overwriting existing fields: %s\n%s'], referenceFilePath, parseErrorMessage);
+                    continue;
+                end
+
+                if ~isempty(refData) && ~isstruct(refData)
+                    warning('ui:trackingPlatforms:TrackingProvider:RefJsonReadFailed', ...
+                        'Reference JSON root is not an object, skipping arena grid extraction: %s', referenceFilePath);
+                    continue;
+                end
+
+                if isstruct(refData) && isfield(refData, 'arena_grid') && isstruct(refData.arena_grid) && isfield(refData.arena_grid, 'vertices')
+                    [existingVertices, hasExistingVertices] = normalizeArenaGridVertices(refData.arena_grid.vertices);
+                    if hasExistingVertices && size(existingVertices, 1) >= 4
+                        continue;
+                    end
+                end
+
+                pendingVideoFilePaths(end+1, 1) = videoFile;
+                pendingReferenceFilePaths(end+1, 1) = referenceFilePath;
+                pendingReferenceData{end+1, 1} = refData;
+            end
+
+            if isempty(pendingVideoFilePaths)
+                return;
+            end
+
             if ~isempty(kvargs.ProgressDialogHandle)
-                kvargs.ProgressDialogHandle.Indeterminate = currentIndeterminateState;
-                kvargs.ProgressDialogHandle.Message = 'Trigger events extracted, saved to ' + referenceFilePath;
+                currentIndeterminateState = kvargs.ProgressDialogHandle.Indeterminate;
+                currentProgressMessage = kvargs.ProgressDialogHandle.Message;
+                kvargs.ProgressDialogHandle.Indeterminate = true;
+                kvargs.ProgressDialogHandle.Message = 'Extracting arena grid vertices...';
+                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage)); %#ok<NASGU>
+            end
+
+            try
+                % Ensure the installation is done before trying to run the blackmarks command, in case the user has not installed it yet
+                % This is no-op if already installed
+                owlv2.install();
+            catch ME
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'Could not install OWLv2-Detector Utility:\n%s', ME.message);
+                return;
+            end
+
+            try
+                [exitCode, stdout] = owlv2.blackmarks(pendingVideoFilePaths, TopNMarks=4, LogLevel='quiet', BatchSize=21);
+            catch ME
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'Could not run arena grid vertex extraction:\n%s', ME.message);
+                return;
+            end
+
+            if exitCode ~= 0
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'OWLv2 black-marks exited with code %d. Skipping arena grid vertex extraction for pending videos.', exitCode);
+                return;
+            end
+
+            try
+                jsonResults = jsondecode(stdout);
+            catch
+                stdoutLines = splitlines(strtrim(string(stdout)));
+                stdoutLines = stdoutLines(strlength(stdoutLines) > 0);
+                if isempty(stdoutLines)
+                    warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                        'OWLv2 black-marks did not return JSON output. Leaving the reference JSON untouched.');
+                    return;
+                end
+
+                try
+                    jsonResults = jsondecode(stdoutLines(end));
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                        'Could not parse OWLv2 black-marks JSON output. Leaving the reference JSON untouched.\n%s', ME.message);
+                    return;
+                end
+            end
+
+            if ~isstruct(jsonResults)
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'OWLv2 black-marks returned an unexpected JSON shape. Leaving the reference JSON untouched.');
+                return;
+            end
+
+            if isempty(jsonResults)
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'OWLv2 black-marks returned no arena grid results. Leaving the reference JSON untouched.');
+                return;
+            end
+
+            if ~isfield(jsonResults, 'file') || ~isfield(jsonResults, 'markers')
+                warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractFailed', ...
+                    'OWLv2 black-marks JSON is missing required file/markers fields. Leaving the reference JSON untouched.');
+                return;
+            end
+
+            resultFiles = strings(numel(jsonResults), 1);
+            for ii = 1:numel(jsonResults)
+                resultFiles(ii) = string(jsonResults(ii).file);
+            end
+
+            for ii = 1:numel(pendingVideoFilePaths)
+                videoFile = pendingVideoFilePaths(ii);
+                resultIdx = find(strcmpi(resultFiles, videoFile), 1);
+                if isempty(resultIdx)
+                    warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractMissingResult', ...
+                        'OWLv2 black-marks did not return arena grid vertices for %s. Leaving the reference JSON untouched.', videoFile);
+                    continue;
+                end
+
+                [arenaVertices, isUsable] = canonicalizeArenaGridVertices(jsonResults(resultIdx).markers);
+                if ~isUsable
+                    warning('ui:trackingPlatforms:TrackingProvider:ArenaGridExtractInvalidMarkers', ...
+                        'OWLv2 black-marks returned malformed or incomplete arena grid markers for %s. Leaving the reference JSON untouched.', videoFile);
+                    continue;
+                end
+
+                refData = pendingReferenceData{ii};
+                refData.arena_grid.vertices = arenaVertices;
+
+                try
+                    writeReferenceJson(pendingReferenceFilePaths(ii), refData);
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:ArenaGridWriteFailed', ...
+                        'Could not write arena grid vertices to %s:\n%s', pendingReferenceFilePaths(ii), ME.message);
+                end
             end
         end
     end
@@ -329,6 +451,13 @@ classdef (Abstract) TrackingProvider < handle
         %%PREPROCESS Pre-process raw data files for your platform
         % A function to pre-process the raw data files for your platform
         % This can include converting video formats, splitting multiple-arenas/subjects, extracting frames, etc.
+        % Output a mapping to show what raw data files were processed into what output files, e.g., an 'updates' struct array with fields:
+        %   'data' - tracking/trial metadata related file
+        %       + 'original' - (scalar) - original raw data file path
+        %       + 'processed' - (1xN) cell array of processed data file paths
+        %   'media' - media files
+        %       + 'original' - (scalar) - original raw media file path
+        %       + 'processed' - (1xN) cell array of processed media file paths
 
 
 
