@@ -165,13 +165,15 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
         end
 
 
-        function preprocess(obj, varargin)
+        function [varargout] = preprocess(obj, varargin)
             arguments
                 obj (1,1) ui.trackingPlatforms.platforms.DeepLabCut
             end
             arguments (Repeating)
                 varargin
             end
+
+            varargout{1} = {};
 
             % Find the main app either via the global handle or by searching for the figure
             if exist('PlacePreferenceGUI', 'var') && ...

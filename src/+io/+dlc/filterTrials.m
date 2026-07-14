@@ -112,7 +112,7 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
     arenaNames(toberemovedIndices) = [];
 
     % Construct trialInfo struct array
-    trialInfo = struct('media', {}, 'data', {}, 'trialNumeric', [], 'multipleArena', []);
+    trialInfo = struct('media', {}, 'data', {}, 'trialNumeric', [], 'multipleArena', [], 'arena', {});
     for i = 1:length(trialNames)
         trialInfo(end+1) = struct( ...
             'media', fullfile(videoFiles(i).folder, videoFiles(i).name), ...

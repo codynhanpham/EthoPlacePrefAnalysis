@@ -136,7 +136,7 @@ classdef (Abstract) TrackingProvider < handle
                 currentProgressMessage = kvargs.ProgressDialogHandle.Message;
                 kvargs.ProgressDialogHandle.Indeterminate = true;
                 kvargs.ProgressDialogHandle.Message = 'Extracting trigger events...';
-                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage)); %#ok<NASGU>
+                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage));
             end
 
             eventTable = triggerExtract.ledPulses(videoFilePath);
@@ -228,9 +228,9 @@ classdef (Abstract) TrackingProvider < handle
                     end
                 end
 
-                pendingVideoFilePaths(end+1, 1) = videoFile;
-                pendingReferenceFilePaths(end+1, 1) = referenceFilePath;
-                pendingReferenceData{end+1, 1} = refData;
+                pendingVideoFilePaths(end+1, 1) = videoFile; %#ok<AGROW>
+                pendingReferenceFilePaths(end+1, 1) = referenceFilePath; %#ok<AGROW>
+                pendingReferenceData{end+1, 1} = refData; %#ok<AGROW>
             end
 
             if isempty(pendingVideoFilePaths)
@@ -242,7 +242,7 @@ classdef (Abstract) TrackingProvider < handle
                 currentProgressMessage = kvargs.ProgressDialogHandle.Message;
                 kvargs.ProgressDialogHandle.Indeterminate = true;
                 kvargs.ProgressDialogHandle.Message = 'Extracting arena grid vertices...';
-                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage)); %#ok<NASGU>
+                progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage));
             end
 
             try
@@ -458,6 +458,8 @@ classdef (Abstract) TrackingProvider < handle
         %   'media' - media files
         %       + 'original' - (scalar) - original raw media file path
         %       + 'processed' - (1xN) cell array of processed media file paths
+        %
+        % If there is no pre-processing needed/implemented for a platform, return an empty {} cell with warning notice logged to console and ui message box
 
 
 
