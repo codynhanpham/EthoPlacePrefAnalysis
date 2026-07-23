@@ -43,12 +43,15 @@
 
 
 
-function joinedStdTable = joinStdTableByStim(stdTableA, stdTableB)
+function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, options)
 
 
     arguments
         stdTableA struct
         stdTableB struct
+        % Set this to true if you want an additional field in joinedStdTable that records the number of animals in stdTableA, so that downstream code can recover how many animals (and therefore how many widened columns) belong to group A vs group B.
+        % When false, this return as the 2nd output argument
+        options.EmbeddedNAnimalA (1,1) logical = false
     end
 
     % Validate other fields in the struct
@@ -105,10 +108,15 @@ function joinedStdTable = joinStdTableByStim(stdTableA, stdTableB)
     joinedStdTable.animalMetadata = stdTableA.animalMetadata;
     keysA = keys(stdTableA.animalMetadata);
     keysB = keys(stdTableB.animalMetadata);
+    
     % Record the split point so downstream code can recover how many animals
     % (and therefore how many widened columns) belong to group A vs group B.
     % Do NOT infer this from numel(stimfileName) — that field concatenates A+B.
-    joinedStdTable.nAnimalsA = length(keysA);
+    nAnimalsA = length(keysA);
+    if options.EmbeddedNAnimalA
+        joinedStdTable.nAnimalsA = nAnimalsA;
+    end
+    
     if ~isempty(intersect(keysA, keysB))
         error('The provided stdTableA (%s) and stdTableB (%s) have overlapping keys in animalMetadata. Cannot merge.', string(stdTableA.stimfileName), string(stdTableB.stimfileName));
     end

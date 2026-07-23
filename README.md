@@ -33,9 +33,16 @@ The program can interface with [DeepLabCut](https://github.com/DeepLabCut/DeepLa
 This integration requires a custom `DLCTool` CLI-based program that exposes basic DLC functionality (e.g., run inference, etc.) in a single-bundle executable.
 
 ### SLEAP
-Support for [SLEAP](https://sleap.ai/)-based tracking is planned. It will most probably be similar to the DLC integration by extending the `TrackingProvider` class interface.
+Support for [SLEAP](https://sleap.ai/)-based tracking is currently under development via the `TrackingProvider` class interface. See [SLEAP Integration](./src/+ui/+trackingPlatforms/+platforms/@SLEAP/README.md) for more details on setup and usage.
 
-SLEAP installation and interaction can also be easily automated and save locally on-demand as it's already using [uv](https://docs.astral.sh/uv/reference/installer/), a very nice Python project manager that can dynamically activate corresponding virtual environments and execute Python scripts directly through CLI commands.
+SLEAP installation is fully automated via a simple `io.sleap.install()` function call that check and only setup SLEAP when missing, no-op otherwise. This function creates a separate and isolated SLEAP installation in the `/src/+io/+sleap/private/sleap-tools` folder, so it does not interfere with any existing SLEAP installation on the system.
+
+Launching the SLEAP GUI is as simple as a single function:
+```matlab
+io.sleap.gui()
+```
+
+In addition, standard SLEAP CLI operations can be done via the `io.sleap` namespace that will ensure the correct SLEAP installation is used. `io.sleap.track()` wraps the SLEAP `track` command with complete MATLAB typing, while other SLEAP commands can be run via `io.sleap.cmd()`.
 
 ### Neurodata Without Borders (NWB)
 I/O support for NWB files is being added, backed by the [MatNWB](https://github.com/NeurodataWithoutBorders/matnwb) library. This addition will improve interoperability with other neuroscience data analysis tools and streamline data management workflows.

@@ -1,9 +1,9 @@
 function fig = mecp2_pilot_stats()
 
-    MECP2_MALE_KO = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/20260611_standardizedTable_MalesKOOnly__n16+Baseline.mat";
+    MECP2_MALE_KO = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Prelim/SingleDay_20260701_MECP2_Male_KO.mat";
     C57_MALE_WT = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/C57/20260611_standardizedTable_MalesOnly+Baseline__NO_OUTLIER__n=15.mat";
 
-    OUTPUTDIR = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Male Mecp2 KO vs. C57 WT";
+    OUTPUTDIR = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Prelim";
 
     mecp2Data = load(MECP2_MALE_KO).standardizedTables;
     c57Data = load(C57_MALE_WT).standardizedTables;
@@ -29,8 +29,8 @@ function fig = mecp2_pilot_stats()
     
     [fig, tgroup, tabs] = ui.tabbedFigure(fig, struct(), tabStruct);
 
-    mergedTable(1) = population.temp.joinStdTableByStim(mecp2Data(1), c57Data(1));
-    mergedTable(2) = population.temp.joinStdTableByStim(mecp2Data(2), c57Data(2));
+    mergedTable(1) = population.temp.joinStdTableByStim(mecp2Data(1), c57Data(1), 'EmbeddedNAnimalA', true);
+    mergedTable(2) = population.temp.joinStdTableByStim(mecp2Data(2), c57Data(2), 'EmbeddedNAnimalA', true);
     assignin('base', 'mergedTable', mergedTable);
 
     SHOW_DATA_POINTS = false;
