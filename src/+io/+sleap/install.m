@@ -7,9 +7,17 @@ function [uvpath, sleapdir] = install(kvargs)
     %   2. Create a virtual environment with uv + Python version
     %   3. uv pip install --torch-backend auto "sleap[nn]" "sleap-io" "sleap-nn"
     %   4. Verify the installation by running "uv run sleap doctor"
+    %
+    % By default, this function does not install the extra ONNX & TensorRT Export dependencies. To install those, pass the kvarg 'NNExport' with one of the following values:
+    %   - 'onnx-cpu' : Install ONNX export dependencies for CPU
+    %   - 'onnx-gpu' : Install ONNX export dependencies for GPU
+    %   - 'tensorrt' : Install TensorRT export dependencies for GPU
+    %   - 'current'  : Use the current NNExport state (read from the install cache). If no prior cache exists, this falls back to 'none'.
+    %   - []         : (default) Preserve whatever NNExport state is already installed (read from the install cache). On a first-time install with no prior cache, this falls back to 'none'.
 
     arguments
         kvargs.Verbose (1,1) logical = false
+        kvargs.NNExport {mustBeTextScalarOrEmpty, mustBeMember(kvargs.NNExport, {'onnx-cpu', 'onnx-gpu', 'tensorrt', 'none', 'current'})} = 'current'
     end
 
     persistent UVPATH SLEAPDIR INSTALLED
@@ -18,13 +26,19 @@ function [uvpath, sleapdir] = install(kvargs)
     cleanup = onCleanup(@() cd(currentpwd)); % Ensure we return to the original directory when this function is out of scope
 
     PYTHON_VERSION = '3.13';
-    CACHE_VERSION = 1;
+    CACHE_VERSION = 2;
 
     thisdir = fileparts(mfilename('fullpath'));
     sleapproj = 'sleap-tools';
     thisprivatedir = fullfile(thisdir, 'private');
     sleapdir = fullfile(thisprivatedir, sleapproj);
+    pyscriptsSrcDir = fullfile(thisdir, 'pyscripts');
     cacheFile = fullfile(sleapdir, '.sleap_install_cache.mat');
+
+    % When NNExport is not specified (empty), preserve whatever NNExport
+    % state is already installed (read from the install cache). Only fall
+    % back to 'none' on a first-time install with no prior cache.
+    nnExport = resolveNnExport(cacheFile, kvargs.NNExport, kvargs.Verbose);
 
     [uvpath, helperResolved] = ensureuvhelperavailable(thisdir, kvargs.Verbose);
 
@@ -32,10 +46,10 @@ function [uvpath, sleapdir] = install(kvargs)
 
     % Fast path: in-memory + on-disk cache can skip doctor syscall.
     if INSTALLED & strcmp(UVPATH, uvpath) & strcmp(SLEAPDIR, sleapdir)
-        if isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION))
+        if isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir))
             installed = true;
         end
-    elseif isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION))
+    elseif isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir))
         installed = true;
     end
 
@@ -73,24 +87,24 @@ function [uvpath, sleapdir] = install(kvargs)
             error('Failed to create virtual environment in SLEAP project. Command output: %s', cmdOut);
         end
 
-        fprintf('Installing SLEAP packages into virtual environment ...\n');
-        cmd = 'pip install --torch-backend auto "sleap[nn]" "sleap-io" "sleap-nn"';
-        fprintf('Running command: \n\tuv %s\n', cmd);
-        [status, cmdOut] = uv.cmd(cmd, UpdateCallbackFcn=@displayuvoutput);
-        if status ~= 0
-            error('Failed to install SLEAP packages. Command output: %s', cmdOut);
-        end
-        cmd = sprintf('lock');
-        [status, cmdOut] = uv.cmd(cmd, UpdateCallbackFcn=@displayuvoutput);
-        if status ~= 0
-            error('Failed to add SLEAP packages to the project. Command output: %s', cmdOut);
-        end
+        syncPyscripts(pyscriptsSrcDir, sleapdir, kvargs.Verbose);
+
+        installSleapPackages(sleapdir, nnExport);
     else
-        installed = isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION));
+        % One-way sync pyscripts into the existing SLEAP project before any
+        % cache/doctor checks so source-side edits are reflected in sleapdir.
+        syncPyscripts(pyscriptsSrcDir, sleapdir, kvargs.Verbose);
+
+        cacheValid = isinstallcachevalid(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir));
+        installed = cacheValid;
         if ~installed
             installed = sleapdoctor(sleapdir, 'Verbose', kvargs.Verbose);
             if installed
-                writeinstallcache(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION));
+                % A cache miss can mean that NNExport changed. Reinstall the
+                % package so the selected extra dependencies are reflected in
+                % the existing environment before refreshing the cache.
+                installSleapPackages(sleapdir, nnExport);
+                writeinstallcache(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir));
             else
                 clearinstallcache(cacheFile);
             end
@@ -116,7 +130,7 @@ function [uvpath, sleapdir] = install(kvargs)
     fprintf('\n\nRunning SLEAP doctor post-installation check to verify installation ...\n\n');
     installed = sleapdoctor(sleapdir, 'Verbose', true);
     if installed
-        writeinstallcache(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION));
+        writeinstallcache(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir));
         INSTALLED = true;
         UVPATH = uvpath;
         SLEAPDIR = sleapdir;
@@ -125,13 +139,25 @@ function [uvpath, sleapdir] = install(kvargs)
         clearinstallcache(cacheFile);
         fprintf('uv + SLEAP installation completed but failed doctor check. Please investigate the issue with the installation manually by running "uv run sleap doctor" in the SLEAP directory: %s\n', sleapdir);
     end
+
+
 end
-function fp = buildinstallfingerprint(sleapdir, uvpath, pythonVersion, cacheVersion)
+
+function mustBeTextScalarOrEmpty(x)
+    if isempty(x)
+        return;
+    end
+    mustBeTextScalar(x);
+end
+
+function fp = buildinstallfingerprint(sleapdir, uvpath, pythonVersion, cacheVersion, nnExport, pyscriptsSrcDir)
     fp = struct();
     fp.CacheVersion = cacheVersion;
     fp.SleapDir = sleapdir;
     fp.UvPath = uvpath;
     fp.PythonVersion = pythonVersion;
+    fp.NNExport = char(nnExport);
+    fp.PyscriptsSrcDir = char(pyscriptsSrcDir);
 
     watchFiles = {
         fullfile(sleapdir, 'pyproject.toml')
@@ -140,7 +166,7 @@ function fp = buildinstallfingerprint(sleapdir, uvpath, pythonVersion, cacheVers
         fullfile(sleapdir, '.venv', 'pyvenv.cfg')
     };
 
-    fileState = repmat(struct('Path', '', 'Exists', false, 'Bytes', 0, 'Datenum', 0), numel(watchFiles), 1);
+    fileState = repmat(struct('Path', '', 'Exists', false, 'Bytes', 0, 'Datenum', 0, 'Hash', ''), numel(watchFiles), 1);
     for i = 1:numel(watchFiles)
         d = dir(watchFiles{i});
         fileState(i).Path = watchFiles{i};
@@ -148,9 +174,116 @@ function fp = buildinstallfingerprint(sleapdir, uvpath, pythonVersion, cacheVers
         if ~isempty(d)
             fileState(i).Bytes = d.bytes;
             fileState(i).Datenum = d.datenum;
+            fileState(i).Hash = filesha256(watchFiles{i});
         end
     end
     fp.FileState = fileState;
+
+    % Include source pyscripts file hashes so cache invalidates when the
+    % source files change (regardless of whether they have been synced yet).
+    fp.PyscriptsState = pyscriptsfilestate(pyscriptsSrcDir);
+end
+
+
+function state = pyscriptsfilestate(pyscriptsSrcDir)
+    state = repmat(struct('Path', '', 'Exists', false, 'Bytes', 0, 'Datenum', 0, 'Hash', ''), 0, 1);
+    if isempty(pyscriptsSrcDir) || ~isfolder(pyscriptsSrcDir)
+        return;
+    end
+    listing = dir(fullfile(pyscriptsSrcDir, '**', '*.*'));
+    listing = listing([listing.isdir] == 0);
+    for i = 1:numel(listing)
+        srcPath = fullfile(listing(i).folder, listing(i).name);
+        relPath = strrep(srcPath, [pyscriptsSrcDir filesep], '');
+        s = struct();
+        s.Path = relPath;
+        s.Exists = true;
+        s.Bytes = listing(i).bytes;
+        s.Datenum = listing(i).datenum;
+        s.Hash = filesha256(srcPath);
+        state(end+1, 1) = s; %#ok<AGROW>
+    end
+end
+
+
+function hash = filesha256(filePath)
+    hash = '';
+    try
+        fid = fopen(filePath, 'r');
+        if fid < 0
+            return;
+        end
+        cleanup = onCleanup(@() fclose(fid));
+        [content, ~] = fread(fid, '*uint8');
+        md = java.security.MessageDigest.getInstance('SHA-256');
+        md.update(typecast(content, 'int8'));
+        digestBytes = md.digest();
+        b = double(digestBytes);
+        b(b < 0) = b(b < 0) + 256;
+        hash = lower(reshape(dec2hex(b, 2).', 1, []));
+    catch
+        d = dir(filePath);
+        if ~isempty(d)
+            hash = sprintf('%d_%d', d.bytes, d.datenum);
+        end
+    end
+end
+
+
+function syncPyscripts(srcDir, sleapdir, verbose)
+    % One-way sync of files from srcDir (pyscripts) into sleapdir.
+    % Copies only files that are missing or whose SHA-256 differs from the
+    % source. Files in sleapdir that are not in srcDir are left untouched
+    % (one-way sync, no deletion).
+    if isempty(srcDir) || ~isfolder(srcDir)
+        if verbose
+            fprintf('No pyscripts source directory found at %s; skipping sync.\n', srcDir);
+        end
+        return;
+    end
+    if ~isfolder(sleapdir)
+        if verbose
+            fprintf('SLEAP project directory does not exist yet at %s; skipping pyscripts sync.\n', sleapdir);
+        end
+        return;
+    end
+
+    listing = dir(fullfile(srcDir, '**', '*.*'));
+    listing = listing([listing.isdir] == 0);
+    copied = 0;
+    skipped = 0;
+    for i = 1:numel(listing)
+        srcPath = fullfile(listing(i).folder, listing(i).name);
+        relPath = strrep(srcPath, [srcDir filesep], '');
+        dstPath = fullfile(sleapdir, relPath);
+
+        needCopy = true;
+        if isfile(dstPath)
+            srcHash = filesha256(srcPath);
+            dstHash = filesha256(dstPath);
+            if ~isempty(srcHash) && ~isempty(dstHash) && strcmp(srcHash, dstHash)
+                needCopy = false;
+            end
+        end
+
+        if needCopy
+            dstParent = fileparts(dstPath);
+            if ~isfolder(dstParent)
+                mkdir(dstParent);
+            end
+            copyfile(srcPath, dstPath);
+            copied = copied + 1;
+            if verbose
+                fprintf('Synced pyscripts file: %s -> %s\n', relPath, dstPath);
+            end
+        else
+            skipped = skipped + 1;
+        end
+    end
+
+    if verbose
+        fprintf('pyscripts sync complete: %d copied, %d up-to-date.\n', copied, skipped);
+    end
 end
 
 
@@ -188,6 +321,77 @@ end
 function clearinstallcache(cacheFile)
     if isfile(cacheFile)
         delete(cacheFile);
+    end
+end
+
+
+function nnExport = resolveNnExport(cacheFile, requested, verbose)
+    % Resolve the effective NNExport value.
+    % If the caller passed a concrete value (onnx-cpu/onnx-gpu/tensorrt/none),
+    % honor it. If the caller passed [] or 'current' (default), preserve
+    % whatever NNExport is already recorded in the install cache so we don't
+    % clobber an existing export-capable install with 'none'. Falls back to
+    % 'none' only when there is no prior cache (first-time install).
+    validValues = {'onnx-cpu', 'onnx-gpu', 'tensorrt', 'none', 'current'};
+
+    if ~isempty(requested) && ~strcmp(requested, 'current')
+        nnExport = char(requested);
+        return;
+    end
+
+    cached = '';
+    if isfile(cacheFile)
+        try
+            data = load(cacheFile, 'cache');
+            if isfield(data, 'cache') && isfield(data.cache, 'Fingerprint') && isfield(data.cache.Fingerprint, 'NNExport')
+                cached = char(data.cache.Fingerprint.NNExport);
+            end
+        catch
+            cached = '';
+        end
+    end
+
+    if ~isempty(cached) && ismember(cached, setdiff(validValues, {'current'}))
+        nnExport = cached;
+        if verbose
+            fprintf('NNExport resolved to ''current''; preserving cached NNExport state: %s\n', nnExport);
+        end
+    else
+        nnExport = 'none';
+        if verbose
+            fprintf('NNExport resolved to ''current'' and no prior cache found; defaulting to ''none''.\n');
+        end
+    end
+end
+
+
+function installSleapPackages(sleapdir, nnExport)
+    currentdir = pwd();
+    cleanup = onCleanup(@() cd(currentdir));
+    cd(sleapdir);
+
+    fprintf('Installing SLEAP packages into virtual environment ...\n');
+    cmd = 'pip install --torch-backend auto "sleap[nn]" "sleap-io"';
+    sleapnn = 'sleap-nn';
+    if strcmp(nnExport, 'onnx-cpu')
+        sleapnn = [sleapnn '[export]'];
+    elseif strcmp(nnExport, 'onnx-gpu')
+        sleapnn = [sleapnn '[export-gpu]'];
+    elseif strcmp(nnExport, 'tensorrt')
+        sleapnn = [sleapnn '[export-gpu,tensorrt]'];
+    elseif strcmp(nnExport, 'none')
+        % Do nothing, don't add any extra dependencies.
+    end
+    cmd = sprintf('%s "%s"', cmd, sleapnn);
+    fprintf('Running command: \n\tuv %s\n', cmd);
+    [status, cmdOut] = uv.cmd(cmd, UpdateCallbackFcn=@displayuvoutput);
+    if status ~= 0
+        error('Failed to install SLEAP packages. Command output: %s', cmdOut);
+    end
+
+    [status, cmdOut] = uv.cmd('lock', UpdateCallbackFcn=@displayuvoutput);
+    if status ~= 0
+        error('Failed to add SLEAP packages to the project. Command output: %s', cmdOut);
     end
 end
 
