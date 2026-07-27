@@ -428,12 +428,28 @@ end
 
 
 function [helperRoot, found] = bootstrapuvhelpernamespace(thisdir, verbose)
+    persistent cachedHelperRoot cachedFound
+    if ~isempty(cachedHelperRoot) && cachedFound
+        helperRoot = cachedHelperRoot;
+        found = cachedFound;
+        return;
+    end
+
     found = false;
     helperRoot = '';
+
+    if ~isempty(meta.package.fromName('uv'))
+        helperRoot = fileparts(which('uv.install'));
+        found = true;
+        cachedHelperRoot = helperRoot;
+        cachedFound = found;
+        return;
+    end
 
     candidateRoots = {
         thisdir
         fullfile(thisdir, '..')
+        fullfile(thisdir, '..', '..')
         fullfile(thisdir, '..', '..', 'lib')
         fullfile(thisdir, '..', '..', '..', 'lib')
     };
@@ -455,6 +471,8 @@ function [helperRoot, found] = bootstrapuvhelpernamespace(thisdir, verbose)
                 if verbose
                     fprintf('Found uv helper package at %s\n', installFile);
                 end
+                cachedHelperRoot = helperRoot;
+                cachedFound = found;
                 return;
             end
         end
@@ -465,7 +483,7 @@ end
 function errstr = buildmissinguvhelpererror(thisdir)
     errstr = sprintf([ ...
         '+uv helper namespace is not installed or not on the MATLAB path.\n' ...
-        'Searched for helper roots relative to %s in ./, ../, and ../../lib.\n' ...
+        'Searched for helper roots relative to %s in ./ ; ../ ; ../../ ; ../../lib/ ; ../../../lib/.\n' ...
         'If +io/+sleap is installed as part of a package, make sure you also download/install the full package together with the +uv helper library.' ...
     ], thisdir);
 end
