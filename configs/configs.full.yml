@@ -132,6 +132,7 @@ tracking_providers:
 
     default_camera_imgwidth_fov_cm: 58.5 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
 
+    # If there are multiple arenas recorded at once within a single trial, the file names are expected to be in the `{trial_name} @ {arena_name}` format (delimited by ` @ ` with spaces), where the arena_name should match the names specified here.
     arena:
       # When using multiple arenas or different arena configs exist, specify them here
       # Just make sure the names match those used in your experiments and the master metadata table
@@ -141,7 +142,68 @@ tracking_providers:
         camera_imgwidth_fov_cm: 58.5
 
       - name: "Lily Booth"
-        # Set the offset to override the default. This is often time all you need if the physical set up is fixed. Otherwise, create a column in the master metadata table named "MIDPOINT_XOFFSET_PX" to specify per-trial offsets. The order of precedence is: trial-specific (master metadata table) > arena-specific (this config) > default (this config).
+        # Set the offset to override the default. This is often time all you need if the physical set up is fixed. Otherwise, use the select reference line/point button in the GUI to define the reference line/point. The order of precedence is: trial/arena-specific (associated *.ref.json file) > arena-specific (this config) > default (this config).
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4
+      
+      - name: "Rain Booth"
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4
+
+  SLEAP:
+    # Path to the SLEAP model directories. Depending on the tracking backend, there might be more than one model directory that must be specified
+    # You may also specify an exported model directory (a single dir with ONNX and/or TensorRT models). The SLEAP backend will automatically detect the model type and use the appropriate one.
+    model_paths:
+      - 
+    
+    # Exported-model runtime (ignored for checkpoints)
+    runtime: auto # Options are: auto, onnx, tensorrt ; auto prefers TensorRT and falls back to ONNX
+
+    # Compute device to pass into SLEAP for inference. Options are: auto, cuda, cuda:0, cuda:1, cpu, mps
+    # If you have multiple GPUs, you can specify the device index (e.g., cuda:0, cuda:1) to select which GPU to use
+    device: auto
+
+    # Batch size for SLEAP inference. Adjust based on your CPU / GPU memory and model size. Default is 8.
+    batch_size: 8
+
+    # Enable tracking of multi-animal instances (subject IDs)
+    # Only applies to multi-animal models.
+    tracking: false
+
+    # Max instances per frame (forward pass only)
+    max_instances: 1
+
+    # Additional SLEAP inference options can be specified here. See SLEAP documentation for more details: https://nn.sleap.ai/latest/reference/cli/#sleap-nn-predict
+    # As future releases of SLEAP may introduce new options and or breaking changes, only essential options are provided as top-level config options in the app, listed above. Other options can be specified here as a dictionary of key-value pairs, which will be passed directly to sleap-nn predict.
+    # If a key is a flag, use a boolean value (true/false) to indicate whether to include the flag or not
+    # If a key uses dashes instead of underscores, you can specify it as a string key in quotes
+    # Note that bad or incompatible options may cause the SLEAP backend to fail, so please refer to the SLEAP documentation for valid options and their expected values.
+    # Some options are strongly discouraged as they are managed by the app and might break the integration pipeline if overridden.
+    # Options that should not be overriden are:
+    # --data_path -> will be set to selected video in the GUI
+    # --output_path -> will be set dynamically per video to match the expected output file structure of the app ({video_dir}/sleap/video_name.predictions.slp)
+    additional_args:
+      # For example, to add --filter_min_mean_node_score, you can specify:
+      # filter_min_mean_node_score: 0.1
+
+
+    # Default x-offset in pixels to improve default estimation of the midpoint between left/right zones if the arena is not perfectly centered in the camera view. This can be overridden per-arena if needed. Selection made using the GUI via src/modules/PerTrialAnalysis/+graphics/uiselectReferenceLine.m or uiselectReferencePoint.m will take precedence. This value is only for the initial estimation if the manual selection is missing.
+    default_midpoint_xoffset_px: 0
+
+    # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+    default_camera_imgwidth_fov_cm: 77.4
+
+    # If there are multiple arenas recorded at once within a single trial, the file names are expected to be in the `{trial_name} @ {arena_name}` format (delimited by ` @ ` with spaces), where the arena_name should match the names specified here.
+    arena:
+      # When using multiple arenas or different arena configs exist, specify them here
+      # Just make sure the names match those used in your experiments and the master metadata table
+
+      - name: "Arena 1" # Required: name of the arena as specified in your experiments, must match the master metadata table and processed file names
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4
+
+      - name: "Lily Booth"
+        # Set the offset to override the default. This is often time all you need if the physical set up is fixed. Otherwise, use the select reference line/point button in the GUI to define the reference line/point. The order of precedence is: trial-specific (master metadata table) > arena-specific (this config) > default (this config).
         midpoint_xoffset_px: 0
         camera_imgwidth_fov_cm: 77.4
       

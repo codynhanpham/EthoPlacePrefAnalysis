@@ -127,7 +127,7 @@ function [uvpath, sleapdir] = install(kvargs)
     end
 
     fprintf('\nSLEAP project created and packages installed successfully at: %s\n', sleapdir);
-    fprintf('\n\nRunning SLEAP doctor post-installation check to verify installation ...\n\n');
+    fprintf('\nRunning SLEAP doctor post-installation check to verify installation ...\n\n');
     installed = sleapdoctor(sleapdir, 'Verbose', true);
     if installed
         writeinstallcache(cacheFile, buildinstallfingerprint(sleapdir, uvpath, PYTHON_VERSION, CACHE_VERSION, nnExport, pyscriptsSrcDir));
@@ -371,7 +371,7 @@ function installSleapPackages(sleapdir, nnExport)
     cd(sleapdir);
 
     fprintf('Installing SLEAP packages into virtual environment ...\n');
-    cmd = 'pip install --torch-backend auto "sleap[nn]" "sleap-io"';
+    cmd = 'pip install --torch-backend auto "sleap[nn]>=1.6.4" "sleap-io"';
     sleapnn = 'sleap-nn';
     if strcmp(nnExport, 'onnx-cpu')
         sleapnn = [sleapnn '[export]'];

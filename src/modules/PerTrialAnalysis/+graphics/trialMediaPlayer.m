@@ -281,7 +281,9 @@ stimStartFrameButton.Layout.Row = 2;
 stimStartFrameButton.Layout.Column = 2;
 
 markCheckedStartFrameButton = uibutton(mainGrid, 'Text', 'Mark Start Frame', 'ButtonPushedFcn', @(btn, event) markStartFrame, 'Tooltip', sprintf('Click to mark the current frame as the new stimulus start frame. This will update the ref.json file with the new trigger event time based on the current video timestamp.\n\nThis button is slight red if the current start frame was detected programmatically before any human input. The first time you manually validate or mark a start frame with this button, it will turn green and update the ref.json file to indicate that the start frame as been manually validated. (Shortcut: Double-M key press)'));
-markCheckedStartFrameButton.Enable = ~isempty(triggerStartFrame);
+% Keep manual marking available even when no start frame was detected. This
+% allows the user to create the first trigger event in the ref.json file.
+markCheckedStartFrameButton.Enable = 'on';
 % Set button color based on validation status: red (auto-detected) or green (manually validated)
 if triggerStartFrameValidated
     markCheckedStartFrameButton.BackgroundColor = [240, 255, 242]/255; % Light green for validated
@@ -1002,6 +1004,7 @@ function markStartFrame()
     % Update triggerStartFrame and validation flag for future use
     triggerStartFrame = currentFrameNum;
     triggerStartFrameValidated = true;
+    stimStartFrameButton.Enable = 'on';
     
     % Update button color to green to indicate manual validation
     markCheckedStartFrameButton.BackgroundColor = [240, 255, 242]/255; % Light green for validated

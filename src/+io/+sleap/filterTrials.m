@@ -96,10 +96,10 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
                 end
             end
         end
-
-        % Data file is the first CSV file that matches:
-        % parent/<trialName>DLC*_filtered.csv
-        dataFilePattern = fullfile(videoFiles(i).folder, 'dlc', sprintf('%sDLC*_filtered.csv', trialName));
+        
+        % Data file is the first .slp file that matches:
+        % parent/<trialName>.predictions.slp
+        dataFilePattern = fullfile(videoFiles(i).folder, 'sleap', sprintf('%s.predictions.slp', trialName));
         dataFiles = dir(dataFilePattern);
         if ~isempty(dataFiles)
             dataFilesList{i} = fullfile(dataFiles(1).folder, dataFiles(1).name);

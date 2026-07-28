@@ -87,14 +87,13 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             end
             
             if ~isfield(configs, 'tracking_providers') || ...
-                    ~isfield(configs.tracking_providers, obj.platform)
+                    ~isfield(configs.tracking_providers, obj.platformVarnameCompat(obj.platform))
                 userConfig = struct();
                 userConfig.CONFIG_ROOT = configs.CONFIG_ROOT;
                 return; % No DLC-specific config found
             end
             userConfig = configs.tracking_providers.(obj.platformVarnameCompat(obj.platform));
             userConfig.CONFIG_ROOT = configs.CONFIG_ROOT;
-            obj.userConfig = userConfig;
 
             defaults = struct();
             if isfield(configs, 'defaults')
@@ -132,6 +131,8 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             else
                 obj.dlcConfigFile = '';
             end
+            
+            obj.userConfig = userConfig;
         end
 
 
@@ -143,25 +144,25 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             end
 
             [parent, thisCSVname, ~] = fileparts(trackingDataFilePath);
-                thisCSVname = char(thisCSVname);
-                % This csv file name can be split at the last "DLC_" occurrence to get the video file name
-                dlcIdx = strfind(thisCSVname, 'DLC_');
-                if isempty(dlcIdx)
-                    videoFileName = thisCSVname;
-                else
-                    videoFileName = thisCSVname(1:dlcIdx(end)-1);
+            thisCSVname = char(thisCSVname);
+            % This csv file name can be split at the last "DLC_" occurrence to get the video file name
+            dlcIdx = strfind(thisCSVname, 'DLC_');
+            if isempty(dlcIdx)
+                videoFileName = thisCSVname;
+            else
+                videoFileName = thisCSVname(1:dlcIdx(end)-1);
+            end
+            % look in the csv ../ folder to find the video file with matching name and known video extensions, grab the actual extension of the file
+            videoExtensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpg', '.mpeg', '.3gp'};
+            mediaPath = "";
+            for i = 1:length(videoExtensions)
+                candidatePath = fullfile(fileparts(parent), strcat(videoFileName, videoExtensions{i}));
+                if isfile(candidatePath)
+                    mediaPath = candidatePath;
+                    break;
                 end
-                % look in the csv ../ folder to find the video file with matching name and known video extensions, grab the actual extension of the file
-                videoExtensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpg', '.mpeg', '.3gp'};
-                mediaPath = "";
-                for i = 1:length(videoExtensions)
-                    candidatePath = fullfile(fileparts(parent), strcat(videoFileName, videoExtensions{i}));
-                    if isfile(candidatePath)
-                        mediaPath = candidatePath;
-                        break;
-                    end
-                end
-                mediaPath = char(mediaPath);
+            end
+            mediaPath = char(mediaPath);
         end
 
 

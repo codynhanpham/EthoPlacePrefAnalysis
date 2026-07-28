@@ -139,6 +139,14 @@ classdef (Abstract) TrackingProvider < handle
                 progressCleanup = onCleanup(@() restoreProgressDialogState(kvargs.ProgressDialogHandle, currentIndeterminateState, currentProgressMessage));
             end
 
+            % triggerExtract should be pre-installed
+            % The repo ships with a prebuilt binary for x64 Windows and Linux,
+            % though you might also need a system dependency for OpenCV
+            % https://github.com/twistedfall/opencv-rust/blob/master/INSTALL.md
+            % For other platforms, you will need to build the binary from source
+            %   1. Ensure you have Rust installed (https://www.rust-lang.org/tools/install)
+            %   2. Go to /lib/trigger-extract/private/trigger-extract (see the Cargo.toml file)
+            %   3. Run `cargo build --release` to build the binary
             eventTable = triggerExtract.ledPulses(videoFilePath);
             if isempty(eventTable)
                 triggerEvents = cell(1, 0);

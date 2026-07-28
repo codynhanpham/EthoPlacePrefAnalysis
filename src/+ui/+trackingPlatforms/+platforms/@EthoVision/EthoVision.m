@@ -88,7 +88,7 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             end
             
             if ~isfield(configs, 'tracking_providers') || ...
-                    ~isfield(configs.tracking_providers, obj.platform)
+                    ~isfield(configs.tracking_providers, obj.platformVarnameCompat(obj.platform))
                 userConfig = struct();
                 userConfig.CONFIG_ROOT = configs.CONFIG_ROOT; % Pass through the CONFIG_ROOT even if no platform-specific config is found, for potential use later
                 return; % No EthoVision-specific config found
@@ -119,12 +119,13 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
                 end
             end
 
-            obj.userConfig = userConfig;
             if isfield(userConfig, 'coordsUnit')
                 obj.coordsUnit = userConfig.coordsUnit;
             else
                 obj.coordsUnit = "cm"; % default to cm
             end
+            
+            obj.userConfig = userConfig;
         end
 
 

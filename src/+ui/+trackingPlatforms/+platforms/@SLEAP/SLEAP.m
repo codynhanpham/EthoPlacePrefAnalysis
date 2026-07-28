@@ -11,8 +11,6 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
 
         coordsUnit = "px";
         px2cmFactor = NaN;
-
-        sleapConfigFile = ''; % Path to the SLEAP config file (YAML)
     end
 
 
@@ -85,14 +83,13 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
             
             if ~isfield(configs, 'tracking_providers') || ...
-                    ~isfield(configs.tracking_providers, obj.platform)
+                    ~isfield(configs.tracking_providers, obj.platformVarnameCompat(obj.platform))
                 userConfig = struct();
                 userConfig.CONFIG_ROOT = configs.CONFIG_ROOT;
                 return; % No SLEAP-specific config found
             end
             userConfig = configs.tracking_providers.(obj.platformVarnameCompat(obj.platform));
             userConfig.CONFIG_ROOT = configs.CONFIG_ROOT;
-            obj.userConfig = userConfig;
 
             defaults = struct();
             if isfield(configs, 'defaults')
@@ -124,12 +121,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 obj.coordsUnit = "px";
             end
 
-            ymlroot = configs.CONFIG_ROOT;
-            if isfield(userConfig, 'config_file')
-                obj.sleapConfigFile = utils.path.canonicalize(fullfile(ymlroot, userConfig.config_file));
-            else
-                obj.sleapConfigFile = '';
-            end
+            obj.userConfig = userConfig;
         end
 
 
@@ -140,26 +132,22 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 kvargs.Options (1,1) struct = struct(); %#ok<INUSA>
             end
 
-            [parent, thisCSVname, ~] = fileparts(trackingDataFilePath);
-                thisCSVname = char(thisCSVname);
-                % This csv file name can be split at the last "SLEAP_" occurrence to get the video file name
-                sleapIdx = strfind(thisCSVname, 'SLEAP_');
-                if isempty(sleapIdx)
-                    videoFileName = thisCSVname;
-                else
-                    videoFileName = thisCSVname(1:sleapIdx(end)-1);
+            % SLEAP tracking file are saved in videoFolder/sleap/<trialName>.predictions.slp
+            % So we can just go up one folder and look for the video file with the same name as the tracking data file (without the .predictions.slp suffix)
+            [trackingFolder, trackingFileName, ~] = fileparts(trackingDataFilePath);
+            videoFileName = strrep(trackingFileName, '.predictions', '');
+            
+            % look in the parent folder to find the video file with matching name and known video extensions, grab the actual extension of the file
+            videoExtensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpg', '.mpeg', '.3gp'};
+            mediaPath = "";
+            for i = 1:length(videoExtensions)
+                candidatePath = fullfile(fileparts(trackingFolder), strcat(videoFileName, videoExtensions{i}));
+                if isfile(candidatePath)
+                    mediaPath = candidatePath;
+                    break;
                 end
-                % look in the csv ../ folder to find the video file with matching name and known video extensions, grab the actual extension of the file
-                videoExtensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpg', '.mpeg', '.3gp'};
-                mediaPath = "";
-                for i = 1:length(videoExtensions)
-                    candidatePath = fullfile(fileparts(parent), strcat(videoFileName, videoExtensions{i}));
-                    if isfile(candidatePath)
-                        mediaPath = candidatePath;
-                        break;
-                    end
-                end
-                mediaPath = char(mediaPath);
+            end
+            mediaPath = char(mediaPath);
         end
 
 
@@ -170,6 +158,8 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             arguments (Repeating)
                 varargin
             end
+
+            obj.platform; %#ok<VUNUS>
 
             % Find the main app either via the global handle or by searching for the figure
             if exist('PlacePreferenceGUI', 'var') && ...
@@ -197,15 +187,14 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 kvargs.Options (1,1) struct = struct();
             end
 
-            defaultOptions = struct(...
-                'CSV', true, ...
-                'CreateLabeledVideo', false, ...
-                'ConfigFile', obj.sleapConfigFile ...
-            );
-            for f = fieldnames(kvargs.Options)'
-                defaultOptions.(f{1}) = kvargs.Options.(f{1});
-            end
-            kvargs.Options = defaultOptions;
+            % defaultOptions = struct( ...
+            %     'CSV', true, ...
+            %     'CreateLabeledVideo', false ...
+            % );
+            % for f = fieldnames(kvargs.Options)'
+            %     defaultOptions.(f{1}) = kvargs.Options.(f{1});
+            % end
+            % kvargs.Options = defaultOptions;
 
             videoFiles = cellstr(videoFiles);
             % Check that all input videoFiles have the same extension
@@ -224,47 +213,26 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 fig = findall(0, 'Type', 'figure', 'Name', 'PlacePref Data Analysis');
             end
 
-
-            % Make sure that the SLEAP config file is set
-            cfg = obj.sleapConfigFile;
-            cfg = char(cfg);
-            if isempty(cfg) || ~isfile(cfg)
-                if ~isempty(kvargs.Options.ConfigFile) && isfile(kvargs.Options.ConfigFile)
-                    cfg = kvargs.Options.ConfigFile;
-                end
-            end
-            if isempty(cfg) || ~isfile(cfg)
-                % Prompt user to select SLEAP config file: notif with Select SLEAP Config YAML or Cancel
-                if ~isempty(fig) && isvalid(fig)
-                    selection = uiconfirm(fig, 'Please select the SLEAP configuration YAML file to proceed with tracking.', ...
-                        'Select SLEAP Config File', ...
-                        'Options', {'Select File', 'Cancel'}, ...
-                        'Icon', 'warning', ...
-                        'DefaultOption', 1, ...
-                        'CancelOption', 2);
+            try
+                modelPaths = validateSLEAPModelPaths(obj.userConfig);
+            catch ME
+                texErrorMessage = strrep(ME.message, '_', '\_');
+                msg = sprintf(['\\fontname{Helvetica}%s\n\n\\fontname{Helvetica}Please update the SLEAP ' ...
+                    '{\\bf model\\_paths} entries in your config YAML file before running tracking.'], ...
+                    texErrorMessage);
+                if ~isempty(fig) && all(isvalid(fig))
+                    uialert(fig(1), msg, 'Invalid SLEAP Model Paths', ...
+                        'Icon', 'warning', 'Interpreter', 'tex');
                 else
-                    selection = questdlg('Please select the SLEAP configuration YAML file to proceed with tracking.', ...
-                        'Select SLEAP Config File', ...
-                        'Select File', 'Cancel', 'Select File');
+                    warningDialog = warndlg(msg, 'Invalid SLEAP Model Paths', 'modal');
+                    warningText = findall(warningDialog, 'Type', 'text');
+                    set(warningText, 'Interpreter', 'tex', 'FontName', 'Helvetica');
                 end
-                    if ~strcmp(selection, 'Select File')
-                        status = false;
-                        output = '';
-                        warning('ui:trackingPlatforms:SLEAP:NoConfigFile', 'No SLEAP configuration file selected. Tracking aborted.');
-                        return;
-                    end
-                [file, path] = uigetfile({'*.yaml;*.yml', 'YAML Files (*.yaml, *.yml)'}, 'Select SLEAP Configuration File');
-                if isequal(file, 0) || isequal(path, 0)
-                    status = false;
-                    output = '';
-                    warning('ui:trackingPlatforms:SLEAP:NoConfigFile', 'No SLEAP configuration file selected. Tracking aborted.');
-                    return;
-                end
-                cfg = fullfile(path, file);
+                status = false;
+                output = '';
+                warning('io:sleap:runTracking:InvalidModelPaths', 'SLEAP model paths are invalid. Please check your config YAML file.\n\n%s', getReport(ME, 'extended'));
+                return;
             end
-
-            sleapConfig = utils.path.canonicalize(cfg);
-            obj.sleapConfigFile = sleapConfig;
 
             prgdlg = gobjects(0);
             if ~isempty(fig) && isvalid(fig)
@@ -283,12 +251,13 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 end
             end
 
-            [status, elapsedTime, output] = io.sleap.runSLEAP( ...
-                sleapConfig, ...
+            [status, ~, output] = io.sleap.runSLEAP( ...
+                modelPaths, ...
                 videoFiles, ...
                 uniqueExts(2:end), ... % videoType without the dot
                 'CSV', kvargs.Options.CSV, ...
                 'CreateLabeledVideo', kvargs.Options.CreateLabeledVideo, ...
+                'Options', obj.userConfig, ...
                 'UpdateCallbackFcn', @updateCallback ...
             );
 
@@ -370,7 +339,6 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
 
             vidObj_temp = VideoReader(header('Video file'));
             vidWidth = vidObj_temp.Width;
-            vidHeight = vidObj_temp.Height;
             pixelSize = ImgWidthFOV_cm / vidWidth; % cm/pixel
             FPS = vidObj_temp.FrameRate;
 
@@ -380,7 +348,6 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             bodyparts = sleapDataHeader.bodyparts;
-            coordLabels = sleapDataHeader.coords; % e.g., {'x', 'y', 'likelihood'}
 
             % In datatable, the bodyparts are flatten as {{bodypart} |> {coordLabel}}, e.g., {'Center |> x', 'Center | y', 'Center | likelihood', ...}
             % We need to extract the x and y coordinates for each bodypart and store them in coords 3D matrix
@@ -418,4 +385,53 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
         end
 
     end
+end
+
+
+function modelPaths = validateSLEAPModelPaths(userConfig)
+    if ~isstruct(userConfig) || ~isfield(userConfig, 'model_paths') || isempty(userConfig.model_paths)
+        error('ui:trackingPlatforms:SLEAP:MissingModelPath', ...
+            ['For SLEAP tracking, ensure a SLEAP entry exists in the ' ...
+            'tracking_providers field of your config YAML file. Next, make sure ' ...
+            'the model_paths field for SLEAP points to the correct SLEAP model folder(s).']);
+    end
+
+    modelPaths = string(userConfig.model_paths);
+    modelPaths = modelPaths(:);
+    modelPaths = modelPaths(strlength(strtrim(modelPaths)) > 0);
+    if isempty(modelPaths)
+        error('ui:trackingPlatforms:SLEAP:MissingModelPath', ...
+            ['For SLEAP tracking, ensure a SLEAP entry exists in the ' ...
+            'tracking_providers field of your config YAML file. Next, make sure ' ...
+            'the model_paths field for SLEAP points to the correct SLEAP model folder(s).']);
+    end
+
+    configRoot = "";
+    if isfield(userConfig, 'CONFIG_ROOT') && ~isempty(userConfig.CONFIG_ROOT)
+        configRoot = string(userConfig.CONFIG_ROOT);
+    end
+
+    resolvedPaths = strings(size(modelPaths));
+    for i = 1:numel(modelPaths)
+        modelPath = modelPaths(i);
+        if ~isfolder(modelPath) && strlength(configRoot) > 0
+            modelPath = fullfile(configRoot, modelPath);
+        end
+        if ~isfolder(modelPath)
+            error('ui:trackingPlatforms:SLEAP:InvalidModelPath', ...
+                'SLEAP model_paths entry is not a valid folder: %s', modelPaths(i));
+        end
+
+        files = dir(fullfile(modelPath, '*'));
+        fileNames = string({files(~[files.isdir]).name});
+        hasConfig = any(endsWith(lower(fileNames), [".yml", ".yaml"]));
+        hasModel = any(endsWith(lower(fileNames), [".ckpt", ".trt", ".onnx"]));
+        if ~hasConfig || ~hasModel
+            error('ui:trackingPlatforms:SLEAP:InvalidModelPath', ...
+                ['SLEAP model folder "%s" must contain at least one .yml or .yaml ' ...
+                'file and at least one .ckpt, .trt, or .onnx file.'], modelPath);
+        end
+        resolvedPaths(i) = string(utils.path.canonicalize(modelPath));
+    end
+    modelPaths = cellstr(resolvedPaths);
 end
