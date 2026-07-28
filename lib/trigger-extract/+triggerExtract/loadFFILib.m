@@ -11,7 +11,12 @@ function loadFFILib(libName, options)
 
     libName = char(libName);
     options.relLibPath = char(options.relLibPath);
-    libFullPath = fullfile(options.ffiProjRoot, options.relLibPath, [libName, '.', getLibExtension()]);
+    if ispc
+        libFileName = libName;
+    else
+        libFileName = ['lib', libName];
+    end
+    libFullPath = fullfile(options.ffiProjRoot, options.relLibPath, [libFileName, '.', getLibExtension()]);
     if ~isfile(libFullPath)
         error('Library file not found: %s', libFullPath);
     end
