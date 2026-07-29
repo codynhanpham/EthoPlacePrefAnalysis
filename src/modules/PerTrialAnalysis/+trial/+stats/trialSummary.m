@@ -1,5 +1,5 @@
-function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, masterMetadataTable, kvargs)
-    %%TRIALSUMMARY Align EthoVision data to stimulus events and summarize trial information
+function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir, masterMetadataTable, kvargs)
+    %%TRIALSUMMARY Align tracking data to stimulus events and summarize trial information
     %
     %   summary = trial.stats.trialSummary(ethovisionXlsx, stimuliDir, masterMetadataTable)
     %
@@ -45,19 +45,23 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
     %   See also: io.ethovision.alignEthovisionRawToStim, io.metadata.loadMasterMetadata, io.config.loadConfigYaml, io.stimuli.extractMetadata
 
     arguments
-        ethovisionXlsx {mustBeFile}
+        trackingDataFile {mustBeFile}
         stimuliDir {mustBeFolder}
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct() % The full configuration struct loaded with io.config.loadConfigYaml()
+        kvargs.TrackingProvider (1,1) {validator.mustBeTrackingProviderOrEmpty} = []
         kvargs.PreStimDurationSec (1,1) {mustBeNonnegative, mustBeFinite} = 480 % The duration in seconds to include before the first stimulus onset in the trial summary. Default is 480s (8 minutes) to cover typical pre-stimulus periods in place preference experiments. Set this to 0 to only include frames from the first stimulus onset onward. 'Trial time' for pre-stimulus frames will be negative, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
         kvargs.PostStimDurationSec (1,1) {mustBeNonnegative, mustBeFinite} = 0 % The duration in seconds to include after the last stimulus offset in the trial summary. Default is 0s. 'Trial time' for post-stimulus frames will be positive, relative to time 0s at stimulus onset. If this is outside the range of the recording, missing timepoints data will be filled with NaNs.
     end
 
-    [header, datatable, ~, stimulusFrameRange, animalMetadata, stimuli] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
-        MasterMetadataTable=masterMetadataTable, ...
-        Config=kvargs.Config ...
-    );
+    if isempty(kvargs.TrackingProvider)
+        error('trial:stats:trialSummary:MissingTrackingProvider', ...
+            'TrackingProvider must be provided for trial alignment.');
+    end
+    [header, datatable, ~, stimulusFrameRange, animalMetadata, stimuli] = ...
+        kvargs.TrackingProvider.alignTrackingToStim(trackingDataFile, stimuliDir, ...
+        Options=struct('MasterMetadataTable', masterMetadataTable, 'Config', kvargs.Config));
 
     stimStartFrame = stimulusFrameRange(1);
     stimEndFrame = stimulusFrameRange(2);
@@ -252,7 +256,7 @@ function [summary, centerpointData] = trialSummary(ethovisionXlsx, stimuliDir, m
         end
     end
 
-    videoFilePath = io.ethovision.mediaPathFromXlsx(ethovisionXlsx);
+    videoFilePath = kvargs.TrackingProvider.mediaPathFromTrackingData(trackingDataFile);
     if ~isfile(videoFilePath)
         error("Video file not found: %s.\nMake sure your folder structure is exactly how EthoVision exported it, with an 'Export Files' folder and a 'Media Files' folder.", videoFilePath);
     end

@@ -75,6 +75,28 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
 
 
     methods
+        function supported = supportsCapability(~, capability)
+            arguments
+                ~
+                capability {mustBeTextScalar}
+            end
+
+            supported = ismember(lower(string(capability)), "__unsupported__");
+        end
+
+        function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, kvargs)
+            arguments
+                obj (1,1) ui.trackingPlatforms.platforms.DeepLabCut
+                trackingDataFilePath %#ok<INUSA>
+                stimuliDir %#ok<INUSA>
+                kvargs.Options (1,1) struct = struct() %#ok<INUSA>
+            end
+
+            obj.requireCapability("alignTrackingToStim");
+            header = []; datatable = table(); units = [];
+            stimulusFrameRange = []; animalMetadata = struct(); stimuli = struct();
+        end
+
         function userConfig = loadConfig(obj, configs)
             %LOADCONFIG Load user configuration from the global config YAML file path or already loaded config struct
             arguments
@@ -174,6 +196,7 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
                 varargin
             end
 
+            obj.platform;
             varargout{1} = {};
 
             % Find the main app either via the global handle or by searching for the figure
@@ -201,6 +224,8 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
                 videoFiles (1,:) {mustBeFile}
                 kvargs.Options (1,1) struct = struct();
             end
+
+            obj.platform;
 
             defaultOptions = struct(...
                 'CSV', true, ...
@@ -288,7 +313,7 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
                 end
             end
 
-            [status, elapsedTime, output] = io.dlc.runDLC( ...
+            [status, ~, output] = io.dlc.runDLC( ...
                 dlcConfig, ...
                 videoFiles, ...
                 uniqueExts(2:end), ... % videoType without the dot
@@ -375,7 +400,6 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
 
             vidObj_temp = VideoReader(header('Video file'));
             vidWidth = vidObj_temp.Width;
-            vidHeight = vidObj_temp.Height;
             pixelSize = ImgWidthFOV_cm / vidWidth; % cm/pixel
             FPS = vidObj_temp.FrameRate;
 
@@ -385,7 +409,6 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             end
 
             bodyparts = dlcDataHeader.bodyparts;
-            coordLabels = dlcDataHeader.coords; % e.g., {'x', 'y', 'likelihood'}
 
             % In datatable, the bodyparts are flatten as {{bodypart} |> {coordLabel}}, e.g., {'Center |> x', 'Center | y', 'Center | likelihood', ...}
             % We need to extract the x and y coordinates for each bodypart and store them in coords 3D matrix

@@ -76,6 +76,15 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
 
 
     methods
+        function supported = supportsCapability(~, capability)
+            arguments
+                ~
+                capability {mustBeTextScalar}
+            end
+
+            supported = ismember(lower(string(capability)), ["aligntrackingtostim", "preprocess"]);
+        end
+
         function userConfig = loadConfig(obj, configs)
             %LOADCONFIG Load user configuration from the global config YAML file path or already loaded config struct
             arguments
@@ -152,10 +161,36 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             validateattributes(kvargs.Options.Header, {'dictionary'}, {'scalar'});
             validateattributes(kvargs.Options.ExpectedNumVariables, {'numeric'}, {'scalar'});
 
+            obj.platform; %#ok<VUNUS>
 
             mediaPath = io.ethovision.mediaPathFromXlsx(trackingDataFilePath, ...
                 Header=kvargs.Options.Header, ...
                 ExpectedNumVariables=kvargs.Options.ExpectedNumVariables);
+        end
+
+
+        function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, kvargs)
+            arguments
+                obj (1,1) ui.trackingPlatforms.platforms.EthoVision
+                trackingDataFilePath {mustBeFile}
+                stimuliDir {mustBeFolder}
+                kvargs.Options (1,1) struct = struct()
+            end
+
+            defaultOptions = struct( ...
+                'MasterMetadataTable', table(), ...
+                'Config', struct() ...
+            );
+            for field = fieldnames(kvargs.Options)'
+                defaultOptions.(field{1}) = kvargs.Options.(field{1});
+            end
+            kvargs.Options = defaultOptions;
+
+            obj.platform; %#ok<VUNUS>
+            [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = ...
+                io.ethovision.alignEthovisionRawToStim(trackingDataFilePath, stimuliDir, ...
+                MasterMetadataTable=kvargs.Options.MasterMetadataTable, ...
+                Config=kvargs.Options.Config);
         end
 
 
@@ -222,6 +257,11 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
                 inputData
                 kvargs.Options (1,1) struct = struct();
             end
+
+            obj.platform;
+            inputData; %#ok<VUNUS>
+            kvargs.Options;
+            status = false;
 
             msg = sprintf("To perform tracking on the EthoVision platform, please use the EthoVision software directly.");
             

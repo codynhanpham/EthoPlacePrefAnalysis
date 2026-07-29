@@ -37,6 +37,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct()
+        kvargs.TrackingProvider (1,1) {validator.mustBeTrackingProviderOrEmpty} = []
         kvargs.PreStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 480;
         kvargs.PostStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 0;
         kvargs.TargetFPS (1,1) double {mustBePositive, mustBeFinite} = 30;
@@ -47,6 +48,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         % pchip is a good compromise that avoids overshoot, but less smooth and flatten missing data points more aggressively (though, for place preference, this may be desirable)
         kvargs.Interpolation {mustBeMember(kvargs.Interpolation, {'linear', 'nearest', 'spline', 'makima', 'pchip', 'cubic'}), mustBeTextScalar} = 'pchip';
         kvargs.UIFigure {mustBeUIFigureOrEmpty} = gobjects(0);
+    end
+
+    if isempty(kvargs.TrackingProvider)
+        error('population:stats:populationPositionOverTime:MissingTrackingProvider', ...
+            'TrackingProvider must be provided for population analysis.');
     end
 
     ntrials = length(ethovisionTrials);
@@ -107,6 +113,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         
         [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, ...
             Config=kvargs.Config, ...
+            TrackingProvider=kvargs.TrackingProvider, ...
             PreStimDurationSec=kvargs.PreStimDurationSec, ...
             PostStimDurationSec=kvargs.PostStimDurationSec);
         % Regardless of what is in config for refmode, we should prioritize what was used in trialSummary by inferring from the size() of centerpointData.midline_x_px and midline_x_px

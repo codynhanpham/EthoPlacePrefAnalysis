@@ -24,7 +24,13 @@ function summaryTable = populationSummary(ethovisionTrials, stimuliDir, masterMe
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct()
+        kvargs.TrackingProvider (1,1) {validator.mustBeTrackingProviderOrEmpty} = []
         kvargs.UIFigure {mustBeUIFigureOrEmpty} = gobjects(0);
+    end
+
+    if isempty(kvargs.TrackingProvider)
+        error('population:stats:populationSummary:MissingTrackingProvider', ...
+            'TrackingProvider must be provided for population analysis.');
     end
 
     ntrials = length(ethovisionTrials);
@@ -61,7 +67,8 @@ function summaryTable = populationSummary(ethovisionTrials, stimuliDir, masterMe
             drawnow;
         end
 
-        trialSummary = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, Config=kvargs.Config);
+        trialSummary = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, ...
+            Config=kvargs.Config, TrackingProvider=kvargs.TrackingProvider);
         animalMeta = trialSummary.animalMetadata;
         animalMatchedStim = trialSummary.animalMatchedStim;
         stimspeakerMatched = trialSummary.stimspeakerMatched;

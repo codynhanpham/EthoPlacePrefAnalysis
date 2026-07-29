@@ -14,7 +14,7 @@ classdef (Abstract) TrackingProvider < handle
 
         userConfig % User configuration specific to the tracking platform and/or experiment. This is usually a scalar struct or object.
 
-        coordsUnit (1,1) double % Unit of the tracked coordinates, e.g., 'pixels', 'cm', etc.
+        coordsUnit {mustBeTextScalar} % Unit of the tracked coordinates, e.g., 'pixels', 'cm', etc.
         px2cmFactor (1,1) double % Conversion factor from pixels to centimeters
 
     end
@@ -356,6 +356,32 @@ classdef (Abstract) TrackingProvider < handle
 
         end
 
+        function supported = supportsCapability(~, capability)
+            %%SUPPORTSCAPABILITY Report whether a provider supports an optional operation.
+            %   Subclasses should override this method when they implement a
+            %   capability such as stimulus alignment or preprocessing.
+            arguments
+                ~
+                capability {mustBeTextScalar} %#ok<INUSA>
+            end
+
+            supported = false;
+        end
+
+        function requireCapability(obj, capability)
+            %%REQUIRECAPABILITY Raise a consistent error for unsupported operations.
+            arguments
+                obj (1,1) ui.trackingPlatforms.TrackingProvider
+                capability {mustBeTextScalar}
+            end
+
+            if ~obj.supportsCapability(capability)
+                error('ui:trackingPlatforms:TrackingProvider:UnsupportedCapability', ...
+                    'Tracking provider "%s" does not support capability "%s".', ...
+                    obj.platform, capability);
+            end
+        end
+
     end
 
 
@@ -468,6 +494,14 @@ classdef (Abstract) TrackingProvider < handle
         %       + 'processed' - (1xN) cell array of processed media file paths
         %
         % If there is no pre-processing needed/implemented for a platform, return an empty {} cell with warning notice logged to console and ui message box
+
+
+
+        [header, data, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, Options);
+        %%ALIGNTRACKINGTOSTIM Align tracking data to stimulus events for analysis
+        %   The initial contract preserves the six outputs of the legacy
+        %   EthoVision alignment function. Options must contain at least
+        %   MasterMetadataTable and Config.
 
 
 

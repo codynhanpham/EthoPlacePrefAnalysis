@@ -71,6 +71,28 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
 
 
     methods
+        function supported = supportsCapability(~, capability)
+            arguments
+                ~
+                capability {mustBeTextScalar}
+            end
+
+            supported = ismember(lower(string(capability)), "__unsupported__");
+        end
+
+        function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, kvargs)
+            arguments
+                obj (1,1) ui.trackingPlatforms.platforms.SLEAP
+                trackingDataFilePath %#ok<INUSA>
+                stimuliDir %#ok<INUSA>
+                kvargs.Options (1,1) struct = struct() %#ok<INUSA>
+            end
+
+            obj.requireCapability("alignTrackingToStim");
+            header = []; datatable = table(); units = [];
+            stimulusFrameRange = []; animalMetadata = struct(); stimuli = struct();
+        end
+
         function userConfig = loadConfig(obj, configs)
             %LOADCONFIG Load user configuration from the global config YAML file path or already loaded config struct
             arguments
@@ -159,7 +181,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 varargin
             end
 
-            obj.platform; %#ok<VUNUS>
+            obj.platform;
 
             % Find the main app either via the global handle or by searching for the figure
             if exist('PlacePreferenceGUI', 'var') && ...

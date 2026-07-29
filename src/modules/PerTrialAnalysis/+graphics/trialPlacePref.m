@@ -1,4 +1,4 @@
-function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable, kvargs)
+function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTable, kvargs)
     %   Assume default parameters
     %
     %   Inputs:
@@ -14,11 +14,17 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     %       d - Heatmap data
 
     arguments
-        ethovisionXlsx {mustBeFile}
+        trackingDataFile {mustBeFile}
         stimuliDir {mustBeFolder}
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct()
+        kvargs.TrackingProvider (1,1) {validator.mustBeTrackingProviderOrEmpty} = []
+    end
+
+    if isempty(kvargs.TrackingProvider)
+        error('graphics:trialPlacePref:MissingTrackingProvider', ...
+            'TrackingProvider must be provided for trial alignment.');
     end
 
     configs = kvargs.Config;
@@ -38,10 +44,9 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
         CenterOffset_px = cell2mat(CenterOffset_px);
     end
 
-    [header, datatable, units, stimulusFrameRange, animalMetadata] = io.ethovision.alignEthovisionRawToStim(ethovisionXlsx, stimuliDir, ...
-        MasterMetadataTable=masterMetadataTable, ...
-        Config=kvargs.Config ...
-    );
+    [header, datatable, ~, stimulusFrameRange, animalMetadata] = ...
+        kvargs.TrackingProvider.alignTrackingToStim(trackingDataFile, stimuliDir, ...
+        Options=struct('MasterMetadataTable', masterMetadataTable, 'Config', kvargs.Config));
 
     arenaName = header("Arena name");
     % Check for configs overrides for this arena
@@ -72,7 +77,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     end
 
     stimPeriodTable = datatable(stimulusFrameRange(1):stimulusFrameRange(2), :);
-    videoFilePath = io.ethovision.mediaPathFromXlsx(ethovisionXlsx);
+    videoFilePath = kvargs.TrackingProvider.mediaPathFromTrackingData(trackingDataFile);
 
     if ~isfile(videoFilePath)
         error("Video file not found: %s.\nMake sure your folder structure is exactly how EthoVision exported it, with an 'Export Files' folder and a 'Media Files' folder.", videoFilePath);
@@ -322,6 +327,7 @@ function [f,d] = trialPlacePref(ethovisionXlsx, stimuliDir, masterMetadataTable,
     % (legacy .midpoint.csv/.midline.csv are auto-migrated) depending on
     % config's defaults.distance2refmode.
     refmode = 'line'; % default
+    refmode = refmode; %#ok<NASGU>
     fromConfigKey = {'defaults', 'distance2refmode'};
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         refmode = getfield(configs, fromConfigKey{:});

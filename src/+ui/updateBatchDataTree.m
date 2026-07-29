@@ -173,14 +173,14 @@ for i = 1:length(newExperiments)
             tree.CheckedNodes = [tree.CheckedNodes; expNode];
         end
 
-        hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree);
+        hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree, kvargs.TrackingProvider, masterMetadata);
         % Remove experiment node if it has no valid trials
         if ~hasValidTrials
             delete(expNode);
         end
     else
         % Update existing experiment node's trials
-        hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree);
+        hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree, kvargs.TrackingProvider, masterMetadata);
         % Remove experiment node if it has no valid trials
         if ~hasValidTrials
             delete(expNode);
@@ -230,16 +230,24 @@ for i = 1:length(nodes)
 end
 end
 
-function hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree)
+function hasValidTrials = updateTrialsForExperiment(expNode, expPath, whitelist, doFilter, tree, trackingProvider, masterMetadata)
 %%UPDATETRIALSFOREXPERIMENT Update trials for a specific experiment node
 %   Returns true if the experiment has valid trials, false otherwise
 
 if nargin < 5
     tree = [];
 end
+if nargin < 6 || isempty(trackingProvider)
+    error('ui:updateBatchDataTree:MissingTrackingProvider', ...
+        'TrackingProvider must be provided to update trial nodes.');
+end
+if nargin < 7
+    masterMetadata = table();
+end
 
 try
-    [newTrialNames, newTrialInfo] = io.ethovision.filterTrials(expPath);
+    [newTrialNames, newTrialInfo] = trackingProvider.filterTrials(expPath, ...
+        Options=struct('MetadataTable', masterMetadata));
     % Filter out trials that are multi-arena exports
     singleArenaIdx = arrayfun(@(t) isfield(t, 'multipleArena') && ~t.multipleArena, newTrialInfo);
     newTrialNames = newTrialNames(singleArenaIdx);
