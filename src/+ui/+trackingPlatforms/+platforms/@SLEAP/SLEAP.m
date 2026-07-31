@@ -209,30 +209,50 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 kvargs.Options (1,1) struct = struct();
             end
 
-            % defaultOptions = struct( ...
-            %     'CSV', true, ...
-            %     'CreateLabeledVideo', false ...
-            % );
-            % for f = fieldnames(kvargs.Options)'
-            %     defaultOptions.(f{1}) = kvargs.Options.(f{1});
-            % end
-            % kvargs.Options = defaultOptions;
-
-            videoFiles = cellstr(videoFiles);
-            % Check that all input videoFiles have the same extension
-            [~, ~, exts] = cellfun(@fileparts, videoFiles, 'UniformOutput', false);
-            uniqueExts = unique(exts);
-            if ~isscalar(uniqueExts)
-                error('All input video files must have the same extension.');
+            defaultOptions = struct( ...
+                'MainFigureHandle', gobjects(0), ...
+                'ProgressDialogHandle', gobjects(0) ...
+            );
+            for f = fieldnames(kvargs.Options)'
+                defaultOptions.(f{1}) = kvargs.Options.(f{1});
             end
-            uniqueExts = char(uniqueExts);
+            kvargs.Options = defaultOptions;
 
+            % Validate 'ProgressDialogHandle' option, either empty, or a valid
+            % uiprogressdlg handle of class 'matlab.ui.dialog.ProgressDialog'
+            % if not valid, set to empty
+            if ~isempty(kvargs.Options.ProgressDialogHandle) && ...
+                    ~(isvalid(kvargs.Options.ProgressDialogHandle) && ...
+                    isa(kvargs.Options.ProgressDialogHandle, 'matlab.ui.dialog.ProgressDialog'))
+                warning('ui:trackingPlatforms:SLEAP:runTracking:InvalidProgressDialogHandle', ...
+                    'The provided ProgressDialogHandle is not a valid uiprogressdlg handle. It will be ignored.');
+                kvargs.Options.ProgressDialogHandle = gobjects(0);
+            end
+            % The provided MainFigureHandle must exist, otherwise, set to empty
+            if ~isempty(kvargs.Options.MainFigureHandle) && ...
+                    ~(isvalid(kvargs.Options.MainFigureHandle) && ...
+                    isa(kvargs.Options.MainFigureHandle, 'matlab.ui.Figure'))
+                warning('ui:trackingPlatforms:SLEAP:runTracking:InvalidMainFigureHandle', ...
+                    'The provided MainFigureHandle is not a valid uifigure handle. It will be ignored.');
+                kvargs.Options.MainFigureHandle = gobjects(0);
+            end
+            
+            % If the MainFigureHandle is empty, try to find the main app figure by heuristics
             % Find the main app either via the global handle or by searching for the figure
-            if exist('PlacePreferenceGUI', 'var') && ...
-                    isa(PlacePreferenceGUI, 'PlacePrefDataGUI_main')
-                fig = PlacePreferenceGUI.Figure;
+            if ~isempty(kvargs.Options.MainFigureHandle) && isvalid(kvargs.Options.MainFigureHandle)
+                fig = kvargs.Options.MainFigureHandle;
             else
-                fig = findall(0, 'Type', 'figure', 'Name', 'PlacePref Data Analysis');
+                if exist('PlacePreferenceGUI', 'var') && ...
+                        isa(PlacePreferenceGUI, 'PlacePrefDataGUI_main')
+                    fig = PlacePreferenceGUI.Figure;
+                else
+                    fig = findall(0, 'Type', 'figure', 'Name', 'PlacePref Data Analysis');
+                    if isempty(fig) || ~all(isvalid(fig))
+                        fig = gobjects(0);
+                    else
+                        fig = fig(1); % Take the first valid figure found
+                    end
+                end
             end
 
             try
@@ -242,8 +262,8 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 msg = sprintf(['\\fontname{Helvetica}%s\n\n\\fontname{Helvetica}Please update the SLEAP ' ...
                     '{\\bf model\\_paths} entries in your config YAML file before running tracking.'], ...
                     texErrorMessage);
-                if ~isempty(fig) && all(isvalid(fig))
-                    uialert(fig(1), msg, 'Invalid SLEAP Model Paths', ...
+                if ~isempty(fig) && isvalid(fig)
+                    uialert(fig, msg, 'Invalid SLEAP Model Paths', ...
                         'Icon', 'warning', 'Interpreter', 'tex');
                 else
                     warningDialog = warndlg(msg, 'Invalid SLEAP Model Paths', 'modal');
@@ -256,31 +276,68 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 return;
             end
 
-            prgdlg = gobjects(0);
-            if ~isempty(fig) && isvalid(fig)
-                prgdlg = uiprogressdlg(fig,'Title', 'Running SLEAP Tracking', ...
-                    'Message', 'Initializing...', ...
-                    'Cancelable', false, 'Indeterminate', 'on');
-                cleanupObj = onCleanup(@() close(prgdlg));
-                drawnow;
-            end
+            videoFiles = cellstr(videoFiles);
 
-            function updateCallback(line)
-                if ~isempty(prgdlg) && isvalid(prgdlg)
-                    prgdlg.Message = line;
+            % Create a progress dialog if a valid handle is not provided,
+            % otherwise, use the provided handle to update the progress message
+            % ProgressDialog only applies when fig is a valid uifigure handle
+            
+            if ~isempty(kvargs.Options.ProgressDialogHandle) && isvalid(kvargs.Options.ProgressDialogHandle)
+                prgdlg = kvargs.Options.ProgressDialogHandle;
+            else
+                if ~isempty(fig) && isvalid(fig)
+                    prgdlg = uiprogressdlg(fig, 'Title', 'SLEAPing...', ...
+                        'Message', 'Initializing...', ...
+                        'Cancelable', false, 'Indeterminate', 'on');
+                        clenaupObj = onCleanup(@() delete(prgdlg));
                 else
-                    fprintf('%s\n', line);
+                    prgdlg = [];
                 end
             end
 
-            [status, ~, output] = io.sleap.runSLEAP( ...
-                modelPaths, ...
+
+            % Ensure io.sleap.available() first,
+            % If not, we can handle io.sleap.install() here with Verbose and progress
+            % Set prg to "Checking SLEAP installation functionality..." and then call io.sleap.available()
+            prgdlg.Message = 'Checking SLEAP installation functionality...';
+            prgdlg.Title = 'Ensure SLEAP...';
+            [isAvailable, ~] = io.sleap.available();
+            if ~isAvailable
+                prgdlg.Message = 'SLEAP is not available. Attempting to install SLEAP. See the MATLAB Command Window for details...';
+                prgdlg.Title = 'Installing SLEAP...';
+                try
+                    [uvpath, sleapdir] = io.sleap.install('Verbose', true);
+                    fprintf('SLEAP installation completed successfully.\n\nUV path: %s\nSLEAP directory: %s\n\n', uvpath, sleapdir);
+                catch ME
+                    delete(prgdlg);
+                    texErrorMessage = strrep(ME.message, '_', '\_');
+                    msg = sprintf(['\\fontname{Helvetica}%s\n\n\\fontname{Helvetica}Please ensure that SLEAP is installed via io.sleap.install() and available in your MATLAB environment before running tracking.'], ...
+                        texErrorMessage);
+                    if ~isempty(fig) && isvalid(fig)
+                        uialert(fig, msg, 'SLEAP Installation Failed', ...
+                            'Icon', 'error', 'Interpreter', 'tex');
+                    else
+                        error('io:sleap:runTracking:SLEAPInstallationFailed', ...
+                            'SLEAP installation failed. Please ensure that SLEAP is installed via io.sleap.install() and available in your MATLAB environment before running tracking.\n\n%s', getReport(ME, 'extended'));
+                    end
+                    status = false;
+                    output = '';
+                    return;
+                end
+            end
+            % At this point, SLEAP is available
+            % We can get the canonical path to the SLEAP directory and the uv path for reporting
+            [uvpath, sleapdir] = io.sleap.install(); % no-op if already installed, only to get the paths
+
+            % Report uv path and sleapdir to prgdlg.Message
+            prgdlg.Message = sprintf('SLEAP is available.\n\nUV path: %s\n\nSLEAP directory: %s\n\n\nRunning SLEAP tracking on %d video(s)...', uvpath, sleapdir, numel(videoFiles));
+            prgdlg.Title = 'Running SLEAP Tracking...';
+
+            [status, ~, output] = io.sleap.predict( ...
                 videoFiles, ...
-                uniqueExts(2:end), ... % videoType without the dot
-                'CSV', kvargs.Options.CSV, ...
-                'CreateLabeledVideo', kvargs.Options.CreateLabeledVideo, ...
-                'Options', obj.userConfig, ...
-                'UpdateCallbackFcn', @updateCallback ...
+                modelPaths, ...
+                'SleapUserConfig', obj.userConfig, ...
+                'ProgressDialogHandle', prgdlg ...
             );
 
             close(prgdlg);

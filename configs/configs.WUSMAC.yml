@@ -94,7 +94,32 @@ tracking_providers:
             assign_to: "right"
         neutral_zones:
           - name: "Hallway 2"
+  
+  SLEAP:
+    model_paths:
+      - 
+    
+    runtime: tensorrt
+    device: auto
+    batch_size: 16
+    tracking: false
+    max_instances: 1
 
+    additional_args:
 
-  DeepLabCut:
-    config_file: "../../DLCDetectionModel/config.yaml"
+    default_midpoint_xoffset_px: 0
+
+    default_camera_imgwidth_fov_cm: 77.4
+
+    arena:
+      - name: "Arena 1"
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4
+
+      - name: "Lily Booth"
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4
+      
+      - name: "Rain Booth"
+        midpoint_xoffset_px: 0
+        camera_imgwidth_fov_cm: 77.4

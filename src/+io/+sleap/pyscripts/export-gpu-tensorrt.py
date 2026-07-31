@@ -4,18 +4,17 @@ This module mirrors the SLEAP-NN export CLI, but calls the Python API
 directly so you can export a centroid model + centered-instance model as
 both ONNX and TensorRT in one function.
 
-This is a temporary workaround for SLEAP-NN >=0.2.0 and <0.3.0
+Main improvement is to embed the ability to accept RGB input and convert it to grayscale inside the model, which is not available in the CLI. This is useful for exporting models that were trained on grayscale images but need to be used on RGB images without preprocessing.
 
-The main fix for the TensorRT build issue is to make the workspace size
-configurable and default it to a larger value than the CLI default.
 
-SLEAP-NN >=0.3.0 exposes `--workspace-size-gb` as a CLI argument, and the unified Predictor API will simplifies things further, so this module will be removed or become deprecated in a future release.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -62,6 +61,45 @@ def _save_training_config(cfg, export_dir: Path, filename: str) -> Path:
 	path = export_dir / filename
 	OmegaConf.save(cfg, path)
 	return path
+
+
+def _resolve_edge_inds_from_config(cfg, node_names: list[str]) -> list[tuple[int, int]]:
+	"""Resolve skeleton edges from an OmegaConf config.
+
+	SLEAP-NN 0.3.1's ``resolve_edge_inds`` does not recognize an OmegaConf
+	``DictConfig`` as a ``dict``, so it returns no edges for the normal YAML
+	skeleton representation (``source: {name: ...}``). Convert the config to
+	plain containers before resolving the names.
+	"""
+
+	from omegaconf import OmegaConf
+
+	skeletons = OmegaConf.to_container(cfg.data_config.skeletons, resolve=True)
+	if not isinstance(skeletons, list) or not skeletons:
+		return []
+
+	skeleton = skeletons[0]
+	if not isinstance(skeleton, Mapping):
+		return []
+
+	edges = skeleton.get("edges", [])
+	if not isinstance(edges, list):
+		return []
+
+	name_to_index = {name: index for index, name in enumerate(node_names)}
+	resolved: list[tuple[int, int]] = []
+	for edge in edges:
+		if not isinstance(edge, Mapping):
+			continue
+		source = edge.get("source")
+		destination = edge.get("destination")
+		if not isinstance(source, Mapping) or not isinstance(destination, Mapping):
+			continue
+		source_name = source.get("name")
+		destination_name = destination.get("name")
+		if source_name in name_to_index and destination_name in name_to_index:
+			resolved.append((name_to_index[source_name], name_to_index[destination_name]))
+	return resolved
 
 
 def export_topdown_tensorrt(
@@ -112,13 +150,12 @@ def export_topdown_tensorrt(
 
 	from sleap_nn.export.cli import _load_lightning_model
 	from sleap_nn.export.exporters import export_to_onnx, export_to_tensorrt
-	from sleap_nn.export.metadata import build_base_metadata
+	from sleap_nn.export.metadata import build_base_metadata, embed_metadata_in_onnx
 	from sleap_nn.export.utils import (
 		load_training_config,
 		resolve_anchor_part,
 		resolve_backbone_type,
 		resolve_crop_size,
-		resolve_edge_inds,
 		resolve_input_scale,
 		resolve_input_shape,
 		resolve_model_type,
@@ -185,6 +222,16 @@ def export_topdown_tensorrt(
 	instance_config_path = _save_training_config(
 		instance_cfg, export_dir, "training_config_centered_instance.yaml"
 	)
+	# SLEAP-NN 0.3.1's exported-runtime loader looks specifically for this
+	# unqualified filename. Keep the role-specific files too, matching the
+	# official export bundle while preserving the full skeleton for inference.
+	_save_training_config(instance_cfg, export_dir, "training_config.yaml")
+	training_config_payload = {
+		"centroid": centroid_config_path.read_text(encoding="utf-8"),
+		"centered_instance": instance_config_path.read_text(encoding="utf-8"),
+	}
+	training_config_text = json.dumps(training_config_payload)
+	training_config_embedded = bool(training_config_payload)
 
 	centroid_scale = input_scale if input_scale is not None else resolve_input_scale(centroid_cfg)
 	instance_scale = input_scale if input_scale is not None else resolve_input_scale(instance_cfg)
@@ -198,7 +245,7 @@ def export_topdown_tensorrt(
 		)
 
 	node_names = resolve_node_names(instance_cfg, "centered_instance")
-	edge_inds = resolve_edge_inds(instance_cfg, node_names)
+	edge_inds = _resolve_edge_inds_from_config(instance_cfg, node_names)
 
 	base_wrapper = TopDownONNXWrapper(
 		centroid_model=centroid_model,
@@ -274,13 +321,18 @@ def export_topdown_tensorrt(
 		max_batch_size=max_batch_size,
 		precision="fp32",
 		training_config_hash=training_config_hash,
-		training_config_embedded=False,
+		training_config_embedded=training_config_embedded,
 		input_dtype="uint8",
 		normalization="0_to_1",
 		peak_threshold=0.2,
 		anchor_part=anchor_part,
 	)
 	onnx_metadata.save(export_dir / "export_metadata.json")
+	try:
+		embed_metadata_in_onnx(onnx_path, onnx_metadata, training_config_text)
+	except ImportError:
+		# Keep the sidecar metadata/config files usable when ONNX is unavailable.
+		pass
 
 	workspace_gb = DEFAULT_WORKSPACE_GB if workspace_size_gb is None else workspace_size_gb
 	trt_workspace_bytes = int(workspace_gb * (1 << 30))
@@ -313,7 +365,7 @@ def export_topdown_tensorrt(
 		max_batch_size=max_batch_size,
 		precision=precision,
 		training_config_hash=training_config_hash,
-		training_config_embedded=False,
+		training_config_embedded=training_config_embedded,
 		input_dtype="uint8",
 		normalization="0_to_1",
 		peak_threshold=0.2,

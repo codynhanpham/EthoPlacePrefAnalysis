@@ -370,6 +370,7 @@ function installSleapPackages(sleapdir, nnExport)
     cleanup = onCleanup(@() cd(currentdir));
     cd(sleapdir);
 
+    fprintf('PWD: %s\n', pwd());
     fprintf('Installing SLEAP packages into virtual environment ...\n');
     cmd = 'pip install --torch-backend auto "sleap[nn]>=1.6.4" "sleap-io"';
     sleapnn = 'sleap-nn';
