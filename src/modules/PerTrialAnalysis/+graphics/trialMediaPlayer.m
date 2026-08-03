@@ -42,6 +42,7 @@ trackData = [];
 trackDataTime = [];
 pixelSize = [];
 bpColors = [];
+trackingEdges = struct('source', {}, 'target', {});
 bodypartNames = strings(0);
 centerPointBodyPartIndex = [];
 frameTimestamps = [];
@@ -79,6 +80,27 @@ if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && i
         % Colors per bodypart
         if isfield(metadata, 'colors') && ~isempty(metadata.colors)
             bpColors = metadata.colors;
+        end
+
+        % Optional skeleton edges. Each edge connects bodypart indices and
+        % uses the source bodypart's color when rendered.
+        if isfield(metadata, 'edges') && ~isempty(metadata.edges)
+            trackingEdges = metadata.edges;
+            % For skeleton data, use the most-connected bodypart as the
+            % tracing point rather than relying on a bodypart named Center.
+            nBodyparts = size(trackData, 3);
+            connectionCounts = zeros(nBodyparts, 1);
+            for edgeConnectionIdx = 1:numel(trackingEdges)
+                source = double(trackingEdges(edgeConnectionIdx).source);
+                target = double(trackingEdges(edgeConnectionIdx).target);
+                if isscalar(source) && isscalar(target) && ...
+                        source >= 1 && source <= nBodyparts && ...
+                        target >= 1 && target <= nBodyparts && ...
+                        source == fix(source) && target == fix(target)
+                    connectionCounts([source, target]) = connectionCounts([source, target]) + 1;
+                end
+            end
+            [~, centerPointBodyPartIndex] = max(connectionCounts);
         end
 
         % Ensure we have a color for each bodypart; generate fallback if needed
@@ -329,6 +351,7 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'showTracking', true, 'fastMode', false, 'showFps', false, ...
     'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic, ...
     'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex, ...
+    'trackingEdges', trackingEdges, ...
     'frameTimestamps', frameTimestamps, 'frameTimestampEdges', [], 'overlayHandles', gobjects(0), ...
     'lastSeekTime', NaN, 'videoFile', fullPath, 'lastMKeyPressTime', NaT, 'doubleMWindowSec', 0.3);
 
@@ -546,6 +569,47 @@ function renderFrameWithTrack(frame, realFrameTime)
             end
         end
 
+        % Draw optional bodypart edges before the nodes so the node markers
+        % remain visually prominent. Edge color follows its source node.
+        if ~isempty(appData.trackingEdges) && trackFrame <= size(appData.trackData, 1)
+            try
+                xParts = squeeze(appData.trackData(trackFrame, 1, :));
+                yParts = squeeze(appData.trackData(trackFrame, 2, :));
+                xParts = xParts(:);
+                yParts = yParts(:);
+                nParts = numel(xParts);
+                edgeColors = appData.colors;
+                if isempty(edgeColors) || size(edgeColors, 1) ~= nParts
+                    edgeColors = lines(nParts);
+                end
+
+                for renderEdgeIdx = 1:numel(appData.trackingEdges)
+                    edge = appData.trackingEdges(renderEdgeIdx);
+                    source = double(edge.source);
+                    target = double(edge.target);
+                    if ~isscalar(source) || ~isscalar(target) || ...
+                            source < 1 || source > nParts || target < 1 || target > nParts || ...
+                            source ~= fix(source) || target ~= fix(target)
+                        continue;
+                    end
+                    if ~all(isfinite([xParts(source), yParts(source), xParts(target), yParts(target)]))
+                        continue;
+                    end
+                    edgeHandle = line(appData.videoAxes, ...
+                        [xParts(source), xParts(target)], ...
+                        [yParts(source), yParts(target)], ...
+                        'Color', edgeColors(source, :), ...
+                        'LineWidth', 2, ...
+                        'HitTest', 'off', ...
+                        'PickableParts', 'none');
+                    appData.overlayHandles(end+1, 1) = edgeHandle;
+                end
+            catch
+                % Invalid optional edge metadata should not disable tracking
+                % point rendering.
+            end
+        end
+
         % Plot current positions for ALL bodyparts using their colors
         if trackFrame <= size(appData.trackData, 1)
             try
@@ -571,8 +635,12 @@ function renderFrameWithTrack(frame, realFrameTime)
                         ptColors = hsv(numel(xParts));
                     end
                 end
-                h = scatter(appData.videoAxes, xParts(validMask), yParts(validMask), 70, ptColors(validMask, :), 'filled', ...
-                    'MarkerEdgeColor', 'w', 'LineWidth', 1.2);
+                markerSize = 50;
+                if ~isempty(appData.trackingEdges)
+                    markerSize = 35;
+                end
+                h = scatter(appData.videoAxes, xParts(validMask), yParts(validMask), markerSize, ptColors(validMask, :), 'filled', ...
+                    'MarkerEdgeColor', 'w', 'LineWidth', 1);
                 appData.overlayHandles(end+1,1) = h;
             end
         end

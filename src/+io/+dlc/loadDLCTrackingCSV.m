@@ -6,16 +6,17 @@ function [header, datatable, units] = loadDLCTrackingCSV(filePath, kvargs)
     %
     %   Name-Value Pair Arguments:
     %       MetadataTable - Table containing metadata information.
+    %       HeaderOnly - If true, assert that only the headers are returned, and skip parsing the data table and units.
     %
     %   Outputs:
-    %       header - Struct containing header information from the CSV file.
+    %       header - Dictionary containing header information from the CSV file.
     %       datatable - Table containing the tracking data.
-    %       units - Struct containing units information from the CSV file.
+    %       units - Dictionary containing units information from the CSV file.
 
     arguments
         filePath {mustBeFile}
         
-        kvargs.MetadataTable table = table(); %#ok<INUSA>
+        kvargs.MetadataTable table = table();
         kvargs.HeaderOnly (1,1) logical = false;
     end
 

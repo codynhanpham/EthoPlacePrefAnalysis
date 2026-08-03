@@ -23,6 +23,7 @@ from torch import nn
 
 
 DEFAULT_WORKSPACE_GB = 8.0
+DEFAULT_PEAK_THRESHOLD = 0.025
 
 
 class RGBTopDownONNXWrapper(nn.Module):
@@ -117,6 +118,7 @@ def export_topdown_tensorrt(
 	input_height: Optional[int] = None,
 	input_width: Optional[int] = None,
 	crop_size: Optional[int] = None,
+	peak_threshold: float = DEFAULT_PEAK_THRESHOLD,
 	opset_version: int = 17,
 	verify: bool = True,
 ) -> Path:
@@ -139,6 +141,8 @@ def export_topdown_tensorrt(
 		input_height: Optional export input height override.
 		input_width: Optional export input width override.
 		crop_size: Optional square crop size override.
+		peak_threshold: Confidence threshold baked into centroid and keypoint peak
+			finding. Runtime threshold overrides cannot lower this value.
 		opset_version: ONNX opset version.
 		verify: Run ONNX export verification.
 
@@ -170,6 +174,12 @@ def export_topdown_tensorrt(
 	precision = precision.lower().strip()
 	if precision not in {"fp16", "fp32", "tf32"}:
 		raise ValueError("precision must be one of: fp16, fp32, tf32")
+	if peak_threshold < 0:
+		raise ValueError("peak_threshold must be non-negative")
+	if max_instances < 1:
+		raise ValueError("max_instances must be at least 1")
+	if max_batch_size < 1:
+		raise ValueError("max_batch_size must be at least 1")
 
 	centroid_path = _as_path(centroid_model_dir)
 	instance_path = _as_path(centered_instance_model_dir)
@@ -257,6 +267,8 @@ def export_topdown_tensorrt(
 		centroid_input_scale=centroid_scale,
 		instance_input_scale=instance_scale,
 		n_nodes=len(node_names),
+		centroid_peak_threshold=peak_threshold,
+		instance_peak_threshold=peak_threshold,
 	)
 	wrapper = RGBTopDownONNXWrapper(base_wrapper) if accept_rgb else base_wrapper
 	wrapper.eval().to(device)
@@ -324,7 +336,7 @@ def export_topdown_tensorrt(
 		training_config_embedded=training_config_embedded,
 		input_dtype="uint8",
 		normalization="0_to_1",
-		peak_threshold=0.2,
+		peak_threshold=peak_threshold,
 		anchor_part=anchor_part,
 	)
 	onnx_metadata.save(export_dir / "export_metadata.json")
@@ -368,7 +380,7 @@ def export_topdown_tensorrt(
 		training_config_embedded=training_config_embedded,
 		input_dtype="uint8",
 		normalization="0_to_1",
-		peak_threshold=0.2,
+		peak_threshold=peak_threshold,
 		anchor_part=anchor_part,
 	)
 	trt_metadata.save(export_dir / "model.trt.metadata.json")
@@ -406,6 +418,12 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument("--input-height", type=int, default=None)
 	parser.add_argument("--input-width", type=int, default=None)
 	parser.add_argument("--crop-size", type=int, default=None)
+	parser.add_argument(
+		"--peak-threshold",
+		type=float,
+		default=DEFAULT_PEAK_THRESHOLD,
+		help="Peak confidence threshold baked into the exported graph",
+	)
 	parser.add_argument("--no-accept-rgb", action="store_true", help="Keep a 1-channel export")
 	parser.add_argument("--opset-version", type=int, default=17)
 	parser.add_argument("--no-verify", action="store_true", help="Skip ONNX verification")
@@ -434,6 +452,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 		input_height=args.input_height,
 		input_width=args.input_width,
 		crop_size=args.crop_size,
+		peak_threshold=args.peak_threshold,
 		opset_version=args.opset_version,
 		verify=not args.no_verify,
 	)

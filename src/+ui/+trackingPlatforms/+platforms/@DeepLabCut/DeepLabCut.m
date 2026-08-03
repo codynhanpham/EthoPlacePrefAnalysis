@@ -443,6 +443,7 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
             metadata.px2cmFactor = pixelSize;
             metadata.bodyparts = [cellstr(bodyparts)];
             metadata.colors = lines(nBodyparts);
+            metadata.edges = {};
         end
 
     end

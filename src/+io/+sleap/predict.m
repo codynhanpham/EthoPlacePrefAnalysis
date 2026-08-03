@@ -115,9 +115,12 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
                 i, numel(videoFiles), videoFileName);
         end
         cmd = buildPredictCommand(uvpath, modelPaths, videoFiles{i}, outputFile, confArgs);
-        [exitCode, ~] = uv.run(cmd, Project=sleapdir, UpdateCallbackFcn=@updateOutput);
+        [exitCode, stdout] = uv.run(cmd, Project=sleapdir, UpdateCallbackFcn=@updateOutput);
         if exitCode ~= 0
             status = false;
+            warning('io:sleap:runSLEAP:VideoProcessError', ...
+                'SLEAP processing failed for video "%s" with exit code %d. See stdout for details:\n%s', ...
+                videoFiles{i}, exitCode, stdout);
             break;
         end
         % Commit the final frame count for this video. If JSON progress was not

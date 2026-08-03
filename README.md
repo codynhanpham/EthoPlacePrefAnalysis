@@ -42,7 +42,7 @@ Launching the SLEAP GUI is as simple as a single function:
 io.sleap.gui()
 ```
 
-In addition, standard SLEAP CLI operations can be done via the `io.sleap` namespace that will ensure the correct SLEAP installation is used. `io.sleap.track()` wraps the SLEAP `track` command with complete MATLAB typing, while other SLEAP commands can be run via `io.sleap.cmd()`.
+In addition, standard SLEAP CLI operations can be done via the `io.sleap` namespace that will ensure the correct SLEAP installation is used. `io.sleap.predict()` wraps the SLEAP `predict` command with complete MATLAB typing, while other SLEAP commands can be run via `io.sleap.cmd()`.
 
 ### Neurodata Without Borders (NWB)
 I/O support for NWB files is being added, backed by the [MatNWB](https://github.com/NeurodataWithoutBorders/matnwb) library. This addition will improve interoperability with other neuroscience data analysis tools and streamline data management workflows.

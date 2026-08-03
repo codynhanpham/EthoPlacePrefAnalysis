@@ -106,6 +106,8 @@ tracking_providers:
     max_instances: 1
 
     additional_args:
+      peak_threshold: 0.1
+      filter_min_instance_score: 0.1
 
     default_midpoint_xoffset_px: 0
 

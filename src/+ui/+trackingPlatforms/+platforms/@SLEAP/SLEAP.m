@@ -20,6 +20,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
         lastUnits = configureDictionary("string", "string"); % Store the last loadTrackingData() units to cache
 
         lastFileHash = ''; % Store the last loadTrackingData() file to cache the header, datatable, and units
+        lastInterpolation = "none"; % Interpolation method used for the cached table
     end
 
 
@@ -352,7 +353,8 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             defaultOptions = struct( ...
-                'HeaderOnly', false ...
+                'HeaderOnly', false, ...
+                'Interpolation', 'linear' ...
             );
             for f = fieldnames(kvargs.Options)'
                 defaultOptions.(f{1}) = kvargs.Options.(f{1});
@@ -360,9 +362,16 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             kvargs.Options = defaultOptions;  
 
             validateattributes(kvargs.Options.HeaderOnly, {'logical'}, {'scalar'});
+            validateattributes(kvargs.Options.Interpolation, {'char', 'string'}, {'scalartext'});
+            interpolation = string(kvargs.Options.Interpolation);
+            validInterpolations = ["none", "linear", "nearest", "spline", "makima", "pchip", "cubic"];
+            if ~ismember(lower(interpolation), validInterpolations)
+                error('ui:trackingPlatforms:SLEAP:loadTrackingData:InvalidInterpolation', ...
+                    'Interpolation must be one of: %s.', strjoin(validInterpolations, ', '));
+            end
 
             fileHash = ui.trackingPlatforms.TrackingProvider.hashFile(dataFilePath);
-            if strcmp(fileHash, obj.lastFileHash)
+            if strcmp(fileHash, obj.lastFileHash) && strcmpi(interpolation, obj.lastInterpolation)
                 header = obj.lastHeader;
                 if kvargs.Options.HeaderOnly
                     datatable = table();
@@ -371,10 +380,12 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 end
 
                 if isempty(obj.lastDatatable) || (isempty(obj.lastUnits) || isempty(obj.lastUnits.keys))
-                    [header, datatable, units] = io.sleap.loadSLEAPTrackingCSV(dataFilePath, 'HeaderOnly', false);
+                    [header, datatable, units] = io.sleap.loadTrackingSlp( ...
+                        dataFilePath, 'HeaderOnly', false, 'Interpolation', interpolation);
                     obj.lastHeader = header;
                     obj.lastDatatable = datatable;
                     obj.lastUnits = units;
+                    obj.lastInterpolation = interpolation;
                     
                     return;
                 end
@@ -384,10 +395,14 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             obj.lastFileHash = fileHash;
-            [header, datatable, units] = io.sleap.loadSLEAPTrackingCSV(dataFilePath, 'HeaderOnly', kvargs.Options.HeaderOnly);
+            [header, datatable, units] = io.sleap.loadTrackingSlp( ...
+                dataFilePath, ...
+                'HeaderOnly', kvargs.Options.HeaderOnly, ...
+                'Interpolation', interpolation);
             obj.lastHeader = header;
             obj.lastDatatable = datatable;
             obj.lastUnits = units;
+            obj.lastInterpolation = interpolation;
         end
 
 
@@ -400,7 +415,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             defaultOptions = struct( ...
-                ...% No options for now
+                 'Interpolation', 'linear' ...
             );
             for f = fieldnames(kvargs.Options)'
                 defaultOptions.(f{1}) = kvargs.Options.(f{1});
@@ -416,7 +431,13 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             ImgWidthFOV_cm = NaN;
 
 
-            vidObj_temp = VideoReader(header('Video file'));
+            videoFilePath = string(header('Video file'));
+            if strlength(videoFilePath) == 0 || ~isfile(videoFilePath)
+                error('io:sleap:loadTrackingCoordsPixels:MissingVideoFile', ...
+                    'The source video file could not be resolved from the SLEAP file.');
+            end
+
+            vidObj_temp = VideoReader(char(videoFilePath));
             vidWidth = vidObj_temp.Width;
             pixelSize = ImgWidthFOV_cm / vidWidth; % cm/pixel
             FPS = vidObj_temp.FrameRate;
@@ -426,43 +447,87 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 error('io:sleap:loadTrackingCoordsPixels:InvalidSLEAPHeader', 'SLEAP data header does not contain bodyparts information. Either double-check the SLEAP CSV file, update the SLEAP toolbox, or check the loadSLEAPTrackingCSV() implementation.');
             end
 
-            bodyparts = sleapDataHeader.bodyparts;
+            bodyparts = string(sleapDataHeader.bodyparts);
 
             % In datatable, the bodyparts are flatten as {{bodypart} |> {coordLabel}}, e.g., {'Center |> x', 'Center | y', 'Center | likelihood', ...}
             % We need to extract the x and y coordinates for each bodypart and store them in coords 3D matrix
-            nBodyparts = length(bodyparts);
+            nBodyparts = numel(bodyparts);
             nFrames = height(datatable);
             coords = NaN(nFrames, 2, nBodyparts);
 
             datatableVars = datatable.Properties.VariableNames;
             for b = 1:nBodyparts
-                bodypart = bodyparts{b};
+                bodypart = char(bodyparts(b));
                 xColName = sprintf('%s |> %s', bodypart, 'x');
                 yColName = sprintf('%s |> %s', bodypart, 'y');
 
-                % Check if the columns exist (whether the datatable endsWith the re-constructed x/y column names)
-                xColIdx = find(endsWith(datatableVars, xColName), 1);
-                yColIdx = find(endsWith(datatableVars, yColName), 1);
+                xColIdx = find(strcmp(datatableVars, xColName), 1);
+                yColIdx = find(strcmp(datatableVars, yColName), 1);
                 if isempty(xColIdx) || isempty(yColIdx)
                     error('io:sleap:loadTrackingCoordsPixels:MissingColumns', 'SLEAP tracking data table is missing expected columns for bodypart "%s".', bodypart);
                 end
 
-                coords(:, 1, b) = datatable.(xColName); % x
-                coords(:, 2, b) = datatable.(yColName); % y
+                coords(:, 1, b) = datatable{:, xColIdx}; % x
+                coords(:, 2, b) = datatable{:, yColIdx}; % y
             end
 
-            % timestampSec = (0:(nFrames-1))' / FPS; % This assumes constant FPS!!!
-            % Slightly slower (need to extract PTS first), but more reliable for variable frame rate videos. The timestamps will reflect the actual real world frame times
-            [pts, timebase] = ffprobe.pts(header('Video file'));
-            timestampSec = double(pts) * double(timebase);
+            % Use presentation timestamps rather than frame/FPS arithmetic so
+            % variable-frame-rate videos retain their actual timing.
+            [pts, timebase] = ffprobe.pts(char(videoFilePath));
+            timestampSec = double(pts(:)) * double(timebase);
+            if numel(timestampSec) ~= nFrames
+                error('io:sleap:loadTrackingCoordsPixels:TimestampCountMismatch', ...
+                    'ffprobe returned %d timestamps for %d tracking rows.', ...
+                    numel(timestampSec), nFrames);
+            end
+            if nFrames > 1
+                validDiffs = diff(timestampSec);
+                validDiffs = validDiffs(isfinite(validDiffs) & validDiffs > 0);
+                if ~isempty(validDiffs)
+                    FPS = 1 / mean(validDiffs);
+                end
+            end
 
             metadata = struct();
             metadata.FPS = FPS;
             metadata.px2cmFactor = pixelSize;
-            metadata.bodyparts = [cellstr(bodyparts)];
+            metadata.bodyparts = cellstr(bodyparts);
             metadata.colors = lines(nBodyparts);
+            metadata.edges = localSleapEdges(header, nBodyparts);
         end
 
+    end
+end
+
+function edges = localSleapEdges(header, nBodyparts)
+    edges = {};
+    if ~isKey(header, "SLEAP metadata jsonencode")
+        return;
+    end
+
+    slpMetadata = jsondecode(header("SLEAP metadata jsonencode"));
+    if ~isfield(slpMetadata, 'skeletons') || isempty(slpMetadata.skeletons) || ...
+            ~isfield(slpMetadata.skeletons, 'links')
+        return;
+    end
+
+    links = slpMetadata.skeletons(1).links;
+    if isempty(links)
+        return;
+    end
+    edges = repmat(struct('source', 0, 'target', 0), 1, numel(links));
+    for edgeIdx = 1:numel(links)
+        source = double(links(edgeIdx).source) + 1;
+        target = double(links(edgeIdx).target) + 1;
+        if ~isscalar(source) || ~isscalar(target) || ...
+                source < 1 || source > nBodyparts || ...
+                target < 1 || target > nBodyparts || ...
+                source ~= fix(source) || target ~= fix(target)
+            error('ui:sleap:loadTrackingCoordsPixels:InvalidEdge', ...
+                'SLEAP edge %d references an invalid bodypart index.', edgeIdx);
+        end
+        edges(edgeIdx).source = source;
+        edges(edgeIdx).target = target;
     end
 end
 
