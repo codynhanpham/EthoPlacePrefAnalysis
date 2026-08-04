@@ -1,4 +1,4 @@
-function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir, masterMetadataTable, kvargs)
+function [summary, centerpointData, bodyparts] = trialSummary(trackingDataFile, stimuliDir, masterMetadataTable, kvargs)
     %%TRIALSUMMARY Align tracking data to stimulus events and summarize trial information
     %
     %   summary = trial.stats.trialSummary(ethovisionXlsx, stimuliDir, masterMetadataTable)
@@ -40,6 +40,10 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
     %           + speakerFlipped - Boolean indicating if the speaker positions were flipped for this trial
     %               Whether this trial had the left/right speaker positions flipped compared to the default configuration originally
     %           + stimuliMetadata - metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
+    %       bodyparts - Optional struct for tracking providers that expose body-part coordinates:
+    %           + data - Table containing Trial time, Stimulus name, and X/Y columns for each body part
+    %           + fps - Frame rate copied from centerpointData
+    %           + px2cm - Pixel-to-centimeter conversion copied from centerpointData
     %
     %
     %   See also: io.ethovision.alignEthovisionRawToStim, io.metadata.loadMasterMetadata, io.config.loadConfigYaml, io.stimuli.extractMetadata
@@ -59,6 +63,7 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
         error('trial:stats:trialSummary:MissingTrackingProvider', ...
             'TrackingProvider must be provided for trial alignment.');
     end
+    bodyparts = struct.empty();
     [header, datatable, ~, stimulusFrameRange, animalMetadata, stimuli] = ...
         kvargs.TrackingProvider.alignTrackingToStim(trackingDataFile, stimuliDir, ...
         Options=struct('MasterMetadataTable', masterMetadataTable, 'Config', kvargs.Config));
@@ -212,7 +217,10 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
 
 
     configs = kvargs.Config;
-    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
+    trackingPlatform = string(kvargs.TrackingProvider.platform);
+    isEthoVision = strcmpi(trackingPlatform, "EthoVision");
+    providerConfigName = char(trackingPlatform);
+    fromConfigKey = {'tracking_providers', providerConfigName, 'default_camera_imgwidth_fov_cm'};
     ImgWidthFOV_cm = 58.5; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
@@ -221,7 +229,7 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
         end
     end
 
-    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_center_offset_px'};
+    fromConfigKey = {'tracking_providers', providerConfigName, 'default_camera_center_offset_px'};
     CenterOffset_px = [0,0]; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         CenterOffset_px = getfield(configs, fromConfigKey{:});
@@ -230,7 +238,7 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
 
     arenaName = header("Arena name");
     % Check for configs overrides for this arena
-    arenaConfigPath = {'tracking_providers', 'EthoVision', 'arena'};
+    arenaConfigPath = {'tracking_providers', providerConfigName, 'arena'};
     if validator.nestedStructFieldExists(configs, arenaConfigPath)
         arenaConfigs = getfield(configs, arenaConfigPath{:});
         if iscell(arenaConfigs)
@@ -267,11 +275,17 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
     pixelsize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
     centerPos = [windowXCenter, windowYCenter];
-    centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
-    centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
-    
-    % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
-    centerPos(:,2) = vidHeight * pixelsize - centerPos(:,2);
+    if isEthoVision
+        centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+        centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+
+        % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
+        centerPos(:,2) = vidHeight * pixelsize - centerPos(:,2);
+    else
+        % Non-EthoVision coordinates use top-left-origin image pixels.
+        centerPos(:,1) = centerPos(:,1) * pixelsize;
+        centerPos(:,2) = centerPos(:,2) * pixelsize;
+    end
     trialTime = windowTrialTimeRel;
 
 
@@ -301,8 +315,6 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
             end
         end
     end
-
-
     % MidlineX and midlineY, in px, top-left is (0,0), loaded from .ref.json
     % (legacy .midpoint.csv/.midline.csv are auto-migrated) depending on
     % config's defaults.distance2refmode.
@@ -414,15 +426,70 @@ function [summary, centerpointData] = trialSummary(trackingDataFile, stimuliDir,
     % Note that centerPos here is in cm, but translated to fits image coordinates (top-left is (0,0))
     % If ref is point, simply use the point as the horizontal and/or vertical axis of symmetry
     % If ref is line, use the line as the axis of symmetry
-    if strcmpi(refmode, 'point')
+    if isEthoVision
+        if strcmpi(refmode, 'point')
+            if xflip
+                centerPos(:,1) = 2 * (midlineX * pixelsize) - centerPos(:,1);
+            end
+            if yflip
+                centerPos(:,2) = 2 * (midlineY * pixelsize) - centerPos(:,2);
+            end
+        elseif strcmpi(refmode, 'line')
+            if xflip
+                centerPos = mirrorPointsAcrossLine(centerPos, ...
+                    midlineX * pixelsize, midlineY * pixelsize);
+            end
+            if yflip
+                centerPos = mirrorPointsAcrossLine(centerPos, ...
+                    [midlineY(1), midlineY(end)] * pixelsize, ...
+                    [midlineX(1), midlineX(end)] * pixelsize);
+            end
+        end
+    else
         if xflip
-            centerPos(:,1) = 2 * (midlineX * pixelsize) - centerPos(:,1);
+            centerPos(:,1) = vidWidth * pixelsize - centerPos(:,1);
+            midlineX = vidWidth - midlineX;
         end
         if yflip
-            centerPos(:,2) = 2 * (midlineY * pixelsize) - centerPos(:,2);
+            centerPos(:,2) = vidHeight * pixelsize - centerPos(:,2);
+            midlineY = vidHeight - midlineY;
         end
-    elseif strcmpi(refmode, 'line')
-        centerPos = mirrorPointsAcrossLine(centerPos, midlineX * pixelsize, midlineY * pixelsize);
+    end
+
+    bodypartXVariables = string(datatable.Properties.VariableNames( ...
+        startsWith(datatable.Properties.VariableNames, 'X ')));
+    bodypartXVariables = bodypartXVariables(bodypartXVariables ~= "X center");
+    if isEthoVision
+        % EthoVision does not expose body-part coordinate columns.
+    elseif ~isempty(bodypartXVariables)
+        bodypartData = table(windowTrialTimeRel, cellstr(windowStimulusName), ...
+            'VariableNames', {'Trial time', 'Stimulus name'});
+        for bodypartIdx = 1:numel(bodypartXVariables)
+            xVariable = char(bodypartXVariables(bodypartIdx));
+            yVariable = char("Y " + extractAfter(bodypartXVariables(bodypartIdx), "X "));
+            if ~ismember(yVariable, datatable.Properties.VariableNames)
+                continue;
+            end
+            bodypartX = nan(windowLength, 1);
+            bodypartY = nan(windowLength, 1);
+            if ~isempty(inRangeRows)
+                bodypartX(inRangePositions) = datatable{inRangeRows, xVariable};
+                bodypartY(inRangePositions) = datatable{inRangeRows, yVariable};
+            end
+            bodypartX = bodypartX * pixelsize;
+            bodypartY = bodypartY * pixelsize;
+            if xflip
+                bodypartX = vidWidth * pixelsize - bodypartX;
+            end
+            if yflip
+                bodypartY = vidHeight * pixelsize - bodypartY;
+            end
+            bodypartData.(xVariable) = bodypartX;
+            bodypartData.(yVariable) = bodypartY;
+        end
+        if width(bodypartData) > 2
+            bodyparts = struct('data', bodypartData, 'fps', fpsFromData, 'px2cm', pixelsize);
+        end
     end
 
     

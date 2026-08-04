@@ -27,13 +27,8 @@ Support for additional tracking/pose-estimation software, ethogram labeling tool
 
 Below are some currently supported integrations and short-term future plans.
 
-### DeepLabCut Integration
-The program can interface with [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) (DLC) for pose estimation-based tracking via the `TrackingProvider` class interface. See [DLC Integration](./src/+ui/+trackingPlatforms/+platforms/@DeepLabCut/README.md) for more details on setup and usage.
-
-This integration requires a custom `DLCTool` CLI-based program that exposes basic DLC functionality (e.g., run inference, etc.) in a single-bundle executable.
-
 ### SLEAP
-Support for [SLEAP](https://sleap.ai/)-based tracking is currently under development via the `TrackingProvider` class interface. See [SLEAP Integration](./src/+ui/+trackingPlatforms/+platforms/@SLEAP/README.md) for more details on setup and usage.
+Support for [SLEAP](https://sleap.ai/)-based tracking is fully integrated via the `TrackingProvider` class interface. See [SLEAP Integration](./src/+ui/+trackingPlatforms/+platforms/@SLEAP/README.md) for more details on setup and usage. Unless the something changes in our lab's workflow, SLEAP will receive first-class support in this repository.
 
 SLEAP installation is fully automated via a simple `io.sleap.install()` function call that check and only setup SLEAP when missing, no-op otherwise. This function creates a separate and isolated SLEAP installation in the `/src/+io/+sleap/private/sleap-tools` folder, so it does not interfere with any existing SLEAP installation on the system.
 
@@ -43,6 +38,13 @@ io.sleap.gui()
 ```
 
 In addition, standard SLEAP CLI operations can be done via the `io.sleap` namespace that will ensure the correct SLEAP installation is used. `io.sleap.predict()` wraps the SLEAP `predict` command with complete MATLAB typing, while other SLEAP commands can be run via `io.sleap.cmd()`.
+
+
+### DeepLabCut Integration
+The program can interface with [DeepLabCut](https://github.com/DeepLabCut/DeepLabCut) (DLC) for pose estimation-based tracking via the `TrackingProvider` class interface. See [DLC Integration](./src/+ui/+trackingPlatforms/+platforms/@DeepLabCut/README.md) for more details on setup and usage.
+
+This integration requires a custom `DLCTool` CLI-based program that exposes basic DLC functionality (e.g., run inference, etc.) in a single-bundle executable.
+
 
 ### Neurodata Without Borders (NWB)
 I/O support for NWB files is being added, backed by the [MatNWB](https://github.com/NeurodataWithoutBorders/matnwb) library. This addition will improve interoperability with other neuroscience data analysis tools and streamline data management workflows.

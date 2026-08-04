@@ -28,7 +28,10 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
     end
 
     configs = kvargs.Config;
-    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_imgwidth_fov_cm'};
+    trackingPlatform = string(kvargs.TrackingProvider.platform);
+    isEthoVision = strcmpi(trackingPlatform, "EthoVision");
+    providerConfigName = char(trackingPlatform);
+    fromConfigKey = {'tracking_providers', providerConfigName, 'default_camera_imgwidth_fov_cm'};
     ImgWidthFOV_cm = 58.5; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         ImgWidthFOV_cm = getfield(configs, fromConfigKey{:});
@@ -37,7 +40,7 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
         end
     end
 
-    fromConfigKey = {'tracking_providers', 'EthoVision', 'default_camera_center_offset_px'};
+    fromConfigKey = {'tracking_providers', providerConfigName, 'default_camera_center_offset_px'};
     CenterOffset_px = [0,0]; % default value for compat with older code
     if validator.nestedStructFieldExists(configs, fromConfigKey)
         CenterOffset_px = getfield(configs, fromConfigKey{:});
@@ -50,7 +53,7 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
 
     arenaName = header("Arena name");
     % Check for configs overrides for this arena
-    arenaConfigPath = {'tracking_providers', 'EthoVision', 'arena'};
+    arenaConfigPath = {'tracking_providers', providerConfigName, 'arena'};
     if validator.nestedStructFieldExists(configs, arenaConfigPath)
         arenaConfigs = getfield(configs, arenaConfigPath{:});
         if iscell(arenaConfigs)
@@ -90,17 +93,38 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
     v.CurrentTime = stimPeriodTable{1, 'Trial time'}; % in seconds
     stimstartframedata = readFrame(v);
 
+    fromConfigKey = {'defaults', 'xflip'};
+    xflip = false;
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        xflip = logical(getfield(configs, fromConfigKey{:}));
+    end
+    fromConfigKey = {'defaults', 'yflip'};
+    yflip = false;
+    if validator.nestedStructFieldExists(configs, fromConfigKey)
+        yflip = logical(getfield(configs, fromConfigKey{:}));
+    end
+
 
     pixelsize = ImgWidthFOV_cm / vidWidth; % cm/pixel
 
     centerPos = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
-    centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
-    centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
-    % Scale the center pos to cm
-    centerPos = centerPos / pixelsize;
-    
-    % Convert to image coordinates (flip Y-axis to match imshow coordinate system)
-    centerPos(:,2) = vidHeight - centerPos(:,2);
+    if isEthoVision
+        centerPos(:,1) = centerPos(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+        centerPos(:,2) = centerPos(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+        % Scale the center pos to cm
+        centerPos = centerPos / pixelsize;
+
+        % Convert to image coordinates (flip Y-axis to match imshow coordinate system)
+        centerPos(:,2) = vidHeight - centerPos(:,2);
+    else
+        % Non-EthoVision alignment returns raw top-left-origin image pixels.
+        if xflip
+            centerPos(:,1) = vidWidth - centerPos(:,1);
+        end
+        if yflip
+            centerPos(:,2) = vidHeight - centerPos(:,2);
+        end
+    end
 
     [N,xedges,yedges] = histcounts2(centerPos(:,1), centerPos(:,2), [(ceil(vidWidth/3)), (ceil(vidHeight/3))]);
     d = N';
@@ -296,33 +320,6 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
 
     %% L/R DISTANCE FROM MIDLINE OVER TIME
 
-    fromConfigKey = {'defaults', 'xflip'};
-    xflip = false; % default value for compat with older code
-    if validator.nestedStructFieldExists(configs, fromConfigKey)
-        xflip = getfield(configs, fromConfigKey{:});
-        if ~islogical(xflip)
-            try
-                xflip = logical(xflip);
-            catch ME
-                xflip = false;
-                warning('graphics:trialPlacePref:xflip:InvalidValue', 'Invalid value for xflip in config, must be boolean. Using default false.\n%s', getReport(ME));
-            end
-        end
-    end
-    fromConfigKey = {'defaults', 'yflip'};
-    yflip = false; % default value for compat with older code
-    if validator.nestedStructFieldExists(configs, fromConfigKey)
-        yflip = getfield(configs, fromConfigKey{:});
-        if ~islogical(yflip)
-            try
-                yflip = logical(yflip);
-            catch ME
-                yflip = false;
-                warning('graphics:trialPlacePref:yflip:InvalidValue', 'Invalid value for yflip in config, must be boolean. Using default false.\n%s', getReport(ME));
-            end
-        end
-    end
-
     % MidlineX and midlineY, in px, top-left is (0,0), loaded from .ref.json
     % (legacy .midpoint.csv/.midline.csv are auto-migrated) depending on
     % config's defaults.distance2refmode.
@@ -449,20 +446,33 @@ function [f,d] = trialPlacePref(trackingDataFile, stimuliDir, masterMetadataTabl
     end
 
 
-    % Convert + offset the midline points (currently in px, image coordinates) to cm
-    midlineX_cm = (midlineX - ((vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize))) * pixelsize;
-    midlineY_cm = (midlineY - ((vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize))) * pixelsize;
-    centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
-    centerPos_cm(:,1) = centerPos_cm(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
-    centerPos_cm(:,2) = centerPos_cm(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
-    % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
-    centerPos_cm(:,2) = vidHeight * pixelsize - centerPos_cm(:,2);
+    if isEthoVision
+        % Convert + offset the midline points (currently in px, image coordinates) to cm
+        midlineX_cm = (midlineX - ((vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize))) * pixelsize;
+        midlineY_cm = (midlineY - ((vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize))) * pixelsize;
+        centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+        centerPos_cm(:,1) = centerPos_cm(:,1) + (vidWidth/2 * pixelsize) + (CenterOffset_px(1) * pixelsize);
+        centerPos_cm(:,2) = centerPos_cm(:,2) + (vidHeight/2 * pixelsize) + (CenterOffset_px(2) * pixelsize);
+        % Convert to image coordinates (flip Y-axis to match imshow coordinate system, such that top-left is (0,0))
+        centerPos_cm(:,2) = vidHeight * pixelsize - centerPos_cm(:,2);
+    else
+        % Non-EthoVision alignment returns raw top-left-origin image pixels.
+        if xflip
+            midlineX = vidWidth - midlineX;
+        end
+        if yflip
+            midlineY = vidHeight - midlineY;
+        end
+        midlineX_cm = midlineX * pixelsize;
+        midlineY_cm = midlineY * pixelsize;
+        centerPos_cm = [stimPeriodTable{:,'X center'}, stimPeriodTable{:,'Y center'}];
+        centerPos_cm(:,1) = centerPos_cm(:,1) * pixelsize;
+        centerPos_cm(:,2) = centerPos_cm(:,2) * pixelsize;
+    end
 
     % Apply x/y flipping by mirroring center positions across the reference
     % point/line before computing distances (consistent with populationPositionOverTime)
-    if ~exist('xflip','var'); xflip = false; end
-    if ~exist('yflip','var'); yflip = false; end
-    if xflip || yflip
+    if isEthoVision && (xflip || yflip)
         pts = centerPos_cm;
         switch refmode
             case 'point'

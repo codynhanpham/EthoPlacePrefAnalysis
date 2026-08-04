@@ -78,20 +78,43 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 capability {mustBeTextScalar}
             end
 
-            supported = ismember(lower(string(capability)), "__unsupported__");
+            supported = ismember(lower(string(capability)), "aligntrackingtostim");
         end
 
         function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, kvargs)
             arguments
                 obj (1,1) ui.trackingPlatforms.platforms.SLEAP
-                trackingDataFilePath %#ok<INUSA>
-                stimuliDir %#ok<INUSA>
-                kvargs.Options (1,1) struct = struct() %#ok<INUSA>
+                trackingDataFilePath {mustBeFile}
+                stimuliDir {mustBeFolder}
+                kvargs.Options (1,1) struct = struct()
             end
 
             obj.requireCapability("alignTrackingToStim");
-            header = []; datatable = table(); units = [];
-            stimulusFrameRange = []; animalMetadata = struct(); stimuli = struct();
+            defaultOptions = struct( ...
+                'MasterMetadataTable', table(), ...
+                'Config', struct(), ...
+                'Interpolation', 'pchip', ...
+                'ReferencePointOutlierThresholdFactor', 3, ...
+                'ArenaName', '', ...
+                'StimulusProtocol', '', ...
+                'StimStartFrame', [], ...
+                'SpeakerFlipped', [] ...
+            );
+            for field = fieldnames(kvargs.Options)'
+                defaultOptions.(field{1}) = kvargs.Options.(field{1});
+            end
+            kvargs.Options = defaultOptions;
+
+            [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = ...
+                io.sleap.alignTrackingToStim(trackingDataFilePath, stimuliDir, ...
+                Config=kvargs.Options.Config, ...
+                Interpolation=kvargs.Options.Interpolation, ...
+                ReferencePointOutlierThresholdFactor=kvargs.Options.ReferencePointOutlierThresholdFactor, ...
+                ArenaName=kvargs.Options.ArenaName, ...
+                StimulusProtocol=kvargs.Options.StimulusProtocol, ...
+                StimStartFrame=kvargs.Options.StimStartFrame, ...
+                SpeakerFlipped=kvargs.Options.SpeakerFlipped, ...
+                MasterMetadataTable=kvargs.Options.MasterMetadataTable);
         end
 
         function userConfig = loadConfig(obj, configs)
@@ -429,7 +452,34 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             [header, datatable, ~] = obj.loadTrackingData(dataFilePath, Options=options);
 
 
-            ImgWidthFOV_cm = NaN;
+            ImgWidthFOV_cm = 77.4;
+            configs = obj.userConfig;
+            if isfield(configs, 'default_camera_imgwidth_fov_cm')
+                ImgWidthFOV_cm = configs.default_camera_imgwidth_fov_cm;
+                if iscell(ImgWidthFOV_cm)
+                    ImgWidthFOV_cm = cell2mat(ImgWidthFOV_cm);
+                end
+            end
+            arenaName = header("Arena name");
+            if isfield(configs, 'arena')
+                arenaConfigs = configs.arena;
+                if iscell(arenaConfigs)
+                    arenaNames = string(cellfun(@(x) x.name, arenaConfigs, 'UniformOutput', false));
+                else
+                    arenaNames = string({arenaConfigs.name});
+                end
+                arenaIdx = find(strcmp(arenaNames, arenaName), 1);
+                if ~isempty(arenaIdx)
+                    if iscell(arenaConfigs)
+                        arenaConfig = arenaConfigs{arenaIdx};
+                    else
+                        arenaConfig = arenaConfigs(arenaIdx);
+                    end
+                    if isfield(arenaConfig, 'camera_imgwidth_fov_cm')
+                        ImgWidthFOV_cm = arenaConfig.camera_imgwidth_fov_cm;
+                    end
+                end
+            end
 
 
             videoFilePath = string(header('Video file'));

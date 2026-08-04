@@ -25,6 +25,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     %               - stimuliSorted: Formatted-name of the stimuli pair in the trials of the same kind, sorted alphabetically. If stim name contains "normal" (case-insensitive), that stim is listed first.
     %               - animalMetadata: A dictionary (string-struct) in the order of columns in centerpointData, where each key is a hash key corresponding to a trial's centerpointData, and each value is the animal metadata struct for that trial.
     %               - centerpointData: A table with columns 'Trial time', 'Stimulus name', 'X center', 'Y center', 'Distance from Midline', 'Arena Grid Score', standardized across trials.
+    %               - bodyparts: Optional struct with a data table containing standardized Trial time, Stimulus name, and X/Y body-part columns; no center statistics.
     %                   Note that 'X center', 'Y center', and 'Distance from Midline' are multi-column variables in the table, with each column representing a trial aligned to stimulus onset and interpolated to the target framerate.
     %                   The coordinates here are flipped such that negative values are towards stimuliSorted(1) and positive values are towards stimuliSorted(2), according to the speaker flip information in the trial metadata.
     %
@@ -67,7 +68,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         'stimfileName', strings(0), ...
         'stimuliSorted', strings(0), ...
         'animalMetadata', configureDictionary("string", "struct"), ...
-        'centerpointData', table() ...
+        'centerpointData', table(), ...
+        'bodyparts', struct('data', table(), 'fps', NaN, 'px2cm', NaN) ...
     );
     if ~isempty(kvargs.UIFigure)
         loader = uiprogressdlg(kvargs.UIFigure, ...
@@ -111,7 +113,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
             drawnow;
         end
         
-        [summary, centerpointData] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, ...
+        [summary, centerpointData, bodyparts] = trial.stats.trialSummary(ethovisionTrials(i).data, stimuliDir, masterMetadataTable, ...
             Config=kvargs.Config, ...
             TrackingProvider=kvargs.TrackingProvider, ...
             PreStimDurationSec=kvargs.PreStimDurationSec, ...
@@ -157,7 +159,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 'stimfileName', stimfileName, ...
                 'stimuliSorted', stimKeysSorted, ...
                 'animalMetadata', configureDictionary("string", "struct"), ... % This will be empty till the end when all trials are processed
-                'centerpointData', table() ...
+                'centerpointData', table(), ...
+                'bodyparts', struct('data', table(), 'fps', NaN, 'px2cm', NaN) ...
             );
 
             t = makeTemplateTableByStim(stimmeta, kvargs.TargetFPS, kvargs.PreStimDurationSec, kvargs.PostStimDurationSec);
@@ -182,6 +185,48 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
             interpArenaGridScore = nan(length(standardizedTime), 1);
         end
         warning('on', 'MATLAB:interp1:NaNstrip');
+
+        bodypartData = table();
+        bodypartPx2cm = NaN;
+        if ~isempty(bodyparts) && isfield(bodyparts, 'data') && ...
+                istable(bodyparts.data) && width(bodyparts.data) > 2
+            bodypartPx2cm = bodyparts.px2cm;
+            bodypartData = table(standardizedTime, standardizedStims, ...
+                'VariableNames', {'Trial time', 'Stimulus name'});
+            bodypartXVariables = string(bodyparts.data.Properties.VariableNames( ...
+                startsWith(bodyparts.data.Properties.VariableNames, 'X ')));
+            for bodypartIdx = 1:numel(bodypartXVariables)
+                xVariable = char(bodypartXVariables(bodypartIdx));
+                yVariable = char("Y " + extractAfter(bodypartXVariables(bodypartIdx), "X "));
+                if ~ismember(yVariable, bodyparts.data.Properties.VariableNames)
+                    continue;
+                end
+                bodypartX = interp1(bodyparts.data{:, 'Trial time'}, ...
+                    bodyparts.data{:, xVariable}, standardizedTime, kvargs.Interpolation, 'extrap');
+                bodypartY = interp1(bodyparts.data{:, 'Trial time'}, ...
+                    bodyparts.data{:, yVariable}, standardizedTime, kvargs.Interpolation, 'extrap');
+                bodypartData.(xVariable) = bodypartX;
+                bodypartData.(yVariable) = bodypartY;
+            end
+
+            bodypartKey = DataHash(bodypartData, 'SHA-256');
+            bodypartKey = bodypartKey(1:min(length(bodypartKey), namelengthmax - 20));
+            bodypartVariables = string(bodypartData.Properties.VariableNames);
+            for variableIdx = 3:numel(bodypartVariables)
+                variableName = bodypartVariables(variableIdx);
+                if startsWith(variableName, "X ")
+                    nodeName = extractAfter(variableName, "X ");
+                    bodypartData.Properties.VariableNames{variableIdx} = ...
+                        char("X " + nodeName + " |> " + bodypartKey);
+                elseif startsWith(variableName, "Y ")
+                    nodeName = extractAfter(variableName, "Y ");
+                    bodypartData.Properties.VariableNames{variableIdx} = ...
+                        char("Y " + nodeName + " |> " + bodypartKey);
+                end
+            end
+
+        end
+
         centerpointData.data = table();
         centerpointData.data.('Trial time') = standardizedTime;
         centerpointData.data.('Stimulus name') = standardizedStims;
@@ -229,10 +274,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
                 lineX = [midlineX_cm(1), midlineX_cm(end)];
                 lineY = [midlineY_cm(1), midlineY_cm(end)];
-                % Line equation: Ax + By + C = 0
-                A = lineY(1) - lineY(2);
-                B = lineX(2) - lineX(1);
-                C = -A*lineX(1) - B*lineY(1);
+                % Line equation: Ax + By + C = 0. Keep the sign convention
+                % consistent with trialPlacePref: right of a vertical line is positive.
+                A = lineY(2) - lineY(1);
+                B = lineX(1) - lineX(2);
+                C = lineX(2)*lineY(1) - lineX(1)*lineY(2);
                 M = A^2 + B^2;
                 if M > 0
                     val = A .* points(:,1) + B .* points(:,2) + C;
@@ -275,10 +321,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
                 points = [centerpointData.data{:, 'X center'}, centerpointData.data{:, 'Y center'}];
                 lineX = [midlineX_cm(1), midlineX_cm(end)];
                 lineY = [midlineY_cm(1), midlineY_cm(end)];
-                % Line equation: Ax + By + C = 0
-                A = lineY(1) - lineY(2);
-                B = lineX(2) - lineX(1);
-                C = -A*lineX(1) - B*lineY(1);
+                % Line equation: Ax + By + C = 0. Keep the sign convention
+                % consistent with trialPlacePref: right of a vertical line is positive.
+                A = lineY(2) - lineY(1);
+                B = lineX(1) - lineX(2);
+                C = lineX(2)*lineY(1) - lineX(1)*lineY(2);
                 M = A^2 + B^2;
                 if M > 0
                     val = A .* points(:,1) + B .* points(:,2) + C;
@@ -291,6 +338,24 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         else
             % This should not happen due to argument validation
             error('Invalid SpeakerFlipAxes value: %s. Must be ''x'' or ''y''.', kvargs.SpeakerFlipAxes);
+        end
+
+        if width(bodypartData) > 2
+            if flipCondition
+                bodypartData = mirrorBodypartData(bodypartData, refmode, ...
+                    midlineX_cm, midlineY_cm, kvargs.SpeakerFlipAxes);
+            end
+            if isempty(stimtables(stimfileName).bodyparts.data)
+                stimtables(stimfileName).bodyparts = struct( ...
+                    'data', bodypartData, ...
+                    'fps', kvargs.TargetFPS, ...
+                    'px2cm', bodypartPx2cm);
+            else
+                stimtables(stimfileName).bodyparts.data = outerjoin( ...
+                    stimtables(stimfileName).bodyparts.data, bodypartData, ...
+                    'Keys', {'Trial time', 'Stimulus name'}, ...
+                    'MergeKeys', true);
+            end
         end
 
 
@@ -355,6 +420,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         arenaGridScoreCols = startsWith(tbl.Properties.VariableNames, 'Arena Grid Score |> ');
         if any(arenaGridScoreCols)
             tbl = mergevars(tbl, tbl.Properties.VariableNames(arenaGridScoreCols), 'NewVariableName', 'Arena Grid Score');
+        end
+
+        bodypartTable = stimtables(stimfileName).bodyparts.data;
+        if width(bodypartTable) > 2
+            stimtables(stimfileName).bodyparts.data = mergeBodypartVariables(bodypartTable);
         end
 
         stimtables(stimfileName).centerpointData = tbl;
@@ -476,5 +546,57 @@ function points = mirrorPointsAcrossLine(points, lineX, lineY)
         factor = -2 * val / M;
         points(:,1) = points(:,1) + factor * A;
         points(:,2) = points(:,2) + factor * B;
+    end
+end
+
+function bodypartData = mirrorBodypartData(bodypartData, refmode, midlineX_cm, midlineY_cm, flipAxis)
+    xVariables = string(bodypartData.Properties.VariableNames( ...
+        startsWith(bodypartData.Properties.VariableNames, 'X ')));
+    for variableIdx = 1:numel(xVariables)
+        xVariable = char(xVariables(variableIdx));
+        yVariable = char("Y " + extractAfter(xVariables(variableIdx), "X "));
+        if ~ismember(yVariable, bodypartData.Properties.VariableNames)
+            continue;
+        end
+        if strcmpi(refmode, 'point')
+            if strcmpi(flipAxis, 'x')
+                bodypartData{:, xVariable} = 2 * midlineX_cm(1) - bodypartData{:, xVariable};
+            else
+                bodypartData{:, yVariable} = 2 * midlineY_cm(1) - bodypartData{:, yVariable};
+            end
+        elseif strcmpi(flipAxis, 'x')
+            points = [bodypartData{:, xVariable}, bodypartData{:, yVariable}];
+            mirroredPoints = mirrorPointsAcrossLine(points, ...
+                [midlineX_cm(1), midlineX_cm(end)], [midlineY_cm(1), midlineY_cm(end)]);
+            bodypartData{:, xVariable} = mirroredPoints(:, 1);
+            bodypartData{:, yVariable} = mirroredPoints(:, 2);
+        else
+            points = [bodypartData{:, xVariable}, bodypartData{:, yVariable}];
+            mirroredPoints = mirrorPointsAcrossLine(points, ...
+                [midlineY_cm(1), midlineY_cm(end)], [midlineX_cm(1), midlineX_cm(end)]);
+            bodypartData{:, xVariable} = mirroredPoints(:, 1);
+            bodypartData{:, yVariable} = mirroredPoints(:, 2);
+        end
+    end
+end
+
+function bodypartData = mergeBodypartVariables(bodypartData)
+    variableNames = string(bodypartData.Properties.VariableNames);
+    xVariables = variableNames(startsWith(variableNames, 'X ') & contains(variableNames, ' |> '));
+    nodeNames = unique(extractBefore(extractAfter(xVariables, 'X '), ' |> '), 'stable');
+    for nodeIdx = 1:numel(nodeNames)
+        nodeName = nodeNames(nodeIdx);
+        xColumns = variableNames(startsWith(variableNames, "X " + nodeName + " |> "));
+        if ~isempty(xColumns)
+            bodypartData = mergevars(bodypartData, cellstr(xColumns), ...
+                'NewVariableName', char("X " + nodeName));
+        end
+        variableNames = string(bodypartData.Properties.VariableNames);
+        yColumns = variableNames(startsWith(variableNames, "Y " + nodeName + " |> "));
+        if ~isempty(yColumns)
+            bodypartData = mergevars(bodypartData, cellstr(yColumns), ...
+                'NewVariableName', char("Y " + nodeName));
+        end
+        variableNames = string(bodypartData.Properties.VariableNames);
     end
 end

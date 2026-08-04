@@ -14,6 +14,5 @@ function cacheFileName = alignedCacheFileName(dataBaseName, trackingPlatform, co
         error('io:cache:alignedCacheFileName:InvalidInput', ...
             'The data basename, tracking platform, and composite hash must be non-empty text scalars.');
     end
-
     cacheFileName = char(dataBaseName + " - " + trackingPlatform + " - " + compositeHash + ".mat");
 end

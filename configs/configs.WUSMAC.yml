@@ -109,6 +109,8 @@ tracking_providers:
       peak_threshold: 0.1
       filter_min_instance_score: 0.1
 
+    reference_body_part: "Spine_3"
+
     default_midpoint_xoffset_px: 0
 
     default_camera_imgwidth_fov_cm: 77.4

@@ -140,18 +140,21 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 
     [filedir, filename] = fileparts(ethovisionXlsx);
     trackingPlatform = "EthoVision";
-    alignedFile = fullfile(filedir, io.cache.alignedCacheFileName(filename, trackingPlatform, ethovisionXlsxHash));
+    alignedFile = io.cache.alignedCacheFilePath(filedir, filename, trackingPlatform, ethovisionXlsxHash);
     cleanupAlignedCacheFiles(filedir, filename, trackingPlatform, alignedFile);
     if isfile(alignedFile)
-        % Load existing aligned file
-        s = load(alignedFile, 'header', 'datatable', 'units', 'stimulusFrameRange', 'animalMetadata', 'stimuli');
-        header = s.header;
-        datatable = s.datatable;
-        units = s.units;
-        stimulusFrameRange = s.stimulusFrameRange;
-        animalMetadata = s.animalMetadata;
-        stimuli = s.stimuli;
-        return;
+        % Load existing aligned file; corrupt files are removed and regenerated.
+        [s, loaded] = io.cache.loadAlignedCache(alignedFile, ...
+            ["header", "datatable", "units", "stimulusFrameRange", "animalMetadata", "stimuli"]);
+        if loaded
+            header = s.header;
+            datatable = s.datatable;
+            units = s.units;
+            stimulusFrameRange = s.stimulusFrameRange;
+            animalMetadata = s.animalMetadata;
+            stimuli = s.stimuli;
+            return;
+        end
     end
 
 
@@ -527,7 +530,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         'metadataRow', metadataRow, ... % This has extra metadata that is not in animalMetadata, but available only when MasterMetadataTable is provided
         'stimulusFrameRange', stimulusFrameRange, 'animalMetadata', animalMetadata, ...
         'ethovisionXlsxHash', ethovisionXlsxHash, 'stimFileHash', stimFileHash, 'stimuli', metadata, "ALIGNMENT_SCRIPT_VERSION", SCRIPT_VERSION);
-    save(alignedFile, '-struct', 's');
+    io.cache.saveAlignedCache(alignedFile, s);
     stimuli = metadata; % for output
 end
 

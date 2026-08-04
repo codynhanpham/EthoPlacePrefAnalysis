@@ -161,7 +161,7 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             validateattributes(kvargs.Options.Header, {'dictionary'}, {'scalar'});
             validateattributes(kvargs.Options.ExpectedNumVariables, {'numeric'}, {'scalar'});
 
-            obj.platform; %#ok<VUNUS>
+            obj.platform;
 
             mediaPath = io.ethovision.mediaPathFromXlsx(trackingDataFilePath, ...
                 Header=kvargs.Options.Header, ...
@@ -186,7 +186,7 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
             end
             kvargs.Options = defaultOptions;
 
-            obj.platform; %#ok<VUNUS>
+            obj.platform;
             [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = ...
                 io.ethovision.alignEthovisionRawToStim(trackingDataFilePath, stimuliDir, ...
                 MasterMetadataTable=kvargs.Options.MasterMetadataTable, ...
