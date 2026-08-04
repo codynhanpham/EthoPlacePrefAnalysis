@@ -121,7 +121,7 @@ tracking_providers:
 
   SLEAP:
     model_paths:
-      - 
+      - ../../SLEAP/exports/260801_135229.general.n=666
     
     runtime: tensorrt
     device: auto
@@ -130,6 +130,8 @@ tracking_providers:
     max_instances: 1
 
     additional_args:
+      peak_threshold: 0.1
+      filter_min_instance_score: 0.1
 
     default_midpoint_xoffset_px: 0
 

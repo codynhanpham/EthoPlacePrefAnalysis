@@ -174,7 +174,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
         end
 
 
-        function preprocess(obj, varargin)
+        function [varargout] = preprocess(obj, varargin)
             arguments
                 obj (1,1) ui.trackingPlatforms.platforms.SLEAP
             end
@@ -183,6 +183,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             obj.platform;
+            varargout{1} = {};
 
             % Find the main app either via the global handle or by searching for the figure
             if exist('PlacePreferenceGUI', 'var') && ...
@@ -354,7 +355,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
 
             defaultOptions = struct( ...
                 'HeaderOnly', false, ...
-                'Interpolation', 'linear' ...
+                'Interpolation', 'pchip' ...
             );
             for f = fieldnames(kvargs.Options)'
                 defaultOptions.(f{1}) = kvargs.Options.(f{1});
@@ -415,7 +416,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             defaultOptions = struct( ...
-                 'Interpolation', 'linear' ...
+                 'Interpolation', 'pchip' ...
             );
             for f = fieldnames(kvargs.Options)'
                 defaultOptions.(f{1}) = kvargs.Options.(f{1});
