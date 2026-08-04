@@ -187,6 +187,16 @@ tracking_providers:
       # filter_min_mean_node_score: 0.1
 
 
+    # The body parts, in order of priority, to use as the reference point for "where the animal is" in the arena
+    # These body part labels, case sensitive, must match the body part labels in your SLEAP model.
+    # First in the list, when found within a frame, will be used as the animal current position for non-detailed position analyses
+    # If none of the labels are found within a frame, or if the list is left empty, the centroid of all detected body parts, excluding outliers AND those with "tail" (case-insensitive) in their label, will be used as the reference point.
+    # If still no body parts are detected, such frames will be treated as missing subject position data, and may be either excluded or interpolated depending on the analyses and their settings.
+    # 
+    # This field handles both scalar and array values. If there is just a single body part to use, you can specify it as a string. Otherwise, specify a list of strings in order of priority.
+    reference_body_part: "Spine_3"
+
+
     # Default x-offset in pixels to improve default estimation of the midpoint between left/right zones if the arena is not perfectly centered in the camera view. This can be overridden per-arena if needed. Selection made using the GUI via src/modules/PerTrialAnalysis/+graphics/uiselectReferenceLine.m or uiselectReferencePoint.m will take precedence. This value is only for the initial estimation if the manual selection is missing.
     default_midpoint_xoffset_px: 0
 

@@ -82,7 +82,7 @@ classdef EthoVision < ui.trackingPlatforms.TrackingProvider
                 capability {mustBeTextScalar}
             end
 
-            supported = ismember(lower(string(capability)), ["aligntrackingtostim", "preprocess"]);
+            supported = ismember(lower(string(capability)), ["aligntrackingtostim", "preprocess", "l1export"]);
         end
 
         function userConfig = loadConfig(obj, configs)

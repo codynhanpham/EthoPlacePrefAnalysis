@@ -63,9 +63,10 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % SCRIPT_VERSION = '1.2.1'; % Fix logic for end-of-stimulus frame calculation
     % SCRIPT_VERSION = '1.2.2'; % Also save dob and source cage code in animalMetadata output struct
     % SCRIPT_VERSION = '1.2.3'; % Include companion ref.json content in cache hash to invalidate stale aligned files when trigger metadata changes
+    % SCRIPT_VERSION = '1.2.4'; % Include tracking platform in aligned cache filename and migrate legacy cache files
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.2.3'; % Include companion ref.json content in cache hash to invalidate stale aligned files when trigger metadata changes
+    SCRIPT_VERSION = '1.2.4'; % Include tracking platform in aligned cache filename and migrate legacy cache files
 
 
 
@@ -138,7 +139,9 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     ethovisionXlsxHash = DataHash(composite, 'SHA-256');
 
     [filedir, filename] = fileparts(ethovisionXlsx);
-    alignedFile = fullfile(filedir, sprintf("%s - %s.mat", filename, string(ethovisionXlsxHash)));
+    trackingPlatform = "EthoVision";
+    alignedFile = fullfile(filedir, io.cache.alignedCacheFileName(filename, trackingPlatform, ethovisionXlsxHash));
+    cleanupAlignedCacheFiles(filedir, filename, trackingPlatform, alignedFile);
     if isfile(alignedFile)
         % Load existing aligned file
         s = load(alignedFile, 'header', 'datatable', 'units', 'stimulusFrameRange', 'animalMetadata', 'stimuli');
@@ -149,16 +152,6 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         animalMetadata = s.animalMetadata;
         stimuli = s.stimuli;
         return;
-    else
-        % Check if any other aligned files with different hash exist, warn and remove them
-        otherAlignedFiles = dir(fullfile(filedir, sprintf("%s - *.mat", filename)));
-        if ~isempty(otherAlignedFiles)
-            for i = 1:length(otherAlignedFiles)
-                otherFilePath = fullfile(otherAlignedFiles(i).folder, otherAlignedFiles(i).name);
-                warning('Removing old aligned file "%s" since inputs have changed.', otherFilePath);
-                delete(otherFilePath);
-            end
-        end
     end
 
 
@@ -706,5 +699,29 @@ function synchronizeTriggerEventsWithMetadata(refJsonPath, stimStartFrame)
         
     catch
         % Silently fail if unable to read/write/process ref.json
+    end
+end
+
+function cleanupAlignedCacheFiles(filedir, dataBaseName, trackingPlatform, canonicalFile)
+    alignedFiles = dir(fullfile(filedir, '*.mat'));
+    for fileIdx = 1:numel(alignedFiles)
+        candidateFile = fullfile(alignedFiles(fileIdx).folder, alignedFiles(fileIdx).name);
+        if strcmpi(candidateFile, canonicalFile)
+            continue;
+        end
+
+        cacheInfo = io.cache.parseAlignedCacheFileName(alignedFiles(fileIdx).name, ...
+            ExpectedDataBaseName=dataBaseName, ...
+            ExpectedTrackingPlatform=trackingPlatform);
+        isLegacyCache = cacheInfo.isLegacy;
+        isStaleProviderCache = cacheInfo.isProviderLabeled && ...
+            strcmpi(cacheInfo.trackingPlatform, trackingPlatform) && ...
+            strcmp(cacheInfo.dataBaseName, string(dataBaseName));
+        isExactLegacyCache = isLegacyCache && ...
+            strcmp(cacheInfo.dataBaseName, string(dataBaseName));
+        if cacheInfo.isAlignedCache && (isExactLegacyCache || isStaleProviderCache)
+            warning('Removing old aligned file "%s" since the cache naming convention or inputs have changed.', candidateFile);
+            delete(candidateFile);
+        end
     end
 end
