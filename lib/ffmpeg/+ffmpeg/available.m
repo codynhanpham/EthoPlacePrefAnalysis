@@ -11,6 +11,9 @@ function [bool, bin] = available()
 
     persistent cachedFFmpegAvailable cachedFFmpegBin
     
+    % MATLAB may export a library path that is incompatible with FFmpeg.
+    libraryPathCleanup = ffmpeg.utils.clearLinuxLibraryPath(); %#ok<NASGU>
+    cleanup = onCleanup(@() clear('libraryPathCleanup'));
     [status, ~] = system('ffmpeg -version');
 
     if ~isempty(cachedFFmpegAvailable) && ~isempty(cachedFFmpegBin) && status == 0

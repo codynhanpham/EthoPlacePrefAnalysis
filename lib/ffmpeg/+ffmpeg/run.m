@@ -30,6 +30,11 @@ function [status, cmdout] = run(args, kvargs)
         error('FFmpeg is not available on the system. Either install FFmpeg system-wide, or place the binaries in the ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
     end
 
+    % Keep the shim alive through the direct execution path. The helper also
+    % protects executeFFmpeg and its CUDA fallback process launches.
+    libraryPathCleanup = ffmpeg.utils.clearLinuxLibraryPath(); %#ok<NASGU>
+    cleanup = onCleanup(@() clear('libraryPathCleanup'));
+
     args = string(args);
     cmdout = '';
 

@@ -1,11 +1,10 @@
 # THIS IS THE CONFIGURATION FILE FOR THE HBOX (OpenField with Hallway) PLACE PREFERENCE SETUP.
 
 preferences:
-  # Nothing yet
 
 defaults:
   stimuli_directory: "../../Stimuli/playlists"
-  master_metadata_table: "../../Place Preferences - Master Metadata.xlsx"
+  master_metadata_table: "../../WUSMAC - Place Preferences - Master Metadata.xlsx"
   project_root: "../../ETHOVISION"
   tracking_platform: "EthoVision"
 
@@ -95,33 +94,10 @@ tracking_providers:
             assign_to: "right"
         neutral_zones:
           - name: "Hallway 2"
-
-
-  DeepLabCut:
-    config_file: "../../DLCDetectionModel/config.yaml"
-
-    default_midpoint_xoffset_px: 0
-
-    default_camera_imgwidth_fov_cm: 58.5
-
-    arena:
-      - name: "Arena 1"
-        midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 58.5
-
-      - name: "Lily Booth"
-        midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
-      
-      - name: "Rain Booth"
-        midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
-
-
-
+  
   SLEAP:
     model_paths:
-      - ../../SLEAP/exports/260801_135229.general.windows_x64.n=666
+      - ../../SLEAP/exports/260801_135229.general.linux_x64.n=666
     
     runtime: tensorrt
     device: auto

@@ -14,6 +14,8 @@ arguments
     stdoutCallback {mustBeFunctionHandleOrEmpty} = [] % or @(varargin)[]
 end
 
+libraryPathCleanup = ffmpeg.utils.clearLinuxLibraryPath(); %#ok<NASGU>
+
 command = char(command);
 
 try

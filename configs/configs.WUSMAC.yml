@@ -97,7 +97,7 @@ tracking_providers:
   
   SLEAP:
     model_paths:
-      - ../../SLEAP/exports/260801_135229.general.n=666
+      - ../../SLEAP/exports/260801_135229.general.windows_x64.n=666
     
     runtime: tensorrt
     device: auto

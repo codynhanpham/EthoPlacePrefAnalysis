@@ -11,16 +11,23 @@ The primary tasks include:
 The program is compatible with linear-zone setups (e.g., two-chamber place preference relative to midline) as well as open-field or Y-maze style arenas (relative to a user-defined reference point/line) with user-defined zones.
 
 ## Requirements
+Here are the general requirements:
 - MATLAB ≥2024b or MATLAB Runtime if using the compiled version.
 - For now, a ***MasterMetadata*** Excel file with pre-defined headers to associate the video/data files with test subjects' metadata logs, stimulus conditions, and trial timings. See [MasterMetadata Validation](./src/+io/+metadata/isMasterMetadataTable.m) for the required headers.
 
 Additionally, the source code includes a pre-compiled binary, `metadata_extract`, to extract metadata (specifically, chapter/marker timestamps) from `.flac` audio stimulus files. This binary is part of the full `NI-DAQmx Media Player` software used for integrating audio stimulus presentation with EthoVision, whose source code is available at [codynhanpham/nidaq_audioplayer](https://github.com/codynhanpham/nidaq_audioplayer).
+
+Lastly, depending on your OS, there may be some additional system-level dependencies that you need to install. Please read on for more specifics.
 
 ### Operating systems
 The program is designed to run on all platforms that is supported by MATLAB, including **Windows**, **macOS**, and **Linux**. It is used and tested regularly on Windows 11, Ubuntu 24.04 (Debian-based Linux), and CachyOS (Arch-based Linux).
 
 The only bottleneck at the moment is building the `metadata_extract` binary for macOS as I do not have access to a modern Mac machine to compile it. If you are on macOS, please head to the [nidaq_audioplayer](https://github.com/codynhanpham/nidaq_audioplayer) repository to build the binary from source, then place the compiled binary in the [`./src/+io/+stimuli`](./src/+io/+stimuli) folder.
 
+#### Linux Dependencies
+Additional system dependencies are required, either by MATLAB itself (most of the time), or by some specific modules included in this project.
+
+- `gstreamer`: MATLAB relies on `gstreamer` for most of its multimedia processing capabilities, especially for the `VideoReader` object. Follow the official installation guide [here](https://gstreamer.freedesktop.org/documentation/installing/on-linux.html?gi-language=c).
 
 ## Third-Party Software Integration
 Support for additional tracking/pose-estimation software, ethogram labeling tools, or other applications will be added to this core repository as needed by our lab workflows and not guaranteed.

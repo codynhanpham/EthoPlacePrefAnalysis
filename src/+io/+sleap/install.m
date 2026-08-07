@@ -374,16 +374,24 @@ function installSleapPackages(sleapdir, nnExport)
     fprintf('Installing SLEAP packages into virtual environment ...\n');
     cmd = 'pip install --torch-backend auto "sleap[nn]>=1.6.4" "sleap-io"';
     sleapnn = 'sleap-nn';
+    constraints = {}; % add additional constraints, this is mostly to patch incompat versions with the current published sleap deps
     if strcmp(nnExport, 'onnx-cpu')
         sleapnn = [sleapnn '[export]'];
     elseif strcmp(nnExport, 'onnx-gpu')
         sleapnn = [sleapnn '[export-gpu]'];
     elseif strcmp(nnExport, 'tensorrt')
         sleapnn = [sleapnn '[export-gpu,tensorrt]'];
+        constraints{end+1} = '"tensorrt<11"';
     elseif strcmp(nnExport, 'none')
         % Do nothing, don't add any extra dependencies.
     end
     cmd = sprintf('%s "%s"', cmd, sleapnn);
+
+    % Add additional constraints at the end
+    if ~isempty(constraints)
+        cmd = sprintf('%s %s', cmd, strjoin(constraints, ' '));
+    end
+
     fprintf('Running command: \n\tuv %s\n', cmd);
     [status, cmdOut] = uv.cmd(cmd, UpdateCallbackFcn=@displayuvoutput);
     if status ~= 0

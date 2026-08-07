@@ -30,6 +30,9 @@ function [status, cmdout] = run(args, kvargs)
         error('FFprobe is not available on the system. Either install FFprobe system-wide (typically, it should be installed alongside FFmpeg), or place the binaries in the ffmpeg/bin/ folder. https://ffmpeg.org/download.html');
     end
 
+    libraryPathCleanup = ffmpeg.utils.clearLinuxLibraryPath(); %#ok<NASGU>
+    cleanup = onCleanup(@() clear('libraryPathCleanup'));
+
     args = string(args);
     cmd = sprintf('"%s" %s', bin, args);
 

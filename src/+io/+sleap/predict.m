@@ -75,16 +75,38 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
     end
 
     % Scan over all video files and count the total number of frames, to estimate the total time for processing.
+    % FFprobe scan is preferred as it is significantly faster than native VideoReader
     nFrames = NaN(1, numel(videoFiles));
     nFramesTotalEstimate = 0;
+    hasFFmpeg = ~isempty(matlab.metadata.Namespace.fromName('ffmpeg'));
     for i = 1:numel(videoFiles)
         try
-            v = VideoReader(videoFiles{i});
-            nFrames(i) = v.NumFrames;
-            nFramesTotalEstimate = nFramesTotalEstimate + v.NumFrames;
-        catch ME
-            warning('io:sleap:runSLEAP:VideoReadError', ...
-                'Could not read video file "%s": %s', videoFiles{i}, ME.message);
+            if hasFFmpeg
+                nFrames(i) = countFramesWithFFmpeg(videoFiles{i});
+            else
+                v = VideoReader(videoFiles{i});
+                nFrames(i) = v.NumFrames;
+            end
+        catch MEFFmpeg
+            if hasFFmpeg
+                % A failed FFmpeg probe indicates it is not usable for this scan.
+                % Fall back for the current file and avoid retrying it for later files.
+                hasFFmpeg = false;
+                try
+                    v = VideoReader(videoFiles{i});
+                    nFrames(i) = v.NumFrames;
+                catch MEVideoReader
+                    warning('io:sleap:runSLEAP:VideoReadError', ...
+                        'Could not read video file "%s" with FFmpeg (%s) or VideoReader (%s).\n\nFull reports:\nFFmpeg: %s\n\nVideoReader: %s', ...
+                        videoFiles{i}, MEFFmpeg.message, MEVideoReader.message, getReport(MEFFmpeg), getReport(MEVideoReader));
+                end
+            else
+                warning('io:sleap:runSLEAP:VideoReadError', ...
+                    'Could not read video file "%s": %s\n\nFull reports:\n%s', videoFiles{i}, MEFFmpeg.message, getReport(MEFFmpeg));
+            end
+        end
+        if ~isnan(nFrames(i))
+            nFramesTotalEstimate = nFramesTotalEstimate + nFrames(i);
         end
     end
 
@@ -292,4 +314,16 @@ function mustBeProgressDialogHandleOrEmpty(value)
     if ~isscalar(value) || ~isvalid(value) || ~isa(value, 'matlab.ui.dialog.ProgressDialog')
         error('Value must be a scalar valid matlab.ui.dialog.ProgressDialog handle or empty.');
     end    
+end
+
+function nFrames = countFramesWithFFmpeg(videoFile)
+    %COUNTFRAMESWITHFFMPEG Count video frames using FFprobe metadata.
+    args = sprintf('-v error -select_streams v:0 -show_entries stream=nb_frames -of default=noprint_wrappers=1:nokey=1 "%s"', ...
+        strrep(videoFile, '"', '\\"'));
+    [~, output] = ffprobe.run(args, 'Echo', false);
+    nFrames = str2double(strtrim(output));
+    if isnan(nFrames) || nFrames < 0
+        error('io:sleap:runSLEAP:FFmpegFrameCountError', ...
+            'FFprobe did not return a valid frame count for video file "%s".', videoFile);
+    end
 end

@@ -10,6 +10,10 @@ function [bool, bin] = available()
     % If you do not have ffprobe installed system/user-wide, grab the executables for your OS at https://www.ffmpeg.org/download.html and place them in the "bin" folder located in this package '/lib/ffmpeg/+ffmpeg/bin'
 
     persistent cachedFFprobeAvailable cachedFFprobeBin
+
+    % MATLAB may export a library path that is incompatible with FFprobe.
+    libraryPathCleanup = ffmpeg.utils.clearLinuxLibraryPath(); %#ok<NASGU>
+    cleanup = onCleanup(@() clear('libraryPathCleanup'));
     [status, ~] = system('ffprobe -version');
     if ~isempty(cachedFFprobeAvailable) && ~isempty(cachedFFprobeBin) && status == 0
         bool = cachedFFprobeAvailable;
