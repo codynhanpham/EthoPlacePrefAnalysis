@@ -31,30 +31,36 @@ function mediaPath = mediaPathFromXlsx(ethovisionXlsx, kvargs)
     experimentName = headers("Experiment");
     videoFilePath = headers("Video file");
 
-    % Find the last occurrence of the experiment name in the path
-    % Check if the path contains ":\" to use the correct file separator
-    if contains(ethovisionXlsx, ':\')
-        sep = '\';
-    else
-        sep = '/';
-    end
-    pathParts = strsplit(ethovisionXlsx, sep);
-    expIdx = find(strcmp(pathParts, experimentName), 1, 'last');
-    % Keep the path up to and including the experiment name
+    % Normalize separators before comparing paths. EthoVision stores the path
+    % using the separator of the machine that performed the export, which
+    % may differ from the machine currently loading the XLSX file.
+    normalizedXlsxPath = replace(string(ethovisionXlsx), "\", "/");
+    normalizedVideoPath = replace(string(videoFilePath), "\", "/");
+
+    % Find the last occurrence of the experiment name in the XLSX path.
+    % Matching path components avoids accidental matches inside filenames.
+    xlsxParts = split(normalizedXlsxPath, "/");
+    expIdx = find(xlsxParts == experimentName, 1, 'last');
     if isempty(expIdx)
         basePath = fileparts(ethovisionXlsx);
     else
-        basePath = fullfile(pathParts{1:expIdx});
+        % Retain the original path root (including a leading slash on Linux)
+        % while using the current platform's separator for the result.
+        basePath = strjoin(xlsxParts(1:expIdx), filesep);
+        if startsWith(normalizedXlsxPath, "/") && ~startsWith(basePath, filesep)
+            basePath = [filesep, basePath];
+        end
     end
-    % Get everything after the experiment name in the video file path
-    videoSubPath = strsplit(videoFilePath, [char(experimentName), sep]);
-    
-    if numel(videoSubPath) < 2
-        % If experiment name not found, return the original video file path
+
+    % Get everything after the experiment component in the video path. This
+    % works even when the metadata path uses Windows separators on Linux.
+    videoParts = split(normalizedVideoPath, "/");
+    videoExpIdx = find(videoParts == experimentName, 1, 'last');
+    if isempty(videoExpIdx) || videoExpIdx == numel(videoParts)
+        % If the experiment name is not present, retain the original behavior.
         mediaPath = videoFilePath;
         return;
-    else
-        relativeVideoPath = fullfile(videoSubPath{2:end});
     end
+    relativeVideoPath = strjoin(videoParts(videoExpIdx + 1:end), filesep);
     mediaPath = fullfile(basePath, relativeVideoPath);
 end

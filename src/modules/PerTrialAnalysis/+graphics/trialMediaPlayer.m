@@ -45,7 +45,6 @@ bpColors = [];
 trackingEdges = struct('source', {}, 'target', {});
 bodypartNames = strings(0);
 centerPointBodyPartIndex = [];
-frameTimestamps = [];
 
 if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && isfile(kvargs.TrackingDataFile) && ~isempty(kvargs.TrackingProvider)
     try
@@ -54,9 +53,9 @@ if isfield(kvargs, 'TrackingDataFile') && ~isempty(kvargs.TrackingDataFile) && i
         trackData = coords; % Nx2xM
         trackDataTime = timestampSec;
         
-        % Use tracking timestamps for video navigation
-        frameTimestamps = timestampSec;
-
+        % Tracking timestamps are kept separate from the video timeline.
+        % Video PTS are loaded below and are authoritative for navigation.
+        
         % Bodypart names and center detection
         if isfield(metadata, 'bodyparts') && ~isempty(metadata.bodyparts)
             try
@@ -135,20 +134,28 @@ catch
     return;
 end
 
-% Determine frame timestamps if not already set by tracking
-if isempty(frameTimestamps)
-    try
-        % Try to use ffprobe to get PTS
-        [pts, timebase] = ffprobe.pts(fullPath);
-        frameTimestamps = pts * timebase;
-    catch
-        % Fallback to constant frame rate if ffprobe fails or not available
-        warning('graphics:trialMediaPlayer:FFprobeFailed', 'Could not get PTS from ffprobe. Falling back to constant frame rate.');
-        frameTimestamps = (0:videoObj.NumFrames-1)' / frameRate;
-    end
+% Always build the navigation timeline from the video's presentation
+% timestamps. Tracking timestamps may have a different length and/or sampling
+% interval, so they must never determine the video frame count.
+try
+    % ffprobe.pts returns one PTS per decoded video frame and its timebase.
+    [pts, timebase] = ffprobe.pts(fullPath);
+    frameTimestamps = double(pts(:)) * double(timebase);
+catch
+    % Fallback only when ffprobe is unavailable. This is not exact for VFR
+    % media, but preserves compatibility with installations without ffprobe.
+    warning('graphics:trialMediaPlayer:FFprobeFailed', ...
+        'Could not get PTS from ffprobe. Falling back to constant frame rate.');
+    frameTimestamps = (0:videoObj.NumFrames-1)' / frameRate;
 end
 
-totalFrames = length(frameTimestamps);
+frameTimestamps = frameTimestamps(isfinite(frameTimestamps));
+if isempty(frameTimestamps)
+    warning('graphics:trialMediaPlayer:NoVideoTimestamps', ...
+        'The video has no usable presentation timestamps.');
+    return;
+end
+totalFrames = numel(frameTimestamps);
 
 
 % Extract the stimulus trigger event time from {videoBaseName}.ref.json in the "trigger_events" field, if it exists
@@ -353,7 +360,9 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex, ...
     'trackingEdges', trackingEdges, ...
     'frameTimestamps', frameTimestamps, 'frameTimestampEdges', [], 'overlayHandles', gobjects(0), ...
-    'lastSeekTime', NaN, 'videoFile', fullPath, 'lastMKeyPressTime', NaT, 'doubleMWindowSec', 0.3);
+    'lastSeekTime', NaN, 'videoFrameIndex', 0, ...
+    'playbackClock', [], 'playbackStartPTS', NaN, ...
+    'videoFile', fullPath, 'lastMKeyPressTime', NaT, 'doubleMWindowSec', 0.3);
 
 % Precompute timestamp bin edges for fast time->index mapping
 try
@@ -440,11 +449,12 @@ function displayFrameWithTrack(frameNum, ~)
     %   frameNum - Video frame number to display (index in frameTimestamps)
     %   realFrameTime - Real time of the frame in seconds
     
-    if frameNum < 1 || frameNum > length(appData.frameTimestamps)
+    if frameNum < 1 || frameNum > totalFrames
         return;
     end
 
-    % Get timestamp for the requested frame
+    % Get timestamp for the requested frame. Video PTS are the only video
+    % timeline; tracking is matched independently during rendering.
     t = appData.frameTimestamps(frameNum);
     
     ensureVideoObjAtTime(t);
@@ -452,15 +462,13 @@ function displayFrameWithTrack(frameNum, ~)
         if ~hasFrame(appData.videoObj)
             return;
         end
-        % VideoReader.CurrentTime typically advances *after* readFrame().
-        % Capture it before reading so tracking aligns with the displayed frame.
-        realFrameTime = appData.videoObj.CurrentTime;
         frame = readFrame(appData.videoObj);
+        appData.videoFrameIndex = frameNum;
     catch
         return;
     end
 
-    renderFrameWithTrack(frame, realFrameTime);
+    renderFrameWithTrack(frame, t);
 end
 
 function renderFrameWithTrack(frame, realFrameTime)
@@ -505,7 +513,9 @@ function renderFrameWithTrack(frame, realFrameTime)
 
         trackFrame = 1;
         if ~isempty(realFrameTime) && ~isempty(appData.trackDataTime)
-            [~, trackFrame] = min(abs(appData.trackDataTime - realFrameTime));
+            % Match this video PTS to the nearest tracking timestamp. The
+            % arrays may have different lengths and sampling frequencies.
+            [~, trackFrame] = min(abs(double(appData.trackDataTime(:)) - double(realFrameTime)));
         end
         trackFrame = max(1, min(trackFrame, size(appData.trackData, 1)));
 
@@ -651,22 +661,6 @@ function renderFrameWithTrack(frame, realFrameTime)
     updateFpsDisplay();
 end
 
-function idx = timeToFrameIndex(t)
-    try
-        if isempty(appData.frameTimestampEdges) || isempty(appData.frameTimestamps)
-            idx = max(1, min(appData.currentFrame, totalFrames));
-            return;
-        end
-        idx = discretize(t, appData.frameTimestampEdges);
-        if isempty(idx) || isnan(idx)
-            idx = 1;
-        end
-        idx = max(1, min(idx, totalFrames));
-    catch
-        idx = max(1, min(appData.currentFrame, totalFrames));
-    end
-end
-
 function ensureVideoObjAtTime(t)
     try
         if ~isfinite(t) || t < 0
@@ -674,6 +668,7 @@ function ensureVideoObjAtTime(t)
         end
         if isfinite(appData.lastSeekTime) && t < appData.lastSeekTime
             appData.videoObj = VideoReader(appData.videoFile);
+            appData.videoFrameIndex = 0;
         end
         appData.videoObj.CurrentTime = t;
         appData.lastSeekTime = t;
@@ -681,6 +676,7 @@ function ensureVideoObjAtTime(t)
         try
             appData.videoObj = VideoReader(appData.videoFile);
             appData.videoObj.CurrentTime = t;
+            appData.videoFrameIndex = 0;
             appData.lastSeekTime = t;
         catch
         end
@@ -706,29 +702,26 @@ function togglePlayback()
         appData.timer = [];
         playButton.Text = 'Play';
     else
-        % Start playback
+        % Start playback from the currently displayed video frame. The
+        % selected frame's PTS anchors the wall-clock playback schedule.
+        if appData.currentFrame >= totalFrames
+            return;
+        end
         appData.isPlaying = true;
         playButton.Text = 'Pause';
-
-        % Reset FPS counter for accurate measurement
         appData.frameCount = 0;
         appData.startTime = tic;
-        appData.fpsHistory = [repmat(frameRate, 1, round(frameRate))]; % Reset history
-
-        % Set up a timer to read frames with more aggressive timing
-        targetPeriod = 1/frameRate;
-        % Use a faster period to compensate for rendering overhead
-        actualPeriod = max(0.001, round(targetPeriod * 0.8, 3)); % 20% faster to account for overhead
-        appData.timer = timer('ExecutionMode', 'fixedRate', 'Period', actualPeriod, ...
+        appData.fpsHistory = [repmat(frameRate, 1, round(frameRate))];
+        appData.playbackStartPTS = appData.frameTimestamps(appData.currentFrame);
+        appData.playbackClock = tic;
+        appData.timer = timer('ExecutionMode', 'fixedRate', 'Period', 0.001, ...
             'TimerFcn', @(obj, event) updateFrame);
-        appData.lastFrameTime = tic;
         start(appData.timer);
     end
 end
 
 function updateFrame()
-    % Check if the figure is still open and video has more frames
-    % Stream decode: do NOT seek per frame; only readFrame sequentially.
+    % Check if the figure is still open and video has more frames.
     if ~isvalid(fig)
         try
             togglePlayback();
@@ -737,55 +730,35 @@ function updateFrame()
         return;
     end
 
-    if isempty(appData.videoObj)
-        try
-            appData.videoObj = VideoReader(appData.videoFile);
-        catch
-            togglePlayback();
-            return;
-        end
-    end
-
-    if ~hasFrame(appData.videoObj)
+    if appData.videoFrameIndex >= totalFrames
         togglePlayback();
         return;
     end
 
-    targetPeriod = 1/frameRate;
-    elapsedTime = toc(appData.lastFrameTime);
-    skipCount = max(1, min(5, floor(elapsedTime / targetPeriod)));
+    % Pace decoding against absolute video PTS differences. This supports
+    % variable-frame-rate media and does not use FrameRate or CurrentTime.
+    nextFrameIndex = appData.videoFrameIndex + 1;
+    targetElapsed = appData.frameTimestamps(nextFrameIndex) - appData.playbackStartPTS;
+    if toc(appData.playbackClock) < targetElapsed
+        return;
+    end
 
     try
-        for k = 1:(skipCount-1)
-            if hasFrame(appData.videoObj)
-                readFrame(appData.videoObj);
-            else
-                togglePlayback();
-                return;
-            end
-        end
-
-        if hasFrame(appData.videoObj)
-            % Capture time before reading; CurrentTime advances after readFrame().
-            realFrameTime = appData.videoObj.CurrentTime;
-            frame = readFrame(appData.videoObj);
-        else
+        if ~hasFrame(appData.videoObj)
             togglePlayback();
             return;
         end
+        frame = readFrame(appData.videoObj);
     catch
         togglePlayback();
         return;
     end
 
-    renderFrameWithTrack(frame, realFrameTime);
-
-    idx = timeToFrameIndex(realFrameTime);
-    appData.currentFrame = idx;
-    appData.slider.Value = idx;
-    appData.frameLabel.Value = idx;
-
-    appData.lastFrameTime = tic;
+    appData.videoFrameIndex = nextFrameIndex;
+    renderFrameWithTrack(frame, appData.frameTimestamps(nextFrameIndex));
+    appData.currentFrame = nextFrameIndex;
+    appData.slider.Value = nextFrameIndex;
+    appData.frameLabel.Value = nextFrameIndex;
     drawnow limitrate nocallbacks;
 end
 

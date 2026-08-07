@@ -500,8 +500,9 @@ classdef (Abstract) TrackingProvider < handle
         [header, data, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, Options);
         %%ALIGNTRACKINGTOSTIM Align tracking data to stimulus events for analysis
         %   The initial contract preserves the six outputs of the legacy
-        %   EthoVision alignment function. Options must contain at least
-        %   MasterMetadataTable and Config.
+        %   EthoVision alignment function. The returned stimulusFrameRange is
+        %   an index range into the aligned tracking datatable, not a video-frame
+        %   range. Options must contain at least MasterMetadataTable and Config.
 
 
 

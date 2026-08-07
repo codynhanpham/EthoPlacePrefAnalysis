@@ -13,21 +13,21 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     %       - 'ExpectedNumVariables' (optional): The number of data columns in the table to expect in EthoVision exported XLSX file. Default max is 50, with empty columns removed.
     %
     %       - 'StimulusProtocol' (optional if `MasterMetadataTable` exists): The name of the stimuli file played during this trial, including the `.flac` extension. This file must exists in `stimuliDir`. If `MasterMetadataTable` is provided, this value will take precedence.
-    %       - 'StimStartFrame' (optional if `MasterMetadataTable` exists): The frame number at which the stimulus starts. This is the first frame when the signal LED turns on in the raw recording. If `MasterMetadataTable` is provided, this value will take precedence.
+    %       - 'StimStartFrame' (optional if `MasterMetadataTable` exists): The 1-based video frame index at which the stimulus starts, defined by the video presentation timestamp (PTS) at the instant the stimulus begins. If `MasterMetadataTable` is provided, this value will take precedence.
     %       - 'SpeakerFlipped' (optional if `MasterMetadataTable` exists): Indicates whether the speaker was flipped during the trial (Normal: Ch1-Left, Ch2-Right | Flipped: Ch1-Right, Ch2-Left). If `MasterMetadataTable` is provided, this value will take precedence.
     %       - 'MasterMetadataTable' (required when any of 'StimuliFileName', 'StimStartFrame', or 'SpeakerFlipped' is missing): Path to the master metadata table containing information about the trials and stimuli. The following headers are required:
     %           + 'ETHOVISION_FILE': Indicates the EthoVision file associated with the trial, must match the `Experiment` header in `ethovisionXlsx`.
     %           + 'ETHOVISION_TRIAL': The trial number, should be in the file name of `ethovisionXlsx`, and match the numeric part of `Trial name` header.
     %           + 'STIMULUS_PROTOCOL': Value to be used for `StimulusProtocol`.
     %           + 'STIM_START_FRAME': Value to be used for `StimStartFrame`.
-    %           + 'HABITUATION_DURATION_SEC': Default used when `STIM_START_FRAME` is missing or NaN, default to 0 if this is also missing or NaN. This value is multiplied by the average frame rate in 'Trial time' column of `ethovisionXlsx`, then +1, to estimate the stimulus start frame.
+    %           + 'HABITUATION_DURATION_SEC': Default used when `STIM_START_FRAME` is missing or NaN, default to 0 if this is also missing or NaN. This value is interpreted as a time relative to the video start and resolved to the closest EthoVision row by trial-time matching.
     %           + 'SPEAKER_FLIPPED': Value to be used for `SpeakerFlipped`.
     %
     %   Outputs:
     %       header   - The header information for the aligned data
     %       datatable - The aligned data table
     %       units    - The units of the data columns
-    %       stimulusFrameRange - The frame range for the stimulus as [startFrame, endFrame], inclusive
+    %       stimulusFrameRange - The EthoVision datatable row range for the stimulus as [startRow, endRow], inclusive
     %       animalMetadata - A struct containing metadata about the animal (sex, strain, genotype, age, dob, cagecode, id, source)
     %       stimuli  - Metadata of the stimuli used in this trial, including individual stimulus timestamps and durations
     %
@@ -64,9 +64,10 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % SCRIPT_VERSION = '1.2.2'; % Also save dob and source cage code in animalMetadata output struct
     % SCRIPT_VERSION = '1.2.3'; % Include companion ref.json content in cache hash to invalidate stale aligned files when trigger metadata changes
     % SCRIPT_VERSION = '1.2.4'; % Include tracking platform in aligned cache filename and migrate legacy cache files
+    % SCRIPT_VERSION = '2.0.0'; % STIM_START_FRAME is now interpreted as a 1-based video-frame index; EthoVision rows are derived from video PTS via Trial time matching.
     % % Comment out previous versions, move above this line (do not delete, keep for reference)
     % % and add the new version with notes here
-    SCRIPT_VERSION = '1.2.4'; % Include tracking platform in aligned cache filename and migrate legacy cache files
+    SCRIPT_VERSION = '2.0.0'; % STIM_START_FRAME is now interpreted as a 1-based video-frame index; EthoVision rows are derived from video PTS via Trial time matching.
 
 
 
@@ -135,8 +136,18 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
         refJsonHash = DataHash(refJsonPath, 'SHA-256', 'file');
     end
 
-    composite = [char(ethovisionXlsxHash), char(manualparamsHash), char(configHash), char(metadatarowHash), char(stimFileHash), char(refJsonPath), char(string(refJsonExists)), char(refJsonHash), char(SCRIPT_VERSION)];
-    ethovisionXlsxHash = DataHash(composite, 'SHA-256');
+    compositeParts = {
+        ethovisionXlsxHash, ...
+        manualparamsHash, ...
+        configHash, ...
+        metadatarowHash, ...
+        stimFileHash, ...
+        refJsonPath, ...
+        refJsonExists, ...
+        refJsonHash, ...
+        SCRIPT_VERSION
+    };
+    ethovisionXlsxHash = DataHash(compositeParts, 'SHA-256');
 
     [filedir, filename] = fileparts(ethovisionXlsx);
     trackingPlatform = "EthoVision";
@@ -160,6 +171,14 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 
     % Load EthoVision data
     [header, datatable, units] = io.ethovision.loadEthovisionXlsx(ethovisionXlsx, ExpectedNumVariables=kvargs.ExpectedNumVariables, ArenaName=kvargs.ArenaName, HeaderOnly=false);
+
+    % Read the video timeline from ffprobe PTS. This is the authoritative
+    % timing source for the video-frame-based stimulus input.
+    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
+    if isempty(mediafile) || ~isfile(mediafile)
+        error('Could not resolve a media file for EthoVision export %s.', ethovisionXlsx);
+    end
+    videoTimes = localReadVideoTimestamps(mediafile);
 
     % Extract metadata parameters if available from the matching row in master metadata
     sex = ''; genotype = ''; strain = ''; age = ''; dob = NaT; cagecode = ''; id = ''; source = '';
@@ -218,12 +237,11 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
                     if isempty(habitdur) || isnan(habitdur)
                         habitdur = 0; % Default to start of trial
                     end
-                    mediafile = io.ethovision.mediaPathFromXlsx(ethovisionXlsx, "Header", header);
-                    if isfile(mediafile)
-                        v = VideoReader(mediafile);
-                        fps = v.FrameRate;
-                        kvargs.StimStartFrame = habitdur * fps + 1;
-                        clear v;
+                    if ~isempty(videoTimes)
+                        % Resolve the habituation duration to the nearest video PTS,
+                        % then map that time onto EthoVision Trial time.
+                        [~, videoStimStartFrame] = min(abs(double(videoTimes(:)) - double(habitdur)));
+                        kvargs.StimStartFrame = videoStimStartFrame;
                     end
                 end
             end
@@ -254,6 +272,22 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     % Do post-processing, more convenient for downstream tasks
     kvargs.SpeakerFlipped = logical(kvargs.SpeakerFlipped);
 
+    % Resolve the provided video-frame input to the nearest EthoVision row by
+    % matching the corresponding video PTS to the trial-time column.
+    kvargs.StimStartFrame = round(double(kvargs.StimStartFrame));
+    if kvargs.StimStartFrame < 1 || kvargs.StimStartFrame > numel(videoTimes)
+        error('StimStartFrame %d is outside the video PTS range 1:%d.', kvargs.StimStartFrame, numel(videoTimes));
+    end
+    stimStartVideoFrame = kvargs.StimStartFrame;
+    stimStartVideoTime = videoTimes(stimStartVideoFrame);
+    trialTimes = double(datatable{:, 'Trial time'});
+    [~, stimStartTrackingFrame] = min(abs(trialTimes(:) - stimStartVideoTime));
+    timeAtStimStart = trialTimes(stimStartTrackingFrame);
+    header("Stimulus start video frame") = string(stimStartVideoFrame);
+    header("Stimulus start video time (s)") = string(stimStartVideoTime);
+    header("Stimulus start EthoVision row") = string(stimStartTrackingFrame);
+    header("Stimulus start EthoVision time (s)") = string(timeAtStimStart);
+
     % Extract metadata from stimulus file
     metadata = io.stimuli.extractMetadata(stimFile, "Config", kvargs.Config);
 
@@ -269,10 +303,10 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     chapters = metadata.chapters; % Nx1 struct array with fields: timestamp, title, description, startsample
 
     numRows = size(datatable, 1);
-    % Calculate stimulus timing
-    timeAtStimStart = datatable{kvargs.StimStartFrame, 'Trial time'};
+    % Calculate stimulus timing from the EthoVision row matched to the video
+    % stimulus-start PTS, then extend to the row whose Trial time best matches
+    % the stimulus end time.
     stimEndTime = timeAtStimStart + metadata.duration;
-    trialTimes = datatable{:, 'Trial time'};
     stimEndFrame = find(trialTimes >= stimEndTime, 1, 'first');
     if isempty(stimEndFrame)
         stimEndFrame = numRows + 1;
@@ -292,8 +326,8 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     end
 
     % Chapter assignment
-    if kvargs.StimStartFrame < stimEndFrame
-        stimIndices = kvargs.StimStartFrame:(stimEndFrame-1);
+    if stimStartTrackingFrame < stimEndFrame
+        stimIndices = stimStartTrackingFrame:(stimEndFrame-1);
         
         if ~isempty(stimIndices)
             % Calculate relative timestamps for all stimulus frames
@@ -520,7 +554,7 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
     datatable = addvars(datatable, cellstr(chapterOriginal), speakerChannelsFlipped, speakerPosExtended, animalSameZoneAsStim, animalMatchedStim, speakerPos, ...
         'NewVariableNames', {'Chapter Original', 'Speaker Channels Flipped', 'Stim Speaker Corrected', 'Animal Is Same Zone As Stim', 'Animal Matched Stim Name', 'Matched Speaker Position'});
 
-    stimulusFrameRange = [kvargs.StimStartFrame, stimEndFrame-1];
+    stimulusFrameRange = [stimStartTrackingFrame, stimEndFrame-1];
     % drop thumbnail from stim metadata since it will take up unnecessary space when saving
     if isfield(metadata, 'thumbnail')
         metadata = rmfield(metadata, 'thumbnail');
@@ -550,6 +584,26 @@ function mustBeNumericLogicalOrEmpty(value)
     mustBeNumericOrLogical(value);
 end
 
+
+function videoTimes = localReadVideoTimestamps(mediafile)
+    %%LOCALREADVIDEOTIMESTAMPS Read ffprobe PTS timestamps for a video file.
+    % The returned values are the authoritative video timeline and are used to
+    % resolve a video-frame stimulus start to the nearest EthoVision Trial time.
+    try
+        [pts, timebase] = ffprobe.pts(char(mediafile));
+    catch ME
+        error('Could not read video PTS timestamps from %s: %s', mediafile, ME.message);
+    end
+
+    videoTimes = double(pts(:)) .* double(timebase);
+    videoTimes = videoTimes(isfinite(videoTimes));
+    if isempty(videoTimes)
+        error('No finite video PTS timestamps were returned for %s.', mediafile);
+    end
+    if numel(videoTimes) > 1 && any(diff(videoTimes) <= 0)
+        error('Video PTS timestamps must be strictly increasing for %s.', mediafile);
+    end
+end
 
 function [zoneName, option] = parseInZoneText(text)
     % Parse text in format: "In zone(<ZoneName> / <Option>)"
@@ -634,9 +688,9 @@ function triggerStartFrame = readTriggerEventsStartFrame(refJsonPath)
 end
 
 function synchronizeTriggerEventsWithMetadata(refJsonPath, stimStartFrame)
-    %%SYNCHRONIZETRIGGEREVENTSSWITHMETADATA Update trigger_events in ref.json to match STIM_START_FRAME from metadata
-    %   Sets the first trigger event's start frame to stimStartFrame,
-    %   creates default trigger event if missing, and marks as validated
+    %%SYNCHRONIZETRIGGEREVENTSSWITHMETADATA Update trigger_events in ref.json to match the video-frame-based STIM_START_FRAME.
+    %   Sets the first trigger event's start frame to the 1-based video frame index,
+    %   creates a default trigger event if missing, and marks it as validated.
     
     if isempty(stimStartFrame) || isnan(stimStartFrame)
         return;
