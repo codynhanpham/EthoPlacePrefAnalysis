@@ -101,6 +101,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
 
     stimtables = configureDictionary("string", "struct");
     animalMetadataDict = configureDictionary("string", "struct");
+    hasArenaGridScore = false;
+    missingArenaGridScorePaths = strings(0, 1);
 
     for i = 1:ntrials
         if ~isempty(kvargs.UIFigure)
@@ -172,6 +174,11 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         thisX = centerpointData.data{:, 'X center'};
         thisY = centerpointData.data{:, 'Y center'};
         thisArenaGridScore = centerpointData.arenaGridScore;
+        if ~isempty(thisArenaGridScore) && any(~isnan(thisArenaGridScore), 'all')
+            hasArenaGridScore = true;
+        else
+            missingArenaGridScorePaths(end+1, 1) = string(ethovisionTrials(i).data); %#ok<AGROW>
+        end
         % Interpolate to the standardized timepoints
         standardizedTime = stimtables(stimfileName).centerpointData{:, 'Trial time'};
         standardizedStims = stimtables(stimfileName).centerpointData{:, 'Stimulus name'};
@@ -179,7 +186,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         interpX = interp1(thisTrialTime, thisX, standardizedTime, kvargs.Interpolation, 'extrap');
         interpY = interp1(thisTrialTime, thisY, standardizedTime, kvargs.Interpolation, 'extrap');
         % Interpolate Arena Grid Score if available
-        if ~isempty(thisArenaGridScore)
+        if ~isempty(thisArenaGridScore) && any(~isnan(thisArenaGridScore), 'all')
             interpArenaGridScore = interp1(thisTrialTime, thisArenaGridScore, standardizedTime, kvargs.Interpolation, 'extrap');
         else
             interpArenaGridScore = nan(length(standardizedTime), 1);
@@ -436,6 +443,13 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
 
     % Remove the initial empty element
     standardizedTables = standardizedTables(2:end);
+
+    if hasArenaGridScore && ~isempty(missingArenaGridScorePaths)
+        warning('population:stats:populationPositionOverTime:MixedArenaGridScore', ...
+            ['Arena Grid Score is missing from some trials. Those trials were filled with NaN.\n' ...
+            'Missing Arena Grid Score data paths:\n%s'], ...
+            strjoin(cellstr(unique(missingArenaGridScorePaths, 'stable')), newline));
+    end
 
     if ~isempty(kvargs.UIFigure)
         loader.Value = 1;

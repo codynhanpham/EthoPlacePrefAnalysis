@@ -11,10 +11,16 @@
 %       (This is the struct format output from population.stats.populationPositionOverTime(i))
 %        Both tables.stimuliSorted must be the same between A and B
 %        Both tables.centerpointData must have 'Trial time' and 'Stimulus name' columns, must share the same sampling rate for 'Trial time', and must have the same set of columns (other than 'Trial time' and 'Stimulus name').
+%        If both tables contain usable bodyparts data, their bodypart X/Y
+%        variables and calibration values must match. Bodyparts are aligned
+%        using the same row mapping as centerpointData and concatenated in
+%        A-then-B order. If either table does not contain usable bodyparts,
+%        the output bodyparts field is empty.
 %
 %   Outputs:
 %       joinedStdTable - A joined standardized table with table.centerpointData's N-rows equal to either A or B, whichever is longer, with rows matched by 'Trial time' and/or 'Stimulus name' for the least amount of inserted NaN rows. The columns are joined into sub-tables sharing the same original headers from A to B, with rows filled with NaNs where no match is found for that stimulus. Other fields in the struct (like metadata) are either copied if both are the same (like stimuliSorted), or merged in order of [A, B] if they are different (like animalMetadata or stimfileName).
 %           For the intended use case, where B is a superset of A (i.e. B includes A plus some extra stimuli blocks somewhere in the trial, typically at the end), the resulting centerpointData table will have the same number of rows as B, with rows from A matched to B by 'Trial time' and 'Stimulus name', and NaN rows inserted in A where no match is found.
+%           If both inputs contain usable bodyparts data, joinedStdTable.bodyparts has the same row alignment as centerpointData, with each X/Y bodypart variable widened in [A, B] order. If either input does not contain usable bodyparts data, joinedStdTable.bodyparts is returned as struct('data', table(), 'fps', NaN, 'px2cm', NaN).
 %
 %  See also: population.stats.populationPositionOverTime
 %
@@ -229,6 +235,118 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
     
     joinedStdTable.centerpointData = joinedCenterPointTable;
 
+    % Bodyparts are optional. They are only joined when both inputs contain
+    % usable bodypart data; otherwise preserve the standard empty schema.
+    [hasBodypartsA, bodypartsA] = getUsableBodyparts(stdTableA, height(stdCenterPointTableA));
+    [hasBodypartsB, bodypartsB] = getUsableBodyparts(stdTableB, height(stdCenterPointTableB));
+
+    if hasBodypartsA && hasBodypartsB
+        if ~isequal(bodypartsA.dataColumns, bodypartsB.dataColumns)
+            error('population:temp:joinStdTableByStim:BodypartVariablesMismatch', ...
+                'The provided bodyparts data must have the same X/Y variable names in the same order.');
+        end
+        if ~isequaln(bodypartsA.fps, bodypartsB.fps)
+            error('population:temp:joinStdTableByStim:BodypartFPSMismatch', ...
+                'The provided bodyparts data must have matching fps values.');
+        end
+        if ~isequaln(bodypartsA.px2cm, bodypartsB.px2cm)
+            error('population:temp:joinStdTableByStim:BodypartPX2CMMismatch', ...
+                'The provided bodyparts data must have matching px2cm values.');
+        end
+
+        bodypartDataA = bodypartsA.data;
+        bodypartDataB = bodypartsB.data;
+        bodypartColumns = bodypartsA.dataColumns;
+
+        if isBaseA
+            alignedBodypartsA = bodypartDataA;
+            alignedBodypartsB = alignBodypartData(bodypartDataB, matchRowMap, height(baseTable), bodypartColumns);
+        else
+            alignedBodypartsA = alignBodypartData(bodypartDataA, matchRowMap, height(baseTable), bodypartColumns);
+            alignedBodypartsB = bodypartDataB;
+        end
+
+        joinedBodypartData = baseTable(:, {'Trial time', 'Stimulus name'});
+        for i = 1:length(bodypartColumns)
+            colName = bodypartColumns{i};
+            joinedBodypartData.(colName) = [alignedBodypartsA.(colName), alignedBodypartsB.(colName)];
+        end
+
+        joinedStdTable.bodyparts = struct( ...
+            'data', joinedBodypartData, ...
+            'fps', bodypartsA.fps, ...
+            'px2cm', bodypartsA.px2cm);
+    else
+        joinedStdTable.bodyparts = emptyBodyparts();
+    end
+
+end
+
+function [isUsable, bodyparts] = getUsableBodyparts(stdTable, expectedHeight)
+    bodyparts = emptyBodyparts();
+    isUsable = false;
+
+    if ~isfield(stdTable, 'bodyparts') || ~isstruct(stdTable.bodyparts) || ...
+            ~isscalar(stdTable.bodyparts) || ~isfield(stdTable.bodyparts, 'data') || ...
+            ~istable(stdTable.bodyparts.data) || isempty(stdTable.bodyparts.data)
+        return;
+    end
+
+    data = stdTable.bodyparts.data;
+    requiredColumns = {'Trial time', 'Stimulus name'};
+    if height(data) ~= expectedHeight || ~all(ismember(requiredColumns, data.Properties.VariableNames))
+        return;
+    end
+
+    dataColumns = setdiff(data.Properties.VariableNames, requiredColumns, 'stable');
+    if isempty(dataColumns)
+        return;
+    end
+
+    % Only complete numeric X/Y pairs are valid bodypart data.
+    for i = 1:length(dataColumns)
+        variableName = dataColumns{i};
+        if startsWith(variableName, 'X ')
+            pairedName = ['Y ', variableName(3:end)];
+        elseif startsWith(variableName, 'Y ')
+            pairedName = ['X ', variableName(3:end)];
+        else
+            return;
+        end
+        if ~ismember(pairedName, dataColumns) || ~isfloat(data.(variableName))
+            return;
+        end
+    end
+
+    if ~isfield(stdTable.bodyparts, 'fps') || ~isfield(stdTable.bodyparts, 'px2cm') || ...
+            ~isnumeric(stdTable.bodyparts.fps) || ~isscalar(stdTable.bodyparts.fps) || ...
+            ~isnumeric(stdTable.bodyparts.px2cm) || ~isscalar(stdTable.bodyparts.px2cm)
+        return;
+    end
+
+    bodyparts.data = data;
+    bodyparts.dataColumns = dataColumns;
+    bodyparts.fps = stdTable.bodyparts.fps;
+    bodyparts.px2cm = stdTable.bodyparts.px2cm;
+    isUsable = true;
+end
+
+function alignedData = alignBodypartData(data, rowMap, nRows, dataColumns)
+    alignedData = table();
+    validMask = ~isnan(rowMap);
+    sourceRows = rowMap(validMask);
+
+    for i = 1:length(dataColumns)
+        colName = dataColumns{i};
+        sourceColumn = data.(colName);
+        alignedColumn = nan(nRows, size(sourceColumn, 2), 'like', sourceColumn);
+        alignedColumn(validMask, :) = sourceColumn(sourceRows, :);
+        alignedData.(colName) = alignedColumn;
+    end
+end
+
+function bodyparts = emptyBodyparts()
+    bodyparts = struct('data', table(), 'fps', NaN, 'px2cm', NaN);
 end
 
 function blocks = getStimBlocks(T)

@@ -10,6 +10,7 @@ function [header, datatable, units] = loadTrackingSlp(filePath, kvargs)
     %       Interpolation - Method used to fill missing X/Y predictions. Use
     %           'none' to preserve missing predictions as NaN. Interpolation
     %           is temporal and is applied independently to each node.
+    %       EnforceSingleInstance - If true, throw an error if the SLEAP file contains more than one instance at any frame. By default, this is false and the loader selects the predicted instance with the highest finite instance score for each frame. Ties use the first instance in file order.
     %
     %   Outputs:
     %       header - String dictionary containing video and SLEAP metadata.
@@ -18,10 +19,11 @@ function [header, datatable, units] = loadTrackingSlp(filePath, kvargs)
 
     arguments
         filePath {mustBeFile}
-        kvargs.MetadataTable table = table() %#ok<INUSA>
+        kvargs.MetadataTable table = table()
         kvargs.Interpolation {mustBeMember(kvargs.Interpolation, ...
             {'none', 'linear', 'nearest', 'spline', 'makima', 'pchip', 'cubic'}), ...
             mustBeTextScalar} = 'none'
+        kvargs.EnforceSingleInstance (1,1) logical = false
         kvargs.HeaderOnly (1,1) logical = false
     end
 
@@ -115,6 +117,11 @@ function [header, datatable, units] = loadTrackingSlp(filePath, kvargs)
     instanceEnd = localNumericColumn(frames, "instance_id_end");
     instanceType = localNumericColumn(instances, "instance_type");
     instanceFrameId = localNumericColumn(instances, "frame_id");
+    if ~isfield(instances, 'score')
+        error('io:sleap:loadTrackingSlp:InvalidInstanceScore', ...
+            'The SLEAP instances dataset is missing the required instance-level score field.');
+    end
+    instanceScore = localNumericColumn(instances, "score");
 
     if nFramesRows > 0 && any(frameVideo ~= frameVideo(1))
         error('io:sleap:loadTrackingSlp:MultipleVideoSources', ...
@@ -122,7 +129,8 @@ function [header, datatable, units] = loadTrackingSlp(filePath, kvargs)
     end
     [frameRows, instanceRows] = localValidateFrameLinks(...
         frameIdxSparse, instanceStart, instanceEnd, instanceType, ...
-        instanceFrameId, frameIds, nVideoFrames, nInstances);
+        instanceFrameId, instanceScore, frameIds, nVideoFrames, nInstances, ...
+        kvargs.EnforceSingleInstance);
 
     header = configureDictionary("string", "string");
     header("Video file") = string(videoFilePath);
@@ -206,10 +214,10 @@ function [header, datatable, units] = loadTrackingSlp(filePath, kvargs)
             frameIdxSparse(badFrame), pointCounts(badFrame), nNodes);
     end
     pointRows = pointStarts + (0:nNodes-1);
-    xValues = predX(pointRows);
-    yValues = predY(pointRows);
-    visibleValues = predVisible(pointRows);
-    scoreValues = predScore(pointRows);
+    xValues = reshape(predX(pointRows), size(pointRows));
+    yValues = reshape(predY(pointRows), size(pointRows));
+    visibleValues = reshape(predVisible(pointRows), size(pointRows));
+    scoreValues = reshape(predScore(pointRows), size(pointRows));
     validPoints = visibleValues & isfinite(xValues) & isfinite(yValues);
     xValues(~validPoints) = NaN;
     yValues(~validPoints) = NaN;
@@ -270,7 +278,8 @@ end
 
 function [frameRows, instanceRows] = localValidateFrameLinks(...
         frameIdx, instanceStart, instanceEnd, instanceType, ...
-        instanceFrameId, frameIds, nVideoFrames, nInstances)
+    instanceFrameId, instanceScore, frameIds, nVideoFrames, nInstances, ...
+    enforceSingleInstance)
     nFramesRows = numel(frameIdx);
     frameRows = zeros(nFramesRows, 1);
     instanceRows = zeros(nFramesRows, 1);
@@ -300,17 +309,40 @@ function [frameRows, instanceRows] = localValidateFrameLinks(...
         if lastInstance == firstInstance - 1
             continue;
         end
-        if lastInstance - firstInstance + 1 ~= 1
+        nFrameInstances = lastInstance - firstInstance + 1;
+        if nFrameInstances > 1 && enforceSingleInstance
             error('io:sleap:loadTrackingSlp:MultiInstanceDetected', ...
                 'Frame %d contains %d instances; only single-instance SLEAP data is supported.', ...
-                frameIdx(frameRow), lastInstance - firstInstance + 1);
+                frameIdx(frameRow), nFrameInstances);
         end
 
-        instanceRow = firstInstance;
-        if instanceType(instanceRow) ~= 1
-            error('io:sleap:loadTrackingSlp:UnexpectedInstanceType', ...
-                'Frame %d does not reference a predicted instance.', frameIdx(frameRow));
+        instanceCandidates = firstInstance:lastInstance;
+        predictedCandidates = instanceCandidates(instanceType(instanceCandidates) == 1);
+        if isempty(predictedCandidates)
+            if nFrameInstances == 1
+                error('io:sleap:loadTrackingSlp:UnexpectedInstanceType', ...
+                    'Frame %d does not reference a predicted instance.', frameIdx(frameRow));
+            end
+            error('io:sleap:loadTrackingSlp:NoPredictedInstance', ...
+                'Frame %d contains %d instances but none are predicted instances.', ...
+                frameIdx(frameRow), nFrameInstances);
         end
+
+        if nFrameInstances == 1
+            instanceRow = predictedCandidates(1);
+        else
+            candidateScores = instanceScore(predictedCandidates);
+            finiteCandidates = isfinite(candidateScores);
+            if ~any(finiteCandidates)
+                error('io:sleap:loadTrackingSlp:InvalidInstanceScore', ...
+                    'Frame %d contains multiple predicted instances, but none has a finite instance score.', ...
+                    frameIdx(frameRow));
+            end
+            finiteCandidates = find(finiteCandidates);
+            [~, bestCandidate] = max(candidateScores(finiteCandidates));
+            instanceRow = predictedCandidates(finiteCandidates(bestCandidate));
+        end
+
         if instanceFrameId(instanceRow) ~= frameIds(frameRow)
             error('io:sleap:loadTrackingSlp:FrameReferenceMismatch', ...
                 'Instance reference for frame %d does not match the containing frame.', ...
