@@ -20,9 +20,9 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
 
     arguments
         videoFiles (1,:) {mustBeFile}
-        modelPaths (1,:) cell = {}
+        modelPaths (1,:) {mustBeText} = {}
         kvargs.SleapUserConfig (1,1) struct = struct()
-        kvargs.ProgressDialogHandle (1,1) {mustBeProgressDialogHandleOrEmpty} = []
+        kvargs.ProgressDialogHandle {mustBeProgressDialogHandleOrEmpty} = []
         kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin) []
     end
 
@@ -31,6 +31,8 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
         error('io:sleap:runSLEAP:Unavailable', ...
             'SLEAP is not available. Please install it with io.sleap.install() first.');
     end
+
+    modelPaths = cellstr(modelPaths);
 
     % Ensure modelPaths or kvargs.SleapUserConfig.model_paths is provided, of modelPaths is empty, use kvargs.SleapUserConfig.model_paths
     % If both are provided, use modelPaths and ignore kvargs.SleapUserConfig.model_paths

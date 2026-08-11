@@ -26,26 +26,24 @@ DEFAULT_WORKSPACE_GB = 8.0
 DEFAULT_PEAK_THRESHOLD = 0.025
 
 
-class RGBTopDownONNXWrapper(nn.Module):
-	"""Adapter that accepts RGB input and converts it to grayscale."""
+class FlexibleChannelsTopDownONNXWrapper(nn.Module):
+	"""Adapter that accepts one- or three-channel input and converts to gray."""
 
 	def __init__(self, base_wrapper):
 		super().__init__()
 		self.base_wrapper = base_wrapper
 
 	@staticmethod
-	def _rgb_to_grayscale(image):
-		if image.shape[-3] != 3:
-			return image
+	def _to_grayscale(image):
+		# Use a channel reduction rather than a Python branch on C. The latter
+		# gets constant-folded during ONNX tracing and makes the TensorRT engine
+		# accept only the channel count used by the export dummy input.
 		if image.dtype != torch.float32:
 			image = image.float()
-		r = image[:, 0:1]
-		g = image[:, 1:2]
-		b = image[:, 2:3]
-		return 0.2989 * r + 0.5870 * g + 0.1140 * b
+		return image.mean(dim=1, keepdim=True)
 
 	def forward(self, image):
-		return self.base_wrapper.forward(self._rgb_to_grayscale(image))
+		return self.base_wrapper.forward(self._to_grayscale(image))
 
 
 def _as_path(path: str | Path) -> Path:
@@ -62,6 +60,31 @@ def _save_training_config(cfg, export_dir: Path, filename: str) -> Path:
 	path = export_dir / filename
 	OmegaConf.save(cfg, path)
 	return path
+
+
+def _configure_export_input_channels(cfg, *, accept_rgb: bool) -> None:
+	"""Make exported-runtime preprocessing match the engine input contract.
+
+	TensorRT cannot have a freely dynamic channel dimension for this model:
+	the first convolution has a fixed number of input channels.  An RGB export
+	therefore uses a three-channel engine, while SLEAP-NN's preprocessing must
+	convert native grayscale videos to RGB before calling the engine.
+	"""
+
+	from omegaconf import OmegaConf
+
+	# Allow adding keys when the source config uses OmegaConf struct mode.
+	OmegaConf.set_struct(cfg, False)
+	preprocessing = cfg.data_config.preprocessing
+	if accept_rgb:
+		preprocessing.ensure_rgb = True
+		preprocessing.ensure_grayscale = False
+	else:
+		preprocessing.ensure_rgb = False
+		preprocessing.ensure_grayscale = True
+
+	# Keep both flags explicit in the exported config, even when the source
+	# training config omitted one or both preprocessing keys.
 
 
 def _resolve_edge_inds_from_config(cfg, node_names: list[str]) -> list[tuple[int, int]]:
@@ -133,8 +156,8 @@ def export_topdown_tensorrt(
 		device: Torch device for export, usually ``"cuda"``.
 		precision: TensorRT precision. ``"fp16"`` is recommended here.
 		workspace_size_gb: TensorRT builder workspace size in GiB.
-		accept_rgb: If True, export a graph that accepts 3-channel RGB input and
-			converts it to grayscale inside the model.
+		accept_rgb: Retained for CLI compatibility. The generated engine accepts
+		both one- and three-channel input and converts either to grayscale.
 		max_instances: Maximum instances per frame.
 		max_batch_size: Maximum batch size used in the TensorRT profile.
 		input_scale: Optional override for both models' input scaling.
@@ -188,6 +211,8 @@ def export_topdown_tensorrt(
 
 	centroid_cfg = load_training_config(centroid_path)
 	instance_cfg = load_training_config(instance_path)
+	_configure_export_input_channels(centroid_cfg, accept_rgb=accept_rgb)
+	_configure_export_input_channels(instance_cfg, accept_rgb=accept_rgb)
 
 	centroid_model_type = resolve_model_type(centroid_cfg)
 	instance_model_type = resolve_model_type(instance_cfg)
@@ -270,7 +295,9 @@ def export_topdown_tensorrt(
 		centroid_peak_threshold=peak_threshold,
 		instance_peak_threshold=peak_threshold,
 	)
-	wrapper = RGBTopDownONNXWrapper(base_wrapper) if accept_rgb else base_wrapper
+	# Keep the input channel dimension dynamic in the exported graph. The
+	# wrapper reduces either C=1 or C=3 to one channel before the trained model.
+	wrapper = FlexibleChannelsTopDownONNXWrapper(base_wrapper)
 	wrapper.eval().to(device)
 
 	input_shape = resolve_input_shape(
@@ -278,14 +305,9 @@ def export_topdown_tensorrt(
 		input_height=input_height,
 		input_width=input_width,
 	)
-	_, channels, height, width = input_shape
-	if accept_rgb:
-		channels = 3
-		input_shape = (1, channels, height, width)
-		if hasattr(base_wrapper.centroid_model, "model"):
-			base_wrapper.centroid_model.model = base_wrapper.centroid_model.model.to(device)
-		if hasattr(base_wrapper.instance_model, "model"):
-			base_wrapper.instance_model.model = base_wrapper.instance_model.model.to(device)
+	_, _channels, height, width = input_shape
+	channels = 3
+	input_shape = (1, channels, height, width)
 
 	model_name = f"{centroid_path.name}+{instance_path.name}"
 	checkpoint_path = f"centroid:{centroid_ckpt};centered_instance:{instance_ckpt}"
@@ -305,6 +327,7 @@ def export_topdown_tensorrt(
 		input_shape=input_shape,
 		input_dtype=torch.uint8,
 		opset_version=opset_version,
+		dynamic_axes={"image": {0: "batch", 1: "channels", 2: "height", 3: "width"}},
 		output_names=[
 			"centroids",
 			"centroid_vals",
@@ -354,6 +377,8 @@ def export_topdown_tensorrt(
 		input_shape=input_shape,
 		input_dtype=torch.uint8,
 		precision=precision,
+		min_shape=(1, 1, height // 2, width // 2),
+		opt_shape=input_shape,
 		max_shape=(max_batch_size, channels, height * 2, width * 2),
 		workspace_size=trt_workspace_bytes,
 		verbose=True,

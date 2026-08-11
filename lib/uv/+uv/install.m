@@ -9,6 +9,12 @@ function [uvbin, uvdir] = install()
     %       uvdir (char): path to the directory where uv is installed
 
     persistent UVBIN UVDIR SYSTEMUV
+
+    % MATLAB's system() may prepend a platform-specific command-output
+    % marker. Capture it once and remove it consistently from all command
+    % output before using it as a path or reporting it in an error.
+    [~, basesystemoutput] = system('echo');
+    basesystemoutput = strtrim(basesystemoutput);
     
     systemwhich = 'which';
     if ispc
@@ -16,7 +22,7 @@ function [uvbin, uvdir] = install()
     end
     [whichStatus, whichOut] = system(sprintf('%s uv', systemwhich));
     if whichStatus == 0
-        sysuv = cleancmdoutput(whichOut);
+        sysuv = cleancmdoutput(whichOut, basesystemoutput);
     else
         sysuv = '';
     end
@@ -64,10 +70,6 @@ function [uvbin, uvdir] = install()
             error('uv installation failed to activate. Command output: %s', cmdOut);
         end
     elseif isunix
-        % Log the base output of system commands (occured on some Linux installations)
-        [~, basesystemoutput] = system('echo');
-        basesystemoutput = strtrim(basesystemoutput);
-
         % Download the installer script using websave
         installerPath = fullfile(uvdir, 'uv_install.sh');
         try 
@@ -96,11 +98,14 @@ function [uvbin, uvdir] = install()
     UVDIR = uvdir;
 end
 
-function cleaned = cleancmdoutput(raw)
-    persistent basesystemoutput
+function cleaned = cleancmdoutput(raw, basesystemoutput)
+    if isempty(raw)
+        cleaned = '';
+        return;
+    end
     if isempty(basesystemoutput)
-        [~, basesystemoutput] = system('echo');
-        basesystemoutput = strtrim(basesystemoutput);
+        cleaned = strtrim(raw);
+        return;
     end
 
     cleaned = strtrim(raw);
