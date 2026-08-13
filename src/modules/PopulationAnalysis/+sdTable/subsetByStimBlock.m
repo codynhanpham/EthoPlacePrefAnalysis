@@ -25,6 +25,10 @@ function standardizedTables = subsetByStimBlock(standardizedTables, period)
         end
 
         standardizedTables(tableIndex).centerpointData = stimPeriodTable(keepMask, :);
+        if ~isempty(standardizedTables(tableIndex).bodyparts)
+            standardizedTables(tableIndex).bodyparts = ...
+                standardizedTables(tableIndex).bodyparts(keepMask, :);
+        end
     end
 
 end

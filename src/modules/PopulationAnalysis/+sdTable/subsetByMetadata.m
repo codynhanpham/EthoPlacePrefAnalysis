@@ -56,6 +56,21 @@ function standardizedTables = subsetByMetadata(standardizedTables, metadataFilte
                 standardizedTables(tableIndex).centerpointData.(varName) = varData(:, idxMask);
             end
         end
+
+        % Keep body-part columns aligned with the same metadata ordering.
+        bodypartTable = standardizedTables(tableIndex).bodyparts;
+        if ~isempty(bodypartTable)
+            vars = bodypartTable.Properties.VariableNames;
+            for varI = 1:length(vars)
+                varName = vars{varI};
+                varData = bodypartTable.(varName);
+                if size(varData, 2) == n
+                    bodypartTable.(varName) = varData(:, idxMask);
+                end
+            end
+            standardizedTables(tableIndex).bodyparts = bodypartTable;
+        end
+
         % Finally subset animalMetadata itself to only include the entries that match the filters
         keys = standardizedTables(tableIndex).animalMetadata.keys();
         standardizedTables(tableIndex).animalMetadata = remove(standardizedTables(tableIndex).animalMetadata, keys(~idxMask));

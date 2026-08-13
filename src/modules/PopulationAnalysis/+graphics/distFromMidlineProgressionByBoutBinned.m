@@ -44,7 +44,8 @@ function f = distFromMidlineProgressionByBoutBinned(standardizedTable, kvargs)
 	kvargs.MeanWindowFrames = validateMeanWindowFrames(kvargs.MeanWindowFrames, 15);
 	kvargs.YLim = validateYLim(kvargs.YLim);
 
-	requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
+	requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', ...
+        'fps', 'px2cm', 'centerpointData', 'bodyparts'};
 	missing = setdiff(requiredFields, fieldnames(standardizedTable), 'stable');
 	if ~isempty(missing)
 		error('The provided standardizedTable is missing required fields: { ''%s'' }', strjoin(missing, ''', '''));

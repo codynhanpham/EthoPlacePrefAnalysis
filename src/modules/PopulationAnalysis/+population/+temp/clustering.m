@@ -19,7 +19,8 @@ function clustering()
 
     stdTables = struct();
     metricsSummaryTables = table();
-    requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
+    requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', ...
+        'fps', 'px2cm', 'centerpointData', 'bodyparts'};
 
     uSex = {}; % unique sex values, as formatted in metadata
     uStrain = {}; % unique strain values, as formatted in metadata

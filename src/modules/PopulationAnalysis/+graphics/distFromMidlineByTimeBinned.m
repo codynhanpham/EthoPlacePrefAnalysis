@@ -31,7 +31,8 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
 
     kvargs.YLim = validateYLim(kvargs.YLim);
 
-    requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', 'centerpointData'};
+    requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', ...
+        'fps', 'px2cm', 'centerpointData', 'bodyparts'};
     % requiredFields = {'stimfileName', 'stimuliSorted', 'centerpointData'}; % !!! OVERRIDE FOR TESTING ONLY !!! THIS WORKS FOR OLD OUTPUT FORMAT WITHOUT ANIMAL METADATA
     missing = setdiff(requiredFields, fieldnames(standardizedTable), 'stable');
     if ~isempty(missing)
