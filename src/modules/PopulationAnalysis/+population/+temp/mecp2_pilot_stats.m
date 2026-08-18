@@ -1,7 +1,10 @@
 function fig = mecp2_pilot_stats()
 
-    MECP2_MALE_KO = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Prelim/SingleDay_20260701_MECP2_Male_KO.mat";
-    C57_MALE_WT = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/C57/20260611_standardizedTable_MalesOnly+Baseline__NO_OUTLIER__n=15.mat";
+    % MECP2_MALE_KO = "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\Mecp2\20260611_standardizedTable_MalesKOOnly__n16+Baseline.mat";
+    MECP2_MALE_KO = "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\Mecp2\20260611_standardizedTable_MalesKOOnly__SLEAP__n16+Baseline.mat";
+
+    % C57_MALE_WT = "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\C57\20260611_standardizedTable_MalesOnly+Baseline__NO_OUTLIER__n=15.mat";
+    C57_MALE_WT = "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\C57\20260611_standardizedTable_MalesOnly+Baseline__SLEAP__NO_OUTLIER__n=15.mat";
 
     OUTPUTDIR = "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/In-House/Mecp2/Prelim";
 

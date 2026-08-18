@@ -10,9 +10,10 @@
 %
 %       (This is the struct format output from population.stats.populationPositionOverTime(i))
 %        Both tables.stimuliSorted must be the same between A and B.
-%        Both tables must use the current standardized-table schema:
-%        'stimfileName', 'stimuliSorted', 'animalMetadata', 'fps', 'px2cm',
-%        'centerpointData', and 'bodyparts'.
+%        Both tables must contain 'stimfileName', 'stimuliSorted',
+%        'animalMetadata', and 'centerpointData'. The 'fps', 'px2cm', and
+%        'bodyparts' fields are optional, but each must either be present in
+%        both tables or absent from both tables.
 %        Both centerpointData tables must have 'Trial time' and 'Stimulus name'
 %        columns, must share the same sampling rate for 'Trial time', and must
 %        have the same set of data columns other than the key columns.
@@ -20,8 +21,8 @@
 %        not expose body-part coordinates.
 %
 %   Outputs:
-%       joinedStdTable - A joined standardized table with centerpointData's N rows equal to either A or B, whichever is longer, with rows matched by 'Trial time' and/or 'Stimulus name' for the least amount of inserted missing rows. Centerpoint and bodypart data columns are widened in A-then-B order, with rows filled with NaNs or other type-appropriate missing values where no match is found for that stimulus. Other fields in the struct (like metadata) are either copied if both are the same (like stimuliSorted, fps, and px2cm), or merged in order of [A, B] if they are different (like animalMetadata or stimfileName).
-%           For the intended use case, where B is a superset of A (i.e. B includes A plus some extra stimuli blocks somewhere in the trial, typically at the end), the resulting centerpointData and bodyparts tables will have the same number of rows as B, with rows from A matched to B by stimulus block and missing rows inserted where no match is found.
+%       joinedStdTable - A joined table with centerpointData's N rows equal to either A or B, whichever is longer, with rows matched by 'Trial time' and/or 'Stimulus name' for the least amount of inserted missing rows. Centerpoint and, when present in both inputs, bodypart data columns are widened in A-then-B order. Optional fields absent from both inputs are omitted from the output. Other fields in the struct (like metadata) are either copied if both are the same (like stimuliSorted, fps, and px2cm), or merged in order of [A, B] if they are different (like animalMetadata or stimfileName).
+%           For the intended use case, where B is a superset of A (i.e. B includes A plus some extra stimuli blocks somewhere in the trial, typically at the end), the resulting centerpointData and, when present, bodyparts tables will have the same number of rows as B, with rows from A matched to B by stimulus block and missing rows inserted where no match is found.
 %       nAnimalsA - Number of animalMetadata entries contributed by stdTableA.
 %           This is returned for compatibility and is also embedded in the
 %           output when 'EmbeddedNAnimalA' is true.
@@ -50,11 +51,12 @@
 % This results in different number of stimuli per trial, thus different lengths of standardized center point tables.
 % This function allows us to align those different length standardized center point tables by matching the stimuli based on 'Trial time' and 'Stimulus name', so that we can compare animal behavior across different stimulus lengths.
 %
-% New-schema (20260812) notes:
+% Optional-field (20260818) notes:
 %   - fps and px2cm are top-level scalar metadata and must agree between A and B.
 %   - bodyparts is a direct table, not a nested bodyparts.data field.
 %   - bodyparts are aligned with the same stimulus-block row mapping as centerpointData.
-%   - Empty bodyparts tables are preserved when neither input contains body-part data.
+%   - Each optional field must be present in both inputs or absent from both.
+%   - Optional fields absent from both inputs are ignored and omitted from the output.
 
 function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, options)
     arguments
@@ -66,15 +68,22 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
     validateInput(stdTableA, 'stdTableA');
     validateInput(stdTableB, 'stdTableB');
 
+    optionalFields = {'fps', 'px2cm', 'bodyparts'};
+    for fieldIndex = 1:numel(optionalFields)
+        validateOptionalFieldPresence(stdTableA, stdTableB, optionalFields{fieldIndex});
+    end
+
     if ~isequal(stdTableA.stimuliSorted, stdTableB.stimuliSorted)
         error('population:temp:joinStdTableByStim:StimuliMismatch', ...
             'The provided standardized tables must have the same stimuliSorted field.');
     end
-    if ~isequaln(stdTableA.fps, stdTableB.fps)
+    hasFPS = isfield(stdTableA, 'fps');
+    if hasFPS && ~isequaln(stdTableA.fps, stdTableB.fps)
         error('population:temp:joinStdTableByStim:FPSMismatch', ...
             'The provided standardized tables must have the same fps.');
     end
-    if ~isequaln(stdTableA.px2cm, stdTableB.px2cm)
+    hasPx2cm = isfield(stdTableA, 'px2cm');
+    if hasPx2cm && ~isequaln(stdTableA.px2cm, stdTableB.px2cm)
         error('population:temp:joinStdTableByStim:Px2cmMismatch', ...
             'The provided standardized tables must have the same px2cm.');
     end
@@ -95,8 +104,12 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
     joinedStdTable = struct();
     joinedStdTable.stimfileName = {stdTableA.stimfileName; stdTableB.stimfileName};
     joinedStdTable.stimuliSorted = stdTableA.stimuliSorted;
-    joinedStdTable.fps = stdTableA.fps;
-    joinedStdTable.px2cm = stdTableA.px2cm;
+    if hasFPS
+        joinedStdTable.fps = stdTableA.fps;
+    end
+    if hasPx2cm
+        joinedStdTable.px2cm = stdTableA.px2cm;
+    end
 
     joinedStdTable.animalMetadata = stdTableA.animalMetadata;
     keysA = keys(stdTableA.animalMetadata);
@@ -116,31 +129,39 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
 
     joinedStdTable.centerpointData = joinDataTable(...
         centerpointA, centerpointB, baseCenterpoint, mapA, mapB, centerpointColumns);
-    joinedStdTable.bodyparts = joinBodypartTables(...
-        stdTableA.bodyparts, stdTableB.bodyparts, baseCenterpoint, mapA, mapB);
+    if isfield(stdTableA, 'bodyparts')
+        joinedStdTable.bodyparts = joinBodypartTables(...
+            stdTableA.bodyparts, stdTableB.bodyparts, baseCenterpoint, mapA, mapB);
+    end
 end
 
 function validateInput(stdTable, inputName)
     requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', ...
-        'fps', 'px2cm', 'centerpointData', 'bodyparts'};
+        'centerpointData'};
     missingFields = setdiff(requiredFields, fieldnames(stdTable));
     if ~isempty(missingFields)
         error('population:temp:joinStdTableByStim:MissingFields', ...
             '%s is missing required fields: %s.', inputName, strjoin(missingFields, ', '));
     end
-    if ~isnumeric(stdTable.fps) || ~isscalar(stdTable.fps) || ...
-            (~isfinite(stdTable.fps) && ~isnan(stdTable.fps))
-        error('population:temp:joinStdTableByStim:InvalidFPS', ...
-            '%s.fps must be a numeric scalar, finite or NaN.', inputName);
+    if isfield(stdTable, 'fps')
+        if ~isnumeric(stdTable.fps) || ~isscalar(stdTable.fps) || ...
+                (~isfinite(stdTable.fps) && ~isnan(stdTable.fps))
+            error('population:temp:joinStdTableByStim:InvalidFPS', ...
+                '%s.fps must be a numeric scalar, finite or NaN.', inputName);
+        end
     end
-    if ~isnumeric(stdTable.px2cm) || ~isscalar(stdTable.px2cm) || ...
-            (~isfinite(stdTable.px2cm) && ~isnan(stdTable.px2cm))
-        error('population:temp:joinStdTableByStim:InvalidPx2cm', ...
-            '%s.px2cm must be a numeric scalar, finite or NaN.', inputName);
+    if isfield(stdTable, 'px2cm')
+        if ~isnumeric(stdTable.px2cm) || ~isscalar(stdTable.px2cm) || ...
+                (~isfinite(stdTable.px2cm) && ~isnan(stdTable.px2cm))
+            error('population:temp:joinStdTableByStim:InvalidPx2cm', ...
+                '%s.px2cm must be a numeric scalar, finite or NaN.', inputName);
+        end
     end
-    if ~istable(stdTable.centerpointData) || ~istable(stdTable.bodyparts)
+    if ~istable(stdTable.centerpointData) || ...
+            (isfield(stdTable, 'bodyparts') && ~istable(stdTable.bodyparts))
         error('population:temp:joinStdTableByStim:InvalidTables', ...
-            '%s.centerpointData and %s.bodyparts must both be tables.', inputName);
+            '%s.centerpointData must be a table and %s.bodyparts, when present, must be a table.', ...
+            inputName, inputName);
     end
     try
         keys(stdTable.animalMetadata);
@@ -159,7 +180,7 @@ function validateInput(stdTable, inputName)
             '%s.centerpointData is missing columns: %s.', inputName, ...
             strjoin(missingCenterpointColumns, ', '));
     end
-    if ~isempty(stdTable.bodyparts)
+    if isfield(stdTable, 'bodyparts') && ~isempty(stdTable.bodyparts)
         missingBodypartColumns = setdiff({'Trial time', 'Stimulus name'}, ...
             stdTable.bodyparts.Properties.VariableNames);
         if ~isempty(missingBodypartColumns)
@@ -172,6 +193,14 @@ function validateInput(stdTable, inputName)
                 '%s.bodyparts and %s.centerpointData must have the same number of rows.', ...
                 inputName, inputName);
         end
+    end
+end
+
+function validateOptionalFieldPresence(stdTableA, stdTableB, fieldName)
+    if xor(isfield(stdTableA, fieldName), isfield(stdTableB, fieldName))
+        error('population:temp:joinStdTableByStim:OptionalFieldPresenceMismatch', ...
+            'The optional field %s must either exist in both standardized tables or be absent from both.', ...
+            fieldName);
     end
 end
 

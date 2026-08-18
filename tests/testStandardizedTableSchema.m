@@ -48,6 +48,33 @@ classdef testStandardizedTableSchema < matlab.unittest.TestCase
             testCase.verifyError(@() population.temp.joinStdTableByStim(tableA, tableB), ...
                 'population:temp:joinStdTableByStim:Px2cmMismatch');
         end
+
+        function joinsWhenOptionalFieldsAreAbsentFromBothInputs(testCase)
+            tableA = rmfield(makeStandardizedTable(3, 1, 1, 10, "A"), ...
+                {'fps', 'px2cm', 'bodyparts'});
+            tableB = rmfield(makeStandardizedTable(4, 1, 2, 10, "B"), ...
+                {'fps', 'px2cm', 'bodyparts'});
+
+            joined = population.temp.joinStdTableByStim(tableA, tableB);
+
+            testCase.verifySize(joined.centerpointData.('X center'), [4, 2]);
+            testCase.verifyFalse(isfield(joined, 'fps'));
+            testCase.verifyFalse(isfield(joined, 'px2cm'));
+            testCase.verifyFalse(isfield(joined, 'bodyparts'));
+        end
+
+        function rejectsOneSidedOptionalFields(testCase)
+            fieldNames = {'fps', 'px2cm', 'bodyparts'};
+            for fieldIndex = 1:numel(fieldNames)
+                tableA = makeStandardizedTable(3, 1, 1, 10);
+                tableB = makeStandardizedTable(3, 1, 2, 10);
+                tableB = rmfield(tableB, fieldNames{fieldIndex});
+
+                testCase.verifyError(...
+                    @() population.temp.joinStdTableByStim(tableA, tableB), ...
+                    'population:temp:joinStdTableByStim:OptionalFieldPresenceMismatch');
+            end
+        end
     end
 end
 
