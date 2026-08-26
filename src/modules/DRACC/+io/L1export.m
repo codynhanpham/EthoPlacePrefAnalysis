@@ -8,7 +8,7 @@ function outputpath = L1export(projectFolder, trials, kvargs)
     end
 
     kvargs.TrackingProvider.requireCapability("L1export");
-    projectFolder = char(projectFolder);
+    projectFolder = char(utils.path.canonicalize(projectFolder));
 
     nonmultiarenatrials = trials(~[trials.multipleArena]);
 
@@ -16,16 +16,32 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         warning('dracc:io:L1export:NoValidTrials', 'No split/single arena trials found. No L1 export will be generated. Before running this export, make sure to pre-process the trials and split any multi-arena trials into single arena trials.');
     end
 
+    % Resolve all trial paths against the project root. The relative paths are
+    % retained so the export preserves the source project layout.
+    mediaFiles = strings(numel(nonmultiarenatrials), 1);
+    mediaRelativePaths = strings(numel(nonmultiarenatrials), 1);
+    dataFiles = strings(numel(nonmultiarenatrials), 1);
+    dataRelativePaths = strings(numel(nonmultiarenatrials), 1);
+    for i = 1:numel(nonmultiarenatrials)
+        [mediaFiles(i), mediaRelativePaths(i)] = resolveProjectFile( ...
+            nonmultiarenatrials(i).media, projectFolder, 'media');
+        [dataFiles(i), dataRelativePaths(i)] = resolveProjectFile( ...
+            nonmultiarenatrials(i).data, projectFolder, 'data');
+    end
+
     % All non-multi-arena trials .data files also need to have a corresponding provider-labeled aligned MAT file next to them.
     missingMatFiles = [];
     alignedMatFiles = strings(numel(nonmultiarenatrials), 1);
+    alignedRelativePaths = strings(numel(nonmultiarenatrials), 1);
     for i = 1:numel(nonmultiarenatrials)
-        trial = nonmultiarenatrials(i);
-        dataFile = trial.data;
-        [dataDir, dataBaseName, ~] = fileparts(dataFile);
-        alignedMatFiles(i) = findAlignedCacheFile(dataDir, dataBaseName, kvargs.TrackingProvider.platform, dataFile);
+        [dataDir, dataBaseName, ~] = fileparts(dataFiles(i));
+        alignedFile = findAlignedCacheFile(dataDir, dataBaseName, kvargs.TrackingProvider.platform, dataFiles(i));
+        alignedMatFiles(i) = alignedFile;
         if strlength(alignedMatFiles(i)) == 0
-            missingMatFiles = [missingMatFiles; string(dataFile)]; %#ok<AGROW>
+            missingMatFiles = [missingMatFiles; dataFiles(i)]; %#ok<AGROW>
+        else
+            [alignedMatFiles(i), alignedRelativePaths(i)] = resolveProjectFile( ...
+                alignedMatFiles(i), projectFolder, 'aligned MAT');
         end
     end
     if ~isempty(missingMatFiles)
@@ -36,18 +52,26 @@ function outputpath = L1export(projectFolder, trials, kvargs)
     % Auto-migrate legacy midpoint/midline CSV files before validating.
     missingRefFiles = [];
     missingArenaGridFiles = [];
+    refJsonFiles = strings(numel(nonmultiarenatrials), 1);
+    refJsonRelativePaths = strings(numel(nonmultiarenatrials), 1);
+    arenaGridMatFiles = strings(numel(nonmultiarenatrials), 1);
+    arenaGridRelativePaths = strings(numel(nonmultiarenatrials), 1);
     for i = 1:numel(nonmultiarenatrials)
-        trial = nonmultiarenatrials(i);
-        mediaFile = trial.media;
-        [mediaDir, mediaBaseName, ~] = fileparts(mediaFile);
+        [mediaDir, mediaBaseName, ~] = fileparts(mediaFiles(i));
         graphics.migrateLegacyCSVRefs2JSON(mediaDir);
-        refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
-        arenaGridMatFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.arenagrid.mat'));
+        refJsonFile = string(fullfile(mediaDir, strcat(mediaBaseName, '.ref.json')));
+        arenaGridMatFile = string(fullfile(mediaDir, strcat(mediaBaseName, '.ref.arenagrid.mat')));
         if ~isfile(refJsonFile)
-            missingRefFiles = [missingRefFiles; string(mediaFile)]; %#ok<AGROW>
+            missingRefFiles = [missingRefFiles; mediaFiles(i)]; %#ok<AGROW>
+        else
+            [refJsonFiles(i), refJsonRelativePaths(i)] = resolveProjectFile( ...
+                refJsonFile, projectFolder, 'reference JSON');
         end
         if ~isfile(arenaGridMatFile)
-            missingArenaGridFiles = [missingArenaGridFiles; string(mediaFile)]; %#ok<AGROW>
+            missingArenaGridFiles = [missingArenaGridFiles; mediaFiles(i)]; %#ok<AGROW>
+        else
+            [arenaGridMatFiles(i), arenaGridRelativePaths(i)] = resolveProjectFile( ...
+                arenaGridMatFile, projectFolder, 'arena grid MAT');
         end
     end
     if ~isempty(missingRefFiles)
@@ -73,47 +97,101 @@ function outputpath = L1export(projectFolder, trials, kvargs)
         mkdir(outputdir);
     end
 
-    % Copy all trials.media files into outputdir/Media Files/; and all trials.data files into outputdir/Export Files/;
-    mediaOutputDir = fullfile(outputdir, 'Media Files');
-    dataOutputDir = fullfile(outputdir, 'Export Files');
-    if ~exist(mediaOutputDir, 'dir')
-        mkdir(mediaOutputDir);
-    end
-    if ~exist(dataOutputDir, 'dir')
-        mkdir(dataOutputDir);
-    end
-
+    % Copy every source file to its project-relative path below outputdir.
     for i = 1:numel(nonmultiarenatrials)
-        trial = nonmultiarenatrials(i);
-        copyfile(trial.media, mediaOutputDir);
-        copyfile(trial.data, dataOutputDir);
-        % Also copy the corresponding aligned .mat file and reference .ref.json file
+        copyRelativeFile(mediaFiles(i), mediaRelativePaths(i), outputdir);
+        copyRelativeFile(dataFiles(i), dataRelativePaths(i), outputdir);
+
+        % Also copy the corresponding aligned MAT and reference files.
         if strlength(alignedMatFiles(i)) > 0
-            copyfile(alignedMatFiles(i), dataOutputDir);
+            copyRelativeFile(alignedMatFiles(i), alignedRelativePaths(i), outputdir);
         end
 
-        [mediaDir, mediaBaseName, ~] = fileparts(trial.media);
-        graphics.migrateLegacyCSVRefs2JSON(mediaDir);
-        refJsonFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.json'));
-        if isfile(refJsonFile)
-            copyfile(refJsonFile, mediaOutputDir);
+        if strlength(refJsonFiles(i)) > 0
+            copyRelativeFile(refJsonFiles(i), refJsonRelativePaths(i), outputdir);
         end
 
-        % Copy the corresponding arena grid file
-        arenaGridMatFile = fullfile(mediaDir, strcat(mediaBaseName, '.ref.arenagrid.mat'));
-        if isfile(arenaGridMatFile)
-            copyfile(arenaGridMatFile, mediaOutputDir);
+        if strlength(arenaGridMatFiles(i)) > 0
+            copyRelativeFile(arenaGridMatFiles(i), arenaGridRelativePaths(i), outputdir);
         end
     end
 
 
     % TODO: Maybe add metadata export for this data set as well for redundancy!
+    % Alternatively, manually copy the metadata from the MasterMetadata excel sheet to another sheet subset
+
+
+    % Lastly, copy the TrackingProvider.userConfig.CONFIG_FILE runtime config to the outputdir, if it exists.
+    % Rename as 'configs.runtime.yml'
+    configFilePath = kvargs.TrackingProvider.userConfig.CONFIG_FILE;
+    if isfile(configFilePath)
+        outputConfigPath = fullfile(outputdir, 'configs.runtime.yml');
+        [status,msg] = copyfile(configFilePath, outputConfigPath);
+        if ~status
+            error('dracc:io:L1export:ConfigCopyFailed', 'Failed to copy the runtime config file from "%s" to "%s":\n%s', configFilePath, outputConfigPath, getReport(msg));
+        end
+    else
+        warning('dracc:io:L1export:MissingRuntimeConfig', 'The runtime config file "%s" does not exist. No runtime config will be included in the L1 export.', configFilePath);
+    end
 
 
     % Zip and remove temp dir
+    % fprintf('Creating L1 export zip file: \n\t%s\n\nThis will take a while...\n', zipFilePath);
     zip(zipFilePath, outputdir, outputdir);
     rmdir(outputdir, 's');
     outputpath = zipFilePath;
+end
+
+function [resolvedPath, relativePath] = resolveProjectFile(filePath, projectFolder, description)
+    % Resolve a source file against projectFolder and return its safe relative path.
+    filePath = string(filePath);
+    projectFolder = string(projectFolder);
+    description = string(description);
+
+    if strlength(strtrim(filePath)) == 0
+        error('dracc:io:L1export:MissingSourceFile', ...
+            'The %s source path is empty.', description);
+    end
+
+    if ~utils.path.isAbsolute(filePath)
+        filePath = string(fullfile(projectFolder, filePath));
+    end
+
+    if ~isfile(filePath)
+        error('dracc:io:L1export:MissingSourceFile', ...
+            'The %s source file does not exist: %s', description, filePath);
+    end
+
+    resolvedPath = string(utils.path.canonicalize(filePath));
+    projectFolder = string(utils.path.canonicalize(projectFolder));
+    projectPrefix = projectFolder;
+    if ~endsWith(projectPrefix, string(filesep))
+        projectPrefix = projectPrefix + string(filesep);
+    end
+
+    comparisonPath = resolvedPath;
+    comparisonPrefix = projectPrefix;
+    if ispc
+        comparisonPath = lower(comparisonPath);
+        comparisonPrefix = lower(comparisonPrefix);
+    end
+
+    if ~startsWith(comparisonPath, comparisonPrefix)
+        error('dracc:io:L1export:SourceOutsideProject', ...
+            'The %s source file must be inside projectFolder. File: %s; projectFolder: %s', ...
+            description, resolvedPath, projectFolder);
+    end
+
+    relativePath = extractAfter(resolvedPath, strlength(projectPrefix));
+end
+
+function copyRelativeFile(sourceFile, relativePath, outputdir)
+    destinationFile = fullfile(outputdir, relativePath);
+    [destinationDir, ~, ~] = fileparts(destinationFile);
+    if ~exist(destinationDir, 'dir')
+        mkdir(destinationDir);
+    end
+    copyfile(sourceFile, destinationFile);
 end
 
 function alignedFile = findAlignedCacheFile(dataDir, dataBaseName, trackingPlatform, dataFile)

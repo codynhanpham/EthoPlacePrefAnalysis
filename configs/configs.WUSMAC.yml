@@ -32,7 +32,7 @@ tracking_providers:
   EthoVision:
     # Default settings applied to all sub-categories unless overridden 
     coordsUnit: "cm"
-    default_camera_imgwidth_fov_cm: 92
+    default_camera_imgwidth_fov_cm: 92.25
     default_camera_center_offset_px: [0, 0]
     default_zone_match_method: "startsWith"  # one of these: "exact", "startsWith", "endsWith", "contains"
 
@@ -41,7 +41,7 @@ tracking_providers:
       # When using multiple arenas or different arena configs exist, specify them here
       # Just make sure the names match those used in EthoVision
       - name: "Arena 1"
-        camera_imgwidth_fov_cm: 92
+        camera_imgwidth_fov_cm: 92.25
         camera_center_offset_px: [0, 0]
         zone:
           left: Left
@@ -113,17 +113,17 @@ tracking_providers:
 
     default_midpoint_xoffset_px: 0
 
-    default_camera_imgwidth_fov_cm: 77.4
+    default_camera_imgwidth_fov_cm: 92.25
 
     arena:
       - name: "Arena 1"
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
 
       - name: "Lily Booth"
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
       
       - name: "Rain Booth"
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25

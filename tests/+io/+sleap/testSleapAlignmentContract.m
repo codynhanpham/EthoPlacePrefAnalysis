@@ -5,7 +5,7 @@ end
 function testSleapAdvertisesAlignment(testCase)
     provider = ui.trackingPlatforms.platforms.SLEAP();
     testCase.verifyTrue(provider.supportsCapability("alignTrackingToStim"));
-    testCase.verifyFalse(provider.supportsCapability("L1export"));
+    testCase.verifyTrue(provider.supportsCapability("L1export"));
 end
 
 function testSleapCacheNameUsesProviderLabel(testCase)

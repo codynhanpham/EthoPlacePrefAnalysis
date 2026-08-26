@@ -70,9 +70,11 @@ function testMalformedHashIsIgnored(testCase)
     testCase.verifyFalse(info.isAlignedCache);
 end
 
-function testEthoVisionAdvertisesL1Export(testCase)
+function testEthoVisionRejectsL1Export(testCase)
     provider = ui.trackingPlatforms.platforms.EthoVision();
-    testCase.verifyTrue(provider.supportsCapability("L1export"));
+    testCase.verifyFalse(provider.supportsCapability("L1export"));
+    testCase.verifyError(@() provider.requireCapability("L1export"), ...
+        'ui:trackingPlatforms:TrackingProvider:UnsupportedCapability');
 end
 
 function testUnsupportedProviderRejectsL1Export(testCase)

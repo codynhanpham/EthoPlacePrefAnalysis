@@ -19,7 +19,6 @@ function configs = loadConfigYaml(configFile)
         return;
     end
 
-
     ymlText = fileread(configFile);
     configs = yaml.load(ymlText);
     parentdir = fileparts(configFile);
@@ -28,6 +27,7 @@ function configs = loadConfigYaml(configFile)
     else
         configs.CONFIG_ROOT = pwd;
     end
+    configs.CONFIG_FILE = utils.path.canonicalize(configFile, configs.CONFIG_ROOT);
 
     % Validate defaults
     if isfield(configs, 'defaults')

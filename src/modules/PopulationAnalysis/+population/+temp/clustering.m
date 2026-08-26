@@ -3,14 +3,15 @@ function clustering()
     SELCTED_MODE = 1; % Change this to switch between datasets
 
     STDTABLES = [
-        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/012 TSC2/L3/012 TSC2 standardizedTables.mat",
-        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/014 SCN1A/L3/014 SCN1A standardizedTables.mat",
-        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/016 FBN1/L3/016 FBN1 standardizedTables.mat",
+        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/012 TSC2/L3/012_TSC2_standardizedTables.mat",
+        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/014 SCN1A/L3/014_SCN1A_standardizedTables.mat",
+        "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/016 FBN1/L3/016_FBN1_standardizedTables.mat",
+        % "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/020 CACNA1A/L3/020_CACNA1A_standardizedTables.mat",
+        "D:/JOBS/WashU_Neuroscience/Behavior/WU-SMAC/PlacePreference/POPULATION/WU-SMAC/WU-SMAC_L3_L4/021 ZBTB10/L3/021_ZBTB10_standardizedTables.mat",
+        
 
 
         % "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\C57\20260604_standardizedTable_MalesOnly.mat",
-        "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\Mecp2\20260602_standardizedTable_MalesKOOnly.mat",
-        "D:\JOBS\WashU_Neuroscience\Behavior\WU-SMAC\PlacePreference\POPULATION\In-House\C57\20260604_standardizedTable_FemalesOnly.mat",
     ];
 
     % Parse the strain name as 2nd to last directory in the path, split space, get 2nd part (SCN1A, FBN1, etc.)

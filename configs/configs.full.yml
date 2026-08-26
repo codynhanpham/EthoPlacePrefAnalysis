@@ -57,7 +57,7 @@ tracking_providers:
     # Default settings applied to all sub-categories unless overridden 
     coordsUnit: "cm" # The unit of the coordinates in the EthoVision tracking data; set in Arena Settings. Default is "cm". This must be consistent across all arenas used in your experiments.
 
-    default_camera_imgwidth_fov_cm: 58.5 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+    default_camera_imgwidth_fov_cm: 92.25 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
     default_camera_center_offset_px: [0, 0] # EthoVision coordinates' origin is the center of the image; specify an offset here if your arena/area of interest is not perfectly centered in the camera view. Default is [0,0].
     default_zone_match_method: "startsWith"  # method to match the zone name set here to the ones set in EthoVision; one of these: "exact", "startsWith", "endsWith", "contains". Default is "startsWith".
 
@@ -67,7 +67,7 @@ tracking_providers:
       # The arenas set here should be a superset of all arenas used in your experiments
 
       - name: "Arena 1" # required: name of the arena as specified in EthoVision
-        camera_imgwidth_fov_cm: 58.5
+        camera_imgwidth_fov_cm: 92.25
         camera_center_offset_px: [0, 0]
         zone: # required: list of zone names as specified in EthoVision for this arena matched to left/right sides of the place preference setup
           left: "Left"
@@ -86,7 +86,7 @@ tracking_providers:
           - name: "Hallway"
 
       - name: "Lily Booth"
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
         camera_center_offset_px: [960, 0]
         zone:
           left: "Left 1"
@@ -105,7 +105,7 @@ tracking_providers:
           - name: "Hallway 1"
       
       - name: "Rain Booth"
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
         camera_center_offset_px: [-960, 0]
         zone:
           left: "Left 2"
@@ -130,7 +130,7 @@ tracking_providers:
     # Default x-offset in pixels to correctly define the midpoint between left/right zones if the arena is not perfectly centered in the camera view. This can be overridden per-arena if needed.
     default_midpoint_xoffset_px: 0
 
-    default_camera_imgwidth_fov_cm: 58.5 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
+    default_camera_imgwidth_fov_cm: 92.25 # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
 
     # If there are multiple arenas recorded at once within a single trial, the file names are expected to be in the `{trial_name} @ {arena_name}` format (delimited by ` @ ` with spaces), where the arena_name should match the names specified here.
     arena:
@@ -139,16 +139,16 @@ tracking_providers:
 
       - name: "Arena 1" # Required: name of the arena as specified in your experiments, must match the master metadata table and processed file names
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 58.5
+        camera_imgwidth_fov_cm: 92.25
 
       - name: "Lily Booth"
         # Set the offset to override the default. This is often time all you need if the physical set up is fixed. Otherwise, use the select reference line/point button in the GUI to define the reference line/point. The order of precedence is: trial/arena-specific (associated *.ref.json file) > arena-specific (this config) > default (this config).
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
       
       - name: "Rain Booth"
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
 
   SLEAP:
     # Path to the SLEAP model directories. Depending on the tracking backend, there might be more than one model directory that must be specified
@@ -201,7 +201,7 @@ tracking_providers:
     default_midpoint_xoffset_px: 0
 
     # The actual width of the camera's field of view in cm, such that the pixelsize = FOV_cm / image_width_pixels. Default is shown here.
-    default_camera_imgwidth_fov_cm: 77.4
+    default_camera_imgwidth_fov_cm: 92.25
 
     # If there are multiple arenas recorded at once within a single trial, the file names are expected to be in the `{trial_name} @ {arena_name}` format (delimited by ` @ ` with spaces), where the arena_name should match the names specified here.
     arena:
@@ -210,13 +210,13 @@ tracking_providers:
 
       - name: "Arena 1" # Required: name of the arena as specified in your experiments, must match the master metadata table and processed file names
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
 
       - name: "Lily Booth"
         # Set the offset to override the default. This is often time all you need if the physical set up is fixed. Otherwise, use the select reference line/point button in the GUI to define the reference line/point. The order of precedence is: trial-specific (master metadata table) > arena-specific (this config) > default (this config).
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25
       
       - name: "Rain Booth"
         midpoint_xoffset_px: 0
-        camera_imgwidth_fov_cm: 77.4
+        camera_imgwidth_fov_cm: 92.25

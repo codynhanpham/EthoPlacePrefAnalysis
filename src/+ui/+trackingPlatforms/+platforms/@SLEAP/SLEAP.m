@@ -78,7 +78,7 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
                 capability {mustBeTextScalar}
             end
 
-            supported = ismember(lower(string(capability)), "aligntrackingtostim");
+            supported = ismember(lower(string(capability)), ["aligntrackingtostim", "l1export"]);
         end
 
         function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli] = alignTrackingToStim(obj, trackingDataFilePath, stimuliDir, kvargs)
