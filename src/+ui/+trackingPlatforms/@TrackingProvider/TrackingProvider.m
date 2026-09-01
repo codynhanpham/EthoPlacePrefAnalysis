@@ -347,6 +347,143 @@ classdef (Abstract) TrackingProvider < handle
                 end
             end
         end
+
+
+        function openTrackingDataSheet(trackingDataFilePath, kvargs)
+            %%OPENTRACKINGDATASHEET Open the tracking data sheet in a new tab of the GUI
+            arguments
+                trackingDataFilePath {mustBeTextScalar, mustBeFile}
+                kvargs.MainFigure = []
+            end
+
+            useHDF5Viewer = false;
+            hdf5Extensions = {'.h5', '.hdf5', '.slp'};
+            [~, ~, ext] = fileparts(trackingDataFilePath);
+            isHdf5Like = any(strcmpi(ext, hdf5Extensions));
+            isSleapFile = strcmpi(ext, '.slp');
+            if isSleapFile
+                % SLEAP tracking data is stored in a HDF5-like .slp file
+                fileKind = 'SLEAP tracking data file (.slp)';
+            else
+                fileKind = sprintf('HDF5-like data file (%s)', ext);
+            end
+            if isHdf5Like
+                % We can check if the hdf5view namespace is available and that hdf5view.available() is good
+                % if not, we can either prompt for install in the GUI (if main fig can be found), or show a warning with the installation note in the console and fall back to OS default application
+
+                % Check if hdf5view is available (wrapped in try/catch since
+                % available() errors when the +uv helper namespace is missing)
+                hdf5viewIsAvailable = false;
+                try
+                    hdf5viewIsAvailable = hdf5view.available();
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:HDF5ViewerNotAvailable', ...
+                        ['hdf5view could not be checked for availability and will not be used:\n%s\n' ...
+                        'Make sure the lib/hdf5viewer and lib/uv modules are on the MATLAB path.'], ...
+                        ME.message);
+                end
+
+                if hdf5viewIsAvailable
+                    useHDF5Viewer = true;
+                else
+                    % Resolve the parent figure for prompts:
+                    % 1) An explicitly provided MainFigure takes precedence (must be a valid uifigure)
+                    % 2) Otherwise, fall back to heuristics (global handle or figure search)
+                    fig = [];
+                    if ~isempty(kvargs.MainFigure)
+                        isValidUI = isgraphics(kvargs.MainFigure, 'figure') && ...
+                            matlab.ui.internal.isUIFigure(kvargs.MainFigure);
+                        if isValidUI
+                            fig = kvargs.MainFigure;
+                        else
+                            warning('ui:trackingPlatforms:TrackingProvider:InvalidMainFigureHandle', ...
+                                ['The provided MainFigure is not a valid uifigure handle. ' ...
+                                'Falling back to heuristic figure lookup.']);
+                        end
+                    end
+
+                    if isempty(fig)
+                        % Find the main app either via the global handle or by searching for the figure
+                        if exist('PlacePreferenceGUI', 'var') && ...
+                                isa(PlacePreferenceGUI, 'PlacePrefDataGUI_main') && ...
+                                isvalid(PlacePreferenceGUI.Figure)
+                            fig = PlacePreferenceGUI.Figure;
+                        else
+                            fig = findall(0, 'Type', 'figure', 'Name', 'PlacePref Data Analysis');
+                            if ~isempty(fig) && all(isvalid(fig))
+                                fig = fig(1);
+                            else
+                                fig = [];
+                            end
+                        end
+                    end
+
+                    % If so, prompt for install in the GUI, otherwise, show a warning with the installation note in the console and fall back to OS default application
+                    if ~isempty(fig)
+                        installMsg = sprintf(['The HDF5 viewer (hdf5view) is not installed yet.\n' ...
+                            'It is needed to inspect this %s.\n\n' ...
+                            'Install it now? (Requires internet access; the viewer is ' ...
+                            'installed locally via uv into lib/hdf5viewer/private/hdf5viewer.)'], ...
+                            fileKind);
+                        % Note: no CloseFcn override - the default dismiss behavior is
+                        % what we want, and a named-string CloseFcn is not resolvable
+                        % by evalin and throws 'Unrecognized function or variable'.
+                        selection = uiconfirm(fig, installMsg, 'Install HDF5 Viewer?', ...
+                            'Options', {'Install', 'Skip'}, 'Icon', 'question');
+                        if strcmp(selection, 'Install')
+                            installDlg = uiprogressdlg(fig, 'Title', 'Installing HDF5 Viewer', ...
+                                'Message', 'Installing hdf5view (this may take a few minutes)...\n\nCheck Command Window for details.', ...
+                                'Indeterminate', 'on');
+                            try
+                                [~, installOk] = hdf5view.install();
+                                useHDF5Viewer = installOk;
+                            catch ME
+                                warning('ui:trackingPlatforms:TrackingProvider:HDF5ViewerInstallFailed', ...
+                                    'hdf5view installation failed:\n%s', ME.message);
+                            end
+                            if isvalid(installDlg)
+                                close(installDlg);
+                            end
+                        end
+                    else
+                        if isSleapFile
+                            installNote = sprintf(['hdf5view is not installed, so this %s cannot be opened in the built-in HDF5 viewer.\n' ...
+                                'To enable it, run hdf5view.install() in MATLAB (with lib/hdf5viewer and lib/uv on the path).\n' ...
+                                'The .slp file can also be opened directly in the SLEAP GUI or any HDF5 viewer.\n' ...
+                                'Falling back to the OS default application for this file type.'], fileKind);
+                        else
+                            installNote = sprintf(['hdf5view is not installed, so this %s cannot be opened in the built-in HDF5 viewer.\n' ...
+                                'To enable it, run hdf5view.install() in MATLAB (with lib/hdf5viewer and lib/uv on the path).\n' ...
+                                'Falling back to the OS default application for this file type.'], fileKind);
+                        end
+                        warning('ui:trackingPlatforms:TrackingProvider:HDF5ViewerNotInstalled', '%s', installNote);
+                    end
+                end
+            end
+
+            if useHDF5Viewer
+                % Open with the HDF5 viewer if available
+                try
+                    hdf5view.file(trackingDataFilePath);
+                    return;
+                catch ME
+                    warning('ui:trackingPlatforms:TrackingProvider:HDF5ViewerFailed', ...
+                        'Could not open this %s in the HDF5 viewer, falling back to the OS default application.\n%s', ...
+                        fileKind, ME.message);
+                end
+            end
+
+            % Open with OS default application for the file type
+            if (ispc)
+                winopen(trackingDataFilePath);
+            elseif ismac
+                cmdToExecute = ['open ' trackingDataFilePath];
+                [status, path] = system(cmdToExecute); %#ok<ASGLU>
+            else
+                cmdToExecute = ['xdg-open ' trackingDataFilePath];
+                [status, path] = system(cmdToExecute); %#ok<ASGLU>
+            end
+        end
     end
 
     methods
