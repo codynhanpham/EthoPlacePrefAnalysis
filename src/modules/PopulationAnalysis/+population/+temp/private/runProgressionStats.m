@@ -108,11 +108,13 @@ function longTbl = extractProgressionLongTable(mergedTable, metricType, binWidth
         metaVals = metaDict.values();
         animalKeys = keys(metaDict);
         nmeta = length(metaVals);
-        % nAnimalsA is recorded by joinStdTableByStim and tells us how many
-        % widened columns belong to group A. Do NOT infer from
-        % numel(stimfileName) — that field concatenates A+B and would give
-        % the wrong split when the two groups have different animal counts.
-        ncolsA = thisStdTable.nAnimalsA;
+        % Joined tables record the A/B split explicitly. A standalone
+        % standardizedTable has no B group, so all metadata columns are A.
+        if isfield(thisStdTable, 'nAnimalsA')
+            ncolsA = thisStdTable.nAnimalsA;
+        else
+            ncolsA = nmeta;
+        end
 
         allMetric = stimPeriodTable{:, metricCol};
         metricA = allMetric(:, 1:ncolsA);

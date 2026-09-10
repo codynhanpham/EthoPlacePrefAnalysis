@@ -371,8 +371,6 @@ classdef (Abstract) TrackingProvider < handle
                 % We can check if the hdf5view namespace is available and that hdf5view.available() is good
                 % if not, we can either prompt for install in the GUI (if main fig can be found), or show a warning with the installation note in the console and fall back to OS default application
 
-                % Check if hdf5view is available (wrapped in try/catch since
-                % available() errors when the +uv helper namespace is missing)
                 hdf5viewIsAvailable = false;
                 try
                     hdf5viewIsAvailable = hdf5view.available();
@@ -425,9 +423,6 @@ classdef (Abstract) TrackingProvider < handle
                             'Install it now? (Requires internet access; the viewer is ' ...
                             'installed locally via uv into lib/hdf5viewer/private/hdf5viewer.)'], ...
                             fileKind);
-                        % Note: no CloseFcn override - the default dismiss behavior is
-                        % what we want, and a named-string CloseFcn is not resolvable
-                        % by evalin and throws 'Unrecognized function or variable'.
                         selection = uiconfirm(fig, installMsg, 'Install HDF5 Viewer?', ...
                             'Options', {'Install', 'Skip'}, 'Icon', 'question');
                         if strcmp(selection, 'Install')

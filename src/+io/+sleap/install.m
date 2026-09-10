@@ -372,7 +372,7 @@ function installSleapPackages(sleapdir, nnExport)
 
     fprintf('PWD: %s\n', pwd());
     fprintf('Installing SLEAP packages into virtual environment ...\n');
-    cmd = 'pip install --torch-backend auto "sleap[nn]>=1.6.4" "sleap-io"';
+    cmd = 'pip install --torch-backend auto "sleap[nn]>=1.6.5" "sleap-io"';
     sleapnn = 'sleap-nn';
     constraints = {}; % add additional constraints, this is mostly to patch incompat versions with the current published sleap deps
     if strcmp(nnExport, 'onnx-cpu')
@@ -381,7 +381,7 @@ function installSleapPackages(sleapdir, nnExport)
         sleapnn = [sleapnn '[export-gpu]'];
     elseif strcmp(nnExport, 'tensorrt')
         sleapnn = [sleapnn '[export-gpu,tensorrt]'];
-        constraints{end+1} = '"tensorrt<11"';
+        constraints{end+1} = '"tensorrt>=10.13.0,<11"';
     elseif strcmp(nnExport, 'none')
         % Do nothing, don't add any extra dependencies.
     end

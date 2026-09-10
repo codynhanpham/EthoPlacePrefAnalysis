@@ -30,7 +30,7 @@ function fig = mecp2_pilot_stats()
 
     tabStruct = struct('Title', tabNames);
     
-    [fig, tgroup, tabs] = ui.tabbedFigure(fig, struct(), tabStruct);
+    [fig, ~, tabs] = ui.tabbedFigure(fig, struct(), tabStruct);
 
     mergedTable(1) = population.temp.joinStdTableByStim(mecp2Data(1), c57Data(1), 'EmbeddedNAnimalA', true);
     mergedTable(2) = population.temp.joinStdTableByStim(mecp2Data(2), c57Data(2), 'EmbeddedNAnimalA', true);
@@ -124,6 +124,31 @@ function fig = mecp2_pilot_stats()
     % Compact cross-metric summary table.
     stats.summary = summarizeProgressionStats(stats);
 
+    % Per-subject similarity-to-WT-baseline ranking (see rankSubjectSimilarityToBaseline.m).
+    % Ranks each MECP2 KO subject by multivariate similarity to the C57 WT baseline:
+    % preference index + rate-of-stay + progression components, scored via shrunk
+    % Mahalanobis D2 with a leave-one-out WT empirical null, plus a locomotion-
+    % residualized (adjusted) layer and per-stim trajectory RMSE.
+    stats.similarity = rankSubjectSimilarityToBaseline(c57Data, mecp2Data, ...
+        "ProgressionMetricType", "state", ...
+        "BinWidth", BIN_WIDTH, ...
+        "MeanWindowFrames", MEAN_WINDOW_FRAMES, ...
+        "OutputDir", string(outputDir), ...
+        "FilePrefix", "mecp2_pilot_stats", ...
+        "RunStamp", string(runStamp), ...
+        "Verbose", true);
+
+    % Per-subject progression ranking & consistency (see rankSubjectProgression.m).
+    % ExpectedDirection (optional): struct array with fields
+    %   .stimfileName                 - text, matched against Stimulus Protocol
+    %   .sortedExpectedProgressionDir - vector of 1/-1, same length as that protocol's
+    %                                   stimuliSorted; k-th value applies to k-th stimulus.
+    % Protocols not listed default to +1 (plot convention).
+    % RANK_EXPECTED_DIRECTION = struct( ...
+    %     'stimfileName', {"20260130_Normal-Inverted_27x_[5-10s]ISI_v2.flac", ...
+    %                      "20260204_Normal-WhiteNoise_27x_[5-10s]ISI_v3.flac"}, ...
+    %     'sortedExpectedProgressionDir', {[1, -1], [1, -1]});
+
     % Save analysis tables in TSV-compatible format.
     stats.export = saveProgressionStatsTables(stats, outputDir, runStamp);
     stats.export.commandWindowLogTxt = logTxtPath;
@@ -135,6 +160,7 @@ function fig = mecp2_pilot_stats()
     assignin('base', 'progressionStats', stats);
     assignin('base', 'progressionStatsSummary', stats.summary);
     assignin('base', 'progressionStatsExport', stats.export);
+    assignin('base', 'similarityRanking', stats.similarity);
 
     diary off;
 

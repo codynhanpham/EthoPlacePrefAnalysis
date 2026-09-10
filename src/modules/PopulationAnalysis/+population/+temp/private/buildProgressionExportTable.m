@@ -10,23 +10,23 @@ function analysisTbl = buildProgressionExportTable(stats)
     analysisTbl = emptyAnalysisExportTable();
 
     if isfield(stats, 'state') && isstruct(stats.state)
-        analysisTbl = [analysisTbl; addProgressionExportRows(stats.state, "STATE progression stats", "STATE")]; %#ok<AGROW>
+        analysisTbl = [analysisTbl; addProgressionExportRows(stats.state, "STATE progression stats", "STATE")];
     end
     if isfield(stats, 'distance') && isstruct(stats.distance)
-        analysisTbl = [analysisTbl; addProgressionExportRows(stats.distance, "DISTANCE progression stats", "DISTANCE")]; %#ok<AGROW>
+        analysisTbl = [analysisTbl; addProgressionExportRows(stats.distance, "DISTANCE progression stats", "DISTANCE")];
     end
 
     if isfield(stats, 'pairing') && isstruct(stats.pairing)
         if isfield(stats.pairing, 'state') && isstruct(stats.pairing.state)
-            analysisTbl = [analysisTbl; addPairingExportRows(stats.pairing.state, "STATE pairing-context stats", "state")]; %#ok<AGROW>
+            analysisTbl = [analysisTbl; addPairingExportRows(stats.pairing.state, "STATE pairing-context stats", "state")];
         end
         if isfield(stats.pairing, 'distance') && isstruct(stats.pairing.distance)
-            analysisTbl = [analysisTbl; addPairingExportRows(stats.pairing.distance, "DISTANCE pairing-context stats", "distance")]; %#ok<AGROW>
+            analysisTbl = [analysisTbl; addPairingExportRows(stats.pairing.distance, "DISTANCE pairing-context stats", "distance")];
         end
     end
 
     if isfield(stats, 'summary') && istable(stats.summary) && ~isempty(stats.summary)
-        analysisTbl = [analysisTbl; addSummaryExportRows(stats.summary, "Progression statistics summary")]; %#ok<AGROW>
+        analysisTbl = [analysisTbl; addSummaryExportRows(stats.summary, "Progression statistics summary")];
     end
 end
 
@@ -34,16 +34,16 @@ function rows = addProgressionExportRows(progressStats, description, metricLabel
     rows = emptyAnalysisExportTable();
 
     if isfield(progressStats, 'trajectoryDetails') && ~isempty(progressStats.trajectoryDetails)
-        rows = [rows; addFormulaRows(progressStats.trajectoryDetails, progressStats, description, metricLabel, "LME-Trajectory", false)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(progressStats.trajectoryDetails, progressStats, description, metricLabel, "LME-Trajectory", false)];
     end
     if isfield(progressStats, 'trajectorySummary') && istable(progressStats.trajectorySummary) && ~isempty(progressStats.trajectorySummary)
-        rows = [rows; addModelTermRows(progressStats.trajectorySummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(progressStats.trajectorySummary, description, "model_term")];
     end
     if isfield(progressStats, 'slopeDetails') && ~isempty(progressStats.slopeDetails)
-        rows = [rows; addFormulaRows(progressStats.slopeDetails, progressStats, description, metricLabel, "LME-Slope", false)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(progressStats.slopeDetails, progressStats, description, metricLabel, "LME-Slope", false)];
     end
     if isfield(progressStats, 'slopeSummary') && istable(progressStats.slopeSummary) && ~isempty(progressStats.slopeSummary)
-        rows = [rows; addModelTermRows(progressStats.slopeSummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(progressStats.slopeSummary, description, "model_term")];
     end
 
     if isempty(rows)
@@ -55,28 +55,28 @@ function rows = addPairingExportRows(pairStats, description, metricLabel)
     rows = emptyAnalysisExportTable();
 
     if isfield(pairStats, 'withinStrainDetails') && ~isempty(pairStats.withinStrainDetails)
-        rows = [rows; addFormulaRows(pairStats.withinStrainDetails, pairStats, description, metricLabel, "", true)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(pairStats.withinStrainDetails, pairStats, description, metricLabel, "", true)];
     end
     if isfield(pairStats, 'withinStrainSummary') && istable(pairStats.withinStrainSummary) && ~isempty(pairStats.withinStrainSummary)
-        rows = [rows; addModelTermRows(pairStats.withinStrainSummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(pairStats.withinStrainSummary, description, "model_term")];
     end
     if isfield(pairStats, 'crossStrainDetails') && ~isempty(pairStats.crossStrainDetails)
-        rows = [rows; addFormulaRows(pairStats.crossStrainDetails, pairStats, description, metricLabel, "", true)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(pairStats.crossStrainDetails, pairStats, description, metricLabel, "", true)];
     end
     if isfield(pairStats, 'crossStrainSummary') && istable(pairStats.crossStrainSummary) && ~isempty(pairStats.crossStrainSummary)
-        rows = [rows; addModelTermRows(pairStats.crossStrainSummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(pairStats.crossStrainSummary, description, "model_term")];
     end
     if isfield(pairStats, 'slopeWithinDetails') && ~isempty(pairStats.slopeWithinDetails)
-        rows = [rows; addFormulaRows(pairStats.slopeWithinDetails, pairStats, description, metricLabel, "Slope", true)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(pairStats.slopeWithinDetails, pairStats, description, metricLabel, "Slope", true)];
     end
     if isfield(pairStats, 'slopeWithinSummary') && istable(pairStats.slopeWithinSummary) && ~isempty(pairStats.slopeWithinSummary)
-        rows = [rows; addModelTermRows(pairStats.slopeWithinSummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(pairStats.slopeWithinSummary, description, "model_term")];
     end
     if isfield(pairStats, 'slopeCrossDetails') && ~isempty(pairStats.slopeCrossDetails)
-        rows = [rows; addFormulaRows(pairStats.slopeCrossDetails, pairStats, description, metricLabel, "Slope", true)]; %#ok<AGROW>
+        rows = [rows; addFormulaRows(pairStats.slopeCrossDetails, pairStats, description, metricLabel, "Slope", true)];
     end
     if isfield(pairStats, 'slopeCrossSummary') && istable(pairStats.slopeCrossSummary) && ~isempty(pairStats.slopeCrossSummary)
-        rows = [rows; addModelTermRows(pairStats.slopeCrossSummary, description, "model_term")]; %#ok<AGROW>
+        rows = [rows; addModelTermRows(pairStats.slopeCrossSummary, description, "model_term")];
     end
 
     if isempty(rows)
@@ -89,9 +89,9 @@ function rows = addSummaryExportRows(summaryTbl, description)
 
     totalTerms = height(summaryTbl);
     sigTerms = nnz(summaryTbl.Significant);
-    rows = [rows; makeExportRow(description, "summary_count", "", NaN, "", "", "", "Total terms", NaN, NaN, NaN, NaN, NaN, NaN, false, "", double(totalTerms), "")]; %#ok<AGROW>
-    rows = [rows; makeExportRow(description, "summary_count", "", NaN, "", "", "", "Significant (p<0.05)", NaN, NaN, NaN, NaN, NaN, NaN, false, "", double(sigTerms), "")]; %#ok<AGROW>
-    rows = [rows; addSummaryTermRows(summaryTbl, description)]; %#ok<AGROW>
+    rows = [rows; makeExportRow(description, "summary_count", "", NaN, "", "", "", "Total terms", NaN, NaN, NaN, NaN, NaN, NaN, false, "", double(totalTerms), "")];
+    rows = [rows; makeExportRow(description, "summary_count", "", NaN, "", "", "", "Significant (p<0.05)", NaN, NaN, NaN, NaN, NaN, NaN, false, "", double(sigTerms), "")];
+    rows = [rows; addSummaryTermRows(summaryTbl, description)];
 end
 
 function rows = addSummaryTermRows(summaryTbl, description)

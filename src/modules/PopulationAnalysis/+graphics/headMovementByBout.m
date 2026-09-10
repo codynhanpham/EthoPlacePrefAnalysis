@@ -1,0 +1,582 @@
+function f = headMovementByBout(standardizedTable, kvargs)
+    %%HEADMOVEMENTBYBOUT Plot cumulative head displacement aligned by bout onset, binned over time
+    %
+    %   This function tracks the cumulative displacement of the head (defined as the midpoint
+    %   of the Ear_left and Ear_right bodyparts) over time, aligned to bout onset, for each
+    %   bout of stimulus presentation in the provided standardizedTable.
+    %   Mirroring graphics.cumulativeDisplacementByBout(), the displacement accumulates the
+    %   signed frame-to-frame head movements: movement toward the active stimulus side
+    %   accumulates positively, and movement away from it accumulates negatively.
+    %   At bout onset, the cumulative displacement is re-zeroed.
+    %
+    %   Also mirroring graphics.cumulativeDisplacementByBout(), each replicate is normalized
+    %   to (-1,1) before accumulation (positive values scaled by the replicate's max positive
+    %   value, negative values by its max negative magnitude). This removes variability from
+    %   different arena sizes / head-to-camera distances across trials. Since the head
+    %   coordinate is not midline-referenced, each replicate is first centered on its mean
+    %   before the positive/negative scaling.
+    %
+    %   f = graphics.headMovementByBout(standardizedTable, kvargs)
+    %
+    %   Inputs:
+    %       standardizedTable : Struct array in standardized format, as output by population.stats.populationPositionOverTime()
+    %
+    %   Name-Value Pair Arguments:
+    %       'ResponseWindow' : 1x2 double array specifying the time window (in seconds, relative to bout onset) to analyze. Default is [-1, 6]. This range should cover the full bout duration and ends before the next bout starts.
+    %       'BinWidth' : Scalar double specifying the width of time bins (in seconds) for averaging displacement data. Default is NaN, which uses the smallest time resolution available. Set to 0 or NaN for no binning, or Inf for one single bin over the whole ResponseWindow.
+    %       'BoutRange' : 1x2 double array specifying which bouts to include. Default is [1, Inf] (all bouts). Use integers for bout indices (e.g., [1,3]), or floats in [0,1] for percentage (e.g., [0,0.5] for first 50% of bouts).
+    %       'DisplacementAxis' : Text scalar, 'x' or 'y', specifying which coordinate axis of the head midpoint to use for computing movement directions and displacement magnitudes. Default is 'x' (matching the default SpeakerFlipAxes in population.stats.populationPositionOverTime).
+    %
+    %       'Title' : Text scalar for the overall figure title. Default is '' (no title).
+    %       'SameYLim' : Logical scalar indicating whether to harmonize y-limits across all subplots for direct comparability. Default is true.
+    %       'YLim' : 1x2 double array specifying manual y-limits [min, max]. Default is [] (auto). Overrides SameYLim.
+    %       'ShowDataPoints' : Logical scalar indicating whether to overlay jittered scatter of per-animal bin means. Default is false, since with the default BinWidth (NaN = frame resolution) the per-bin replicate means are essentially raw per-frame samples and would drown out the mean + SEM envelope. Set to true together with a coarser BinWidth to inspect per-animal spread.
+    %
+    %   Outputs:
+    %       f : Figure handle of the generated plot
+    %
+    %   See also: population.stats.populationPositionOverTime, graphics.cumulativeDisplacementByBout, graphics.headReactionTimeByBout
+
+
+    arguments
+        standardizedTable struct {mustBeNonempty}
+
+        kvargs.ResponseWindow (1,2) double = [-1, 6] % in seconds, relative to bout onset
+        kvargs.BinWidth (1,1) double = NaN % in seconds, set to 0 or NaN for no binning (use the smallest time resolution available), or Infinity for one single bin over the whole ResponseWindow. BinWidth is clamped to be at most the size of ResponseWindow.
+        kvargs.BoutRange (1,2) double = [1, Inf] % which bouts to include. Use integers for bout indices (e.g., [1,3]), or floats in [0,1] for percentage (e.g., [0,0.5] for first 50% of bouts)
+        kvargs.DisplacementAxis {mustBeMember(kvargs.DisplacementAxis, {'x', 'y'}), mustBeTextScalar} = 'x' % which head coordinate axis to use for signed displacement
+
+        kvargs.Title {validator.mustBeTextScalarOrEmpty} = ''
+        kvargs.SameYLim (1,1) logical = true % whether to harmonize y-limits across all subplots for direct comparability
+        kvargs.YLim double {validateYLim} = [] % manual y-limits [min, max]; empty = auto
+        kvargs.ShowDataPoints (1,1) logical = false % whether to overlay jittered scatter of per-animal bin means. Off by default: with frame-resolution bins this plots every raw sample and obscures the mean + SEM.
+    end
+
+    kvargs.YLim = validateYLim(kvargs.YLim);
+
+    % Make sure response window is valid: end > start
+    if kvargs.ResponseWindow(2) <= kvargs.ResponseWindow(1)
+        error('Invalid ResponseWindow: End time must be greater than Start time.');
+    end
+
+    requiredFields = {'stimfileName', 'stimuliSorted', 'animalMetadata', ...
+        'fps', 'px2cm', 'centerpointData', 'bodyparts'};
+    missing = setdiff(requiredFields, fieldnames(standardizedTable), 'stable');
+    if ~isempty(missing)
+        error('The provided standardizedTable is missing required fields: { ''%s'' }', strjoin(missing, ''', '''));
+    end
+
+    stimSets = {standardizedTable.stimuliSorted};
+    nstimsets = length(stimSets);
+
+    animalSexes = cellfun(@(x) {x.values().sex}, {standardizedTable.animalMetadata}, 'UniformOutput', false);
+    animalSexes = unique([animalSexes{:}]);
+    nsexes = length(animalSexes);
+
+
+    % Each plot will be by Per StimSet x Strain x Genotype
+    % Within each plot, the stimulus (within the set) will be represented by line style, and Sex by color within each plot
+    % With 2 stimuli per set, there will be 2 line styles (e.g., solid for stim that includes 'normal', dashed for the other stimulus --> 4 lines per plot
+    % Only plot combinations that actually exist in the data.
+
+    % Pre-scan: collect (stimsetIdx, strain, genotype) tuples that have data
+    existingCombos = {};
+    for si = 1:nstimsets
+        thisMeta = standardizedTable(si).animalMetadata;
+        theseStrains = {thisMeta.values().strain};
+        theseGenotypes = {thisMeta.values().genotype};
+        for ai = 1:length(theseStrains)
+            existingCombos{end+1} = {si, theseStrains{ai}, theseGenotypes{ai}}; %#ok<AGROW>
+        end
+    end
+    % De-duplicate
+    [~, uniqueIdx] = unique(cellfun(@(c) sprintf('%d|%s|%s', c{1}, c{2}, c{3}), existingCombos, 'UniformOutput', false), 'stable');
+    existingCombos = existingCombos(uniqueIdx);
+
+    nplots = length(existingCombos);
+
+    % At the onset of each bout, start tracking the displacement of the head (midpoint of the ears) over time
+    % Using the head position at bout onset as the zero point (i.e., how the head displaces from its initial position due to stimulus)
+    % Keep track of direction and stimulus type, so that the resulting result: toward the same side as stimulus = positive displacement, away from stimulus = negative displacement
+    % For each bout, bin the displacement data into time bins of (BinWidth)s, then average + sem across replicates/animals belonging to the same Strain/Genotype/Sex group
+
+    NORMAL_LINE_STYLE = {'-'}; % stimuliSorted should place 'normal' stimulus first
+    OTHER_LINE_STYLE = {'-.', '--', ':'}; % for additional stimuli, each gets a different non-solid line style
+    knownOtherStimLineStyles = configureDictionary('char', 'char'); % Map known non-normal stimulus keywords to specific line styles (e.g., 'inverted' -> '-.', 'white noise' -> '--', etc.)
+
+    ncols = ceil(sqrt(nplots));
+    nrows = ceil(nplots / ncols);
+
+    [screensize, videoaspect] = deal(get(0, 'ScreenSize'), ncols/nrows);
+    [figW, figH] = ui.dynamicFigureSize(videoaspect, 0);
+
+    % Center the figure on the primary screen
+    figPos = [(screensize(3)-figW)/2, (screensize(4)-figH)/2, figW, figH];
+
+    f = figure('Name', sprintf("Head Movement By Bout (Bin Size: %.3f sec)", kvargs.BinWidth), 'Position', figPos, 'NumberTitle', 'off');
+    t = tiledlayout(f, nrows, ncols, 'Padding', 'compact', 'TileSpacing', 'compact');
+    t.Title.String = kvargs.Title;
+    t.Title.FontWeight = 'bold';
+
+    for stimsetIdx = 1:nstimsets
+        thisStimSet = stimSets{stimsetIdx};
+        thisStdTable = standardizedTable(stimsetIdx);
+        bodypartTable = thisStdTable.bodyparts;
+        bodypartTable = graphics.filterStimulusPeriodRows(bodypartTable);
+        bodypartTable = graphics.private.getHeadPositionMatrix(bodypartTable);
+        trialTime = bodypartTable{:, 'Trial time'};
+        headXMatrix = bodypartTable{:, 'Head X'};
+        headYMatrix = bodypartTable{:, 'Head Y'};
+        columnByStrainOrder = {thisStdTable.animalMetadata.values().strain};
+        columnByGenotypeOrder = {thisStdTable.animalMetadata.values().genotype};
+        columnBySexOrder = {thisStdTable.animalMetadata.values().sex};
+
+        % Pre-process the stim sequence into bouts for this stim set
+        stimSequence = bodypartTable{:, 'Stimulus name'};
+        stimsBouts = configureDictionary("char", "struct"); % struct with fields 'nBouts', 'startIdx', 'endIdx', 'responseWindowStartIdx', 'responseWindowEndIdx'
+        for stimIdx = 1:length(thisStimSet)
+            stimName = thisStimSet{stimIdx};
+            % Determine where in the stim sequence this stimulus occurs
+            % Since the raw audio often includes the [Ch#] channel number, need to match by endsWith
+            isStim = endsWith(stimSequence, stimName);
+
+            % Find stimulus start and end indices
+            stimStartIdx = find(diff([0; isStim]) == 1);
+            stimEndIdx = find(diff([isStim; 0]) == -1);
+            nBouts = length(stimStartIdx);
+            nBoutsTotal = nBouts; % Save original total for percentage calculation
+
+            % Apply BoutRange filter to select which bouts to include
+            % Check if using percentage mode (any float value AND range in [0,1])
+            isPercentageMode = (any(mod(kvargs.BoutRange, 1) ~= 0) && all(kvargs.BoutRange >= 0) && all(kvargs.BoutRange <= 1));
+
+            if isPercentageMode
+                % Convert percentage to bout indices
+                boutRangeStart = max(1, round(nBouts * kvargs.BoutRange(1)) + 1); % +1 because percentage 0 should start at bout 1
+                if kvargs.BoutRange(1) == 0
+                    boutRangeStart = 1; % 0% means start from bout 1
+                end
+                boutRangeEnd = min(nBouts, round(nBouts * kvargs.BoutRange(2)));
+            else
+                % Use direct bout indices
+                boutRangeStart = max(1, kvargs.BoutRange(1));
+                boutRangeEnd = min(nBouts, kvargs.BoutRange(2));
+            end
+
+            if boutRangeEnd < boutRangeStart
+                stimStartIdx = [];
+                stimEndIdx = [];
+                nBouts = 0;
+            else
+                boutIndicesToInclude = boutRangeStart:boutRangeEnd;
+
+                % Filter bout indices based on BoutRange
+                stimStartIdx = stimStartIdx(boutIndicesToInclude);
+                stimEndIdx = stimEndIdx(boutIndicesToInclude);
+                nBouts = length(boutIndicesToInclude); % Update nBouts to reflect filtered count
+            end
+
+            % Format the percent range string for titles: start-end %
+            if nBoutsTotal > 0
+                startPercent = (boutRangeStart - 1) / nBoutsTotal * 100;
+                endPercent = boutRangeEnd / nBoutsTotal * 100;
+            else
+                startPercent = 0;
+                endPercent = 0;
+            end
+            percentRangeStr = sprintf('%.1f-%.1f%% = %d reps', startPercent, endPercent, nBouts);
+
+            % The time for each bout response window will be in ref to the start index of that bout == time 0s,
+            % Chunk into ResponseWindow by ('Trial time'), which is in seconds
+            % Find the closest indices in 'Trial time' to the desired ResponseWindow
+            responseWindowStartIdx = zeros(nBouts, 1);
+            responseWindowEndIdx = zeros(nBouts, 1);
+            for boutIdx = 1:nBouts
+                boutStartTime = trialTime(stimStartIdx(boutIdx));
+                desiredWindowStartTime = boutStartTime + kvargs.ResponseWindow(1);
+                desiredWindowEndTime = boutStartTime + kvargs.ResponseWindow(2);
+
+                % Find closest indices
+                [~, responseWindowStartIdx(boutIdx)] = min(abs(trialTime - desiredWindowStartTime));
+                [~, responseWindowEndIdx(boutIdx)] = min(abs(trialTime - desiredWindowEndTime));
+            end
+
+            stimsBouts(stimName) = struct(...
+                'nBouts', nBouts, ...
+                'startIdx', stimStartIdx, ...
+                'endIdx', stimEndIdx, ...
+                'responseWindowStartIdx', responseWindowStartIdx, ...
+                'responseWindowEndIdx', responseWindowEndIdx, ...
+                'percentRangeStr', percentRangeStr ...
+            );
+        end
+
+        for comboIdx = 1:length(existingCombos)
+            combo = existingCombos{comboIdx};
+            if combo{1} ~= stimsetIdx
+                continue;
+            end
+            strain = combo{2};
+            genotype = combo{3};
+
+            strainMask = strcmp(columnByStrainOrder, strain);
+            genotypeMask = strcmp(columnByGenotypeOrder, genotype);
+            genotypeSexData = dictionary(); % Use dictionary to handle stimulus names with spaces
+
+                % One tile per StimSet x Strain x Genotype combination.
+                a = nexttile(t);
+                hold(a, 'on');
+
+                for sexIdx = 1:nsexes
+                    sex = animalSexes{sexIdx};
+                    sexMask = strcmp(columnBySexOrder, sex);
+                    combinedMask = strainMask & genotypeMask & sexMask;
+                    if ~any(combinedMask)
+                        continue;
+                    end
+
+                    headX = headXMatrix(:, combinedMask);
+                    headY = headYMatrix(:, combinedMask);
+
+                    % Normalize each replicate to (-1,1) where [-1,0] if negative and [0-1] if positive
+                    % Mirrors graphics.cumulativeDisplacementByBout(): different trials may use
+                    % a slightly different arena size, so absolute movement magnitudes may vary.
+                    % Since the head coordinate is not midline-referenced, first center each
+                    % replicate on its mean so the positive/negative scaling is meaningful.
+                    for replicateIdx = 1:size(headX, 2)
+                        colData = headX(:, replicateIdx);
+                        colData = colData - mean(colData, 'omitnan');
+                        maxVal = max(colData, [], 'omitnan');
+                        minVal = min(colData, [], 'omitnan');
+
+                        if maxVal > 0 && ~isnan(maxVal)
+                            posMask = colData > 0;
+                            colData(posMask) = colData(posMask) / maxVal;
+                        end
+
+                        if minVal < 0 && ~isnan(minVal)
+                            negMask = colData < 0;
+                            colData(negMask) = colData(negMask) / abs(minVal);
+                        end
+                        headX(:, replicateIdx) = colData;
+                    end
+                    for replicateIdx = 1:size(headY, 2)
+                        colData = headY(:, replicateIdx);
+                        colData = colData - mean(colData, 'omitnan');
+                        maxVal = max(colData, [], 'omitnan');
+                        minVal = min(colData, [], 'omitnan');
+
+                        if maxVal > 0 && ~isnan(maxVal)
+                            posMask = colData > 0;
+                            colData(posMask) = colData(posMask) / maxVal;
+                        end
+
+                        if minVal < 0 && ~isnan(minVal)
+                            negMask = colData < 0;
+                            colData(negMask) = colData(negMask) / abs(minVal);
+                        end
+                        headY(:, replicateIdx) = colData;
+                    end
+
+
+                    % Chunk the data into bouts, then into time bins within each bout, for each stimulus in this stim set
+                    for stimIdx = 1:length(stimsBouts.keys()) % Stim bout key order matches thisStimSet order
+                        stimName = stimsBouts.keys{stimIdx};
+                        boutInfo = stimsBouts(stimName);
+                        nBouts = boutInfo.nBouts;
+                        refIdx = boutInfo.startIdx;
+                        responseWindowStartIdx = boutInfo.responseWindowStartIdx;
+                        responseWindowEndIdx = boutInfo.responseWindowEndIdx;
+
+                        if nBouts == 0
+                            continue;
+                        end
+
+                        % Determine bin width
+                        if isnan(kvargs.BinWidth) || kvargs.BinWidth == 0
+                            binWidth = mean(diff(trialTime)); % use the smallest time resolution available
+                        elseif isinf(kvargs.BinWidth) || kvargs.BinWidth >= (kvargs.ResponseWindow(2) - kvargs.ResponseWindow(1))
+                            binWidth = kvargs.ResponseWindow(2) - kvargs.ResponseWindow(1); % one single bin over the whole ResponseWindow
+                        else
+                            binWidth = kvargs.BinWidth;
+                        end
+
+                        % Create fixed bins centered around time 0 (bout onset), covering the full ResponseWindow
+                        nBinsBefore = ceil(abs(kvargs.ResponseWindow(1)) / binWidth);
+                        nBinsAfter = ceil(kvargs.ResponseWindow(2) / binWidth);
+                        binEdgesRelative = ((-nBinsBefore-0.5):1:(nBinsAfter+0.5)) * binWidth;
+                        nBins = length(binEdgesRelative) - 1;
+                        binTimeCenters = (binEdgesRelative(1:nBins) + binEdgesRelative(2:nBins+1)) / 2;
+
+                        allBinnedDisplacements = []; % will be nBins x nReplicates x nBouts
+
+                        for boutIdx = 1:nBouts
+                            startIdx = responseWindowStartIdx(boutIdx);
+                            endIdx = responseWindowEndIdx(boutIdx);
+                            boutX = headX(startIdx:endIdx, :); % time x replicates
+                            boutY = headY(startIdx:endIdx, :); % time x replicates
+
+                            refIdxInBout = refIdx(boutIdx) - startIdx + 1; % index within boutData corresponding to bout onset (time 0s)
+                            boutStartTime = trialTime(refIdx(boutIdx)); % absolute time when this bout started
+
+                            % Signed head displacement along the chosen axis
+                            if strcmpi(kvargs.DisplacementAxis, 'x')
+                                axisSeries = boutX;
+                            else
+                                axisSeries = boutY;
+                            end
+
+                            % Calculate cumulative head displacement as signed absolute movements
+                            % Mirrors graphics.cumulativeDisplacementByBout(): displacement
+                            % accumulates based on movement direction relative to the stimulus.
+                            % Stimulus side determines cumulation sign: toward active stimulus = positive,
+                            % away from active stimulus = negative
+
+                            % Initialize cumulative displacement series
+                            displacementSeries = zeros(size(axisSeries));
+
+                            % Calculate cumulative displacement from consecutive differences
+                            for timeIdx = 2:size(axisSeries, 1)
+                                prevPositions = axisSeries(timeIdx - 1, :);
+                                currPositions = axisSeries(timeIdx, :);
+                                absDiff = abs(currPositions - prevPositions);
+
+                                % Determine sign based on movement direction relative to stimulus
+                                if stimIdx == 1
+                                    % Stim1 is on the negative side, as per stimuliSorted order
+                                    % If moving negative (current < previous), add to cumulative (toward stimulus)
+                                    % If moving positive (current > previous), subtract from cumulative (away from stimulus)
+                                    directionSign = ones(size(absDiff));
+                                    directionSign(currPositions > prevPositions) = -1;
+                                else
+                                    % Stim2 is on the positive side
+                                    % If moving positive (current > previous), add to cumulative (toward stimulus)
+                                    % If moving negative (current < previous), subtract from cumulative (away from stimulus)
+                                    directionSign = ones(size(absDiff));
+                                    directionSign(currPositions < prevPositions) = -1;
+                                end
+
+                                % Accumulate signed displacement
+                                displacementSeries(timeIdx, :) = displacementSeries(timeIdx - 1, :) + (absDiff .* directionSign);
+                            end
+
+                            % Translate so that at bout onset (refIdxInBout), displacement = 0
+                            displacementSeries = displacementSeries - displacementSeries(refIdxInBout, :);
+
+                            % Bin the displacementSeries into fixed bins anchored at time 0
+                            timeVector = trialTime(startIdx:endIdx);
+                            binEdgesAbsolute = binEdgesRelative + boutStartTime;
+                            [~, ~, binIndices] = histcounts(timeVector, binEdgesAbsolute);
+
+                            binnedBoutDisplacements = NaN(nBins, size(displacementSeries, 2)); % nBins x nReplicates
+                            for binIdx = 1:nBins
+                                binMask = binIndices == binIdx;
+                                if any(binMask)
+                                    binnedBoutDisplacements(binIdx, :) = mean(displacementSeries(binMask, :), 1, 'omitnan');
+                                end
+                            end
+
+                            allBinnedDisplacements = cat(3, allBinnedDisplacements, binnedBoutDisplacements); % nBins x nReplicates x nBouts
+                        end
+
+                        nreplicates = size(allBinnedDisplacements, 2);
+
+                        % Average + SEM across bouts and replicates for this stimulus x sex combination
+                        % Shape: nBins x nReplicates x nBouts -> average to nBins
+                        meanDisplacement = squeeze(mean(allBinnedDisplacements, 3, 'omitnan')); % nBins x nReplicates
+                        meanAcrossReplicates = mean(meanDisplacement, 2, 'omitnan'); % nBins x 1
+                        semAcrossReplicates = std(meanDisplacement, 0, 2, 'omitnan') / sqrt(size(meanDisplacement, 2));
+
+                        % Store results for this stimulus and sex
+                        % Use a composite key: "stimName:sex" to handle stimulus names with spaces
+                        compositeKey = sprintf('%s:%s', stimName, sex);
+                        genotypeSexData(compositeKey) = struct(...
+                            'mean', meanAcrossReplicates, ...
+                            'sem', semAcrossReplicates, ...
+                            'binTimeCenters', binTimeCenters, ...
+                            'replicateMeans', meanDisplacement, ...
+                            'nreplicates', nreplicates ...
+                        );
+                    end
+                end
+
+
+                % Plot the results for this strain x genotype
+                colorMap = {'blue', 'red'}; % blue for M, red for F
+
+                lineHandles = [];
+                lineLabels = {};
+
+                for sexPlotIdx = 1:nsexes
+                    sex = animalSexes{sexPlotIdx};
+                    sexMask = strcmp(columnBySexOrder, sex);
+                    combinedMask = strainMask & genotypeMask & sexMask;
+                    if ~any(combinedMask)
+                        continue;
+                    end
+
+                    % Plot lines for each stimulus
+                    for stimIdx = 1:length(stimsBouts.keys())
+                        stimName = stimsBouts.keys{stimIdx};
+
+                        % Determine line style for this stimulus
+                        if stimIdx == 1
+                            lineStyle = NORMAL_LINE_STYLE{1}; % normal stimulus gets solid line
+                        else
+                            assignedStyle = false;
+                            if isKey(knownOtherStimLineStyles, stimName)
+                                lineStyle = knownOtherStimLineStyles(stimName);
+                                assignedStyle = true;
+                            end
+                            if ~assignedStyle
+                                % If no known keyword matches, assign a line style based on this stimulus's index among the non-normal stimuli
+                                currentKnownOtherStimIndex = length(knownOtherStimLineStyles.keys()) + 1; % index for this new unknown stimulus
+                                lineStyle = OTHER_LINE_STYLE{mod(currentKnownOtherStimIndex-1, length(OTHER_LINE_STYLE)) + 1}; % cycle through OTHER_LINE_STYLE
+                                knownOtherStimLineStyles(stimName) = lineStyle;
+                            end
+                        end
+
+                        compositeKey = sprintf('%s:%s', stimName, sex);
+                        if isKey(genotypeSexData, compositeKey)
+                            data = genotypeSexData(compositeKey);
+                            binTimeCenters = data.binTimeCenters;
+                            meanDisplacement = data.mean;
+                            semDisplacement = data.sem;
+                            replicateMeans = data.replicateMeans;
+
+                            % Ensure vectors are column vectors for fill function
+                            binTimeCenters = binTimeCenters(:);
+                            meanDisplacement = meanDisplacement(:);
+                            semDisplacement = semDisplacement(:);
+
+                            % Make sure the color matches sex
+                            if strcmpi(sex, 'M') || strcmpi(sex, 'Male')
+                                lineColor = colorMap{1};
+                            elseif strcmpi(sex, 'F') || strcmpi(sex, 'Female')
+                                lineColor = colorMap{2};
+                            else
+                                % Gray for unknown (should not happen, i hope....)
+                                lineColor = [0.5, 0.5, 0.5];
+                            end
+
+                            % Add error shading (polygon envelope) - don't include in legend
+                            upperBound = meanDisplacement + semDisplacement;
+                            lowerBound = meanDisplacement - semDisplacement;
+                            fill(a, [binTimeCenters; flipud(binTimeCenters)], ...
+                                [upperBound; flipud(lowerBound)], ...
+                                lineColor, ...
+                                'FaceAlpha', 0.08, ...
+                                'EdgeColor', 'none', ...
+                                'HandleVisibility', 'off');
+
+                            lineHandle = plot(a, binTimeCenters, meanDisplacement, ...
+                                'LineStyle', lineStyle, ...
+                                'Color', lineColor, ...
+                                'LineWidth', 2, ...
+                                'DisplayName', sprintf('%s - %s', stimName, sex));
+
+                            if kvargs.ShowDataPoints
+                                scatterMarker = resolveStimulusMarker(stimIdx);
+                                jitterWidth = resolveTimeJitterWidth(binTimeCenters, kvargs.ResponseWindow);
+                                for binIdx = 1:length(binTimeCenters)
+                                    vals = replicateMeans(binIdx, :);
+                                    vals = vals(isfinite(vals));
+                                    if isempty(vals)
+                                        continue;
+                                    end
+
+                                    jitter = (rand(numel(vals), 1) - 0.5) * 2 * jitterWidth;
+                                    scatter(a, binTimeCenters(binIdx) + jitter, vals(:), 16, ...
+                                        'Marker', scatterMarker, ...
+                                        'MarkerFaceColor', lineColor, ...
+                                        'MarkerEdgeColor', 'none', ...
+                                        'MarkerFaceAlpha', 0.25, ...
+                                        'HandleVisibility', 'off');
+                                end
+                            end
+
+                            % Collect line handle for legend
+                            lineHandles = [lineHandles; lineHandle]; %#ok<AGROW>
+                            lineLabels{end+1} = sprintf('%s - %s (n=%d)', stimName, sex, data.nreplicates); %#ok<AGROW>
+                        end
+                    end
+                end
+
+                yline(a, 0, 'k--', 'LineWidth', 1);
+                xline(a, 0, '--', 'LineWidth', 1, 'Color', [0.3, 0.3, 0.3]);
+
+                title(a, sprintf('[%s]\n%s  %s\n(Bin = %.2fs, Bout Range = %s)', strjoin(thisStimSet, ' / '), strain, genotype, kvargs.BinWidth, percentRangeStr), 'Interpreter', 'none');
+                xlabel(a, 'Time (s) relative to Bout Onset');
+                ylabel(a, sprintf('Cumulative Head Displacement (normalized)\nPositive = toward stimulus, Negative = away from stimulus'));
+                if ~isempty(lineHandles)
+                    legend(a, lineHandles, lineLabels, 'Location', 'southwest', 'Interpreter', 'none');
+                end
+                grid(a, 'on');
+                hold(a, 'off');
+
+        end
+
+    end
+    if ~isempty(kvargs.YLim)
+        allAxes = findall(t, 'Type', 'Axes');
+        if ~isempty(allAxes)
+            ylim(allAxes, kvargs.YLim);
+        end
+    elseif kvargs.SameYLim
+        % Harmonize y-limits across all tile axes so subplots are directly comparable.
+        allAxes = findall(t, 'Type', 'Axes');
+        if ~isempty(allAxes)
+            yLimMatrix = NaN(numel(allAxes), 2);
+            for axIdx = 1:numel(allAxes)
+                thisYLim = ylim(allAxes(axIdx));
+                if all(isfinite(thisYLim))
+                    yLimMatrix(axIdx, :) = thisYLim;
+                end
+            end
+
+            globalYMin = min(yLimMatrix(:, 1), [], 'omitnan');
+            globalYMax = max(yLimMatrix(:, 2), [], 'omitnan');
+
+            if isfinite(globalYMin) && isfinite(globalYMax) && globalYMax > globalYMin
+                ylim(allAxes, [globalYMin, globalYMax]);
+            end
+        end
+    end
+
+end
+
+function yLim = validateYLim(yLim)
+    if isempty(yLim)
+        return;
+    end
+
+    if ~(isnumeric(yLim) && isreal(yLim) && numel(yLim) == 2)
+        error('YLim must be empty or a numeric 2-element vector [min, max].');
+    end
+
+    if ~(isequal(size(yLim), [1, 2]) || isequal(size(yLim), [2, 1]))
+        error('YLim must be shape (1,2) or (2,1).');
+    end
+
+    yLim = reshape(yLim, 1, 2);
+    if ~all(isfinite(yLim))
+        error('YLim values must be finite.');
+    end
+    if yLim(2) <= yLim(1)
+        error('YLim upper bound must be greater than lower bound.');
+    end
+end
+
+function marker = resolveStimulusMarker(stimIdx)
+    markerOptions = {'o', '^', 's', 'd'};
+    marker = markerOptions{mod(stimIdx - 1, numel(markerOptions)) + 1};
+end
+
+function jitterWidth = resolveTimeJitterWidth(binTimeCenters, responseWindow)
+    validCenters = binTimeCenters(isfinite(binTimeCenters));
+    if numel(validCenters) >= 2
+        jitterWidth = 0.15 * min(diff(validCenters));
+    else
+        jitterWidth = 0.02 * max(diff(responseWindow), eps);
+    end
+end
