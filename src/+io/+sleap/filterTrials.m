@@ -83,7 +83,18 @@ function [trialNames, trialInfo] = filterTrials(projectFolder, metadataTable, kv
             (metadataTable.ETHOVISION_FILE == string(experimentName));
             trialRowIdx = find(trialMask);
             if isempty(trialRowIdx)
+                % There are 2 ways to handle this: metadata-driven and strict, or ignore metadata and assume single arena.
+
+                % First option, simply ignore metadata and assume single arena
+                % This is handled by default, simply by including the trial
+                % and assuming default initialization for single arena
+                % (multipleArenaFlags(i) = false; arenaNames{i} = '';)
+                % No need to do anything extra.
+
+
+                % If strictly metadata-driven, uncomment this:
                 % This trial does not have matching metadata; remove from list all together
+                % as we cannot know for sure if it is a multi-arena trial or not, and we cannot know the arena name
                 toberemovedIndices(i) = true;
                 continue;
             else
