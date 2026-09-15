@@ -202,8 +202,9 @@ function [header, datatable, units, stimulusFrameRange, animalMetadata, stimuli]
 end
 
 function [trialTimes, fps] = localReadMediaTimestamps(mediafile, expectedRows)
-	[pts, timebase] = ffprobe.pts(char(mediafile));
-	trialTimes = double(pts(:)) * double(timebase);
+	[pts, timebase, startTime] = ffprobe.pts(char(mediafile));
+	% Subtract start_time for VideoReader 0-based domain consistency.
+	trialTimes = double(pts(:)) * double(timebase) - double(startTime);
 	if numel(trialTimes) ~= expectedRows
 		error('io:sleap:alignTrackingToStim:TimestampCountMismatch', ...
 			'ffprobe returned %d timestamps for %d SLEAP rows.', numel(trialTimes), expectedRows);

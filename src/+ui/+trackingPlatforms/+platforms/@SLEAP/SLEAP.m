@@ -523,9 +523,10 @@ classdef SLEAP < ui.trackingPlatforms.TrackingProvider
             end
 
             % Use presentation timestamps rather than frame/FPS arithmetic so
-            % variable-frame-rate videos retain their actual timing.
-            [pts, timebase] = ffprobe.pts(char(videoFilePath));
-            timestampSec = double(pts(:)) * double(timebase);
+            % variable-frame-rate videos retain their actual timing. Subtract the
+            % stream start_time so timestamps are in VideoReader's 0-based domain.
+            [pts, timebase, startTime] = ffprobe.pts(char(videoFilePath));
+            timestampSec = double(pts(:)) * double(timebase) - double(startTime);
             if numel(timestampSec) ~= nFrames
                 error('io:sleap:loadTrackingCoordsPixels:TimestampCountMismatch', ...
                     'ffprobe returned %d timestamps for %d tracking rows.', ...

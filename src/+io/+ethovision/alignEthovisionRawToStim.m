@@ -590,12 +590,13 @@ function videoTimes = localReadVideoTimestamps(mediafile)
     % The returned values are the authoritative video timeline and are used to
     % resolve a video-frame stimulus start to the nearest EthoVision Trial time.
     try
-        [pts, timebase] = ffprobe.pts(char(mediafile));
+        [pts, timebase, startTime] = ffprobe.pts(char(mediafile));
     catch ME
         error('Could not read video PTS timestamps from %s: %s', mediafile, ME.message);
     end
 
-    videoTimes = double(pts(:)) .* double(timebase);
+    % Subtract start_time for VideoReader 0-based domain consistency.
+    videoTimes = double(pts(:)) .* double(timebase) - double(startTime);
     videoTimes = videoTimes(isfinite(videoTimes));
     if isempty(videoTimes)
         error('No finite video PTS timestamps were returned for %s.', mediafile);

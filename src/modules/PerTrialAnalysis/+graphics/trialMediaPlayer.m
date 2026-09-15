@@ -138,9 +138,11 @@ end
 % timestamps. Tracking timestamps may have a different length and/or sampling
 % interval, so they must never determine the video frame count.
 try
-    % ffprobe.pts returns one PTS per decoded video frame and its timebase.
-    [pts, timebase] = ffprobe.pts(fullPath);
-    frameTimestamps = double(pts(:)) * double(timebase);
+    % ffprobe.pts returns one PTS per decoded video frame, its timebase, and
+    % the stream start_time. Subtracting start_time converts the timestamps
+    % to VideoReader's 0-based domain so seeks land on the labeled frame.
+    [pts, timebase, streamStartTime] = ffprobe.pts(fullPath);
+    frameTimestamps = double(pts(:)) * double(timebase) - double(streamStartTime);
 catch
     % Fallback only when ffprobe is unavailable. This is not exact for VFR
     % media, but preserves compatibility with installations without ffprobe.
@@ -359,25 +361,23 @@ appData = struct('videoObj', videoObj, 'slider', slider, 'frameLabel', frameLabe
     'fpsHistory', [repmat(frameRate, 1, round(frameRate))], 'fpsTextHandle', [], 'frameCount', 0, 'startTime', tic, ...
     'imgHandle', [], 'colors', bpColors, 'bodypartNames', bodypartNames, 'centerPointBodyPartIndex', centerPointBodyPartIndex, ...
     'trackingEdges', trackingEdges, ...
-    'frameTimestamps', frameTimestamps, 'frameTimestampEdges', [], 'overlayHandles', gobjects(0), ...
-    'lastSeekTime', NaN, 'videoFrameIndex', 0, ...
+    'frameTimestamps', frameTimestamps, 'overlayHandles', gobjects(0), ...
+    'videoFrameIndex', 0, ...
     'playbackClock', [], 'playbackStartPTS', NaN, ...
-    'videoFile', fullPath, 'lastMKeyPressTime', NaT, 'doubleMWindowSec', 0.3);
+    'videoFile', fullPath, 'lastMKeyPressTime', NaT, 'doubleMWindowSec', 0.3, ...
+    'refillTimer', [], ...
+    'readerFramePos', [], ...
+    'frameBuffer', struct('data', uint8([]), 'head', 1, 'len', 0, 'startIndex', 1, 'capacity', 0));
 
-% Precompute timestamp bin edges for fast time->index mapping
-try
-    ts = appData.frameTimestamps(:);
-    if numel(ts) >= 2
-        mids = (ts(1:end-1) + ts(2:end)) / 2;
-        appData.frameTimestampEdges = [-Inf; mids; Inf];
-    elseif isscalar(ts)
-        appData.frameTimestampEdges = [-Inf; Inf];
-    else
-        appData.frameTimestampEdges = [];
-    end
-catch
-    appData.frameTimestampEdges = [];
-end
+% Frame buffer sizing: adaptive capacity under a pixel budget (default
+% 100 MB). Frames are held in a PREALLOCATED ring buffer: refills write
+% into existing slots, so appending never copies the whole buffer array
+% (a cat(4) of ~100 MB per refill was the main-thread bottleneck).
+bufferBudgetBytes = 100e6;
+bytesPerFrame = double(vidHeight) * double(vidWidth) * 3; % uint8 RGB
+bufferCapacity = min(totalFrames, max(2, floor(bufferBudgetBytes / max(bytesPerFrame, 1))));
+appData.frameBuffer.capacity = bufferCapacity;
+appData.frameBuffer.data = zeros(vidHeight, vidWidth, 3, bufferCapacity, 'uint8');
 
 
 % Set up a keyboard listener on the figure
@@ -391,6 +391,7 @@ slider.ValueChangedFcn = @(source, event) slider_callback(source.Value);
 
 showFrameAtIndex(1); % Show first frame with tracking overlay
 togglePlayback();
+startRefillTimer();
 
 
 %% Helper functions
@@ -443,35 +444,273 @@ function updateFpsDisplay()
     end
 end
 
-function displayFrameWithTrack(frameNum, ~)
+function actualFrameNum = displayFrameWithTrack(frameNum, ~)
     %%DISPLAYFRAMEWITHTRACK - Display a video frame with optional tracking overlay
     % Inputs:
-    %   frameNum - Video frame number to display (index in frameTimestamps)
-    %   realFrameTime - Real time of the frame in seconds
-    
+    %   frameNum - Video frame number to display (1-based index)
+    % Output:
+    %   actualFrameNum - Index of the frame rendered ([] on failure).
+    %
+    % Frames are decoded with VideoReader.read([start end]), which addresses
+    % frames by exact 1-based index. CurrentTime-based seeking is never used:
+    % its time->frame mapping is unreliable for this media.
+    actualFrameNum = [];
+
     if frameNum < 1 || frameNum > totalFrames
         return;
     end
 
-    % Get timestamp for the requested frame. Video PTS are the only video
-    % timeline; tracking is matched independently during rendering.
-    t = appData.frameTimestamps(frameNum);
-    
-    ensureVideoObjAtTime(t);
-    try
-        if ~hasFrame(appData.videoObj)
-            return;
-        end
-        frame = readFrame(appData.videoObj);
-        appData.videoFrameIndex = frameNum;
-    catch
+    frame = getBufferedFrame(frameNum);
+    if isempty(frame)
         return;
     end
 
-    renderFrameWithTrack(frame, t);
+    appData.videoFrameIndex = frameNum;
+    actualFrameNum = frameNum;
+    renderFrameWithTrack(frame, frameNum);
 end
 
-function renderFrameWithTrack(frame, realFrameTime)
+function bufferEnsure(startFrame, endFrame)
+    %%BUFFERENSURE Have [startFrame endFrame] (inclusive) buffered.
+    % PERFORMANCE-CRITICAL. Ring-buffer backed:
+    % - Covered range -> no-op.
+    % - Forward extension -> decode only the missing tail, write each frame
+    %   directly into its ring slot (no array copies).
+    % - Backward extension / disjoint jump -> decode the head window, write
+    %   into slots (memcpy of the whole buffer is never needed).
+    % Logical window is [startIndex, startIndex+len-1]; ring slot for frame
+    % f is mod(f-1, capacity) + 1.
+    fb = appData.frameBuffer;
+    startFrame = max(1, min(round(startFrame), totalFrames));
+    endFrame = max(startFrame, min(round(endFrame), totalFrames));
+
+    % Already covered?
+    if fb.len > 0 && fb.startIndex <= startFrame && (fb.startIndex + fb.len - 1) >= endFrame
+        return;
+    end
+
+    cap = fb.capacity;
+    if endFrame - startFrame + 1 > cap
+        startFrame = endFrame - cap + 1;
+    end
+
+    % Case 1: forward extension of the current window -> sequential decode
+    % when the reader is already positioned at the tail start (O(1) per
+    % frame, no keyframe restart); otherwise one range read to resync.
+    if fb.len > 0 && startFrame <= fb.startIndex + fb.len && endFrame > fb.startIndex + fb.len - 1
+        tailStart = fb.startIndex + fb.len;
+        if isequal(appData.readerFramePos, tailStart - 1)
+            tail = localDecodeSequential(tailStart, endFrame);
+        else
+            tail = localDecodeRange(tailStart, endFrame);
+        end
+        if ~isempty(tail)
+            ringAppend(tailStart, tail);
+        end
+        return;
+    end
+
+    % Case 2/3: backward extension or disjoint jump -> decode the requested
+    % window and install it as the new logical window (slot math preserves
+    % the ring layout; overlapping frames are re-decoded only on jumps).
+    windowEnd = min(endFrame, startFrame + cap - 1);
+    frames = localDecodeRange(startFrame, windowEnd);
+    if isempty(frames)
+        return;
+    end
+    nNew = size(frames, 4);
+    fb.startIndex = startFrame;
+    fb.len = nNew;
+    writeStartSlot = mod(startFrame - 1, cap) + 1;
+    % Wrap-safe write of the decoded window into the ring.
+    firstPart = min(nNew, cap - writeStartSlot + 1);
+    fb.data(:, :, :, writeStartSlot:writeStartSlot + firstPart - 1) = frames(:, :, :, 1:firstPart);
+    if nNew > firstPart
+        fb.data(:, :, :, 1:nNew - firstPart) = frames(:, :, :, firstPart+1:nNew);
+    end
+    appData.frameBuffer = fb;
+end
+
+function ringAppend(startFrame, frames)
+    % Append decoded tail frames into the ring starting at frame startFrame,
+    % writing each directly into its slot. Trims the logical window from the
+    % front when capacity would be exceeded.
+    fb = appData.frameBuffer;
+    cap = fb.capacity;
+    nNew = size(frames, 4);
+
+    newLen = fb.len + nNew;
+    if newLen > cap
+        drop = newLen - cap;
+        fb.startIndex = fb.startIndex + drop;
+        fb.len = fb.len - drop;
+    end
+
+    for k = 1:nNew
+        f = startFrame + k - 1;
+        slot = mod(f - 1, cap) + 1;
+        fb.data(:, :, :, slot) = frames(:, :, :, k);
+        fb.len = max(fb.len, f - fb.startIndex + 1);
+    end
+    appData.frameBuffer = fb;
+end
+
+function frames = localDecodeSequential(startFrame, endFrame)
+    %%LOCALDECODESEQUENTIAL Decode [startFrame endFrame] frame by frame.
+    % Assumes the reader is at or before startFrame. Sequential readFrame
+    % calls cost O(1) each (no keyframe restart), unlike read([s e]) which
+    % re-seeks from the preceding keyframe on every call.
+    frames = [];
+    startFrame = max(1, round(startFrame));
+    endFrame = max(startFrame, min(round(endFrame), totalFrames));
+    if startFrame > totalFrames
+        return;
+    end
+
+    nWant = endFrame - startFrame + 1;
+    collected = cell(1, nWant);
+    nGot = 0;
+    try
+        for k = 1:nWant
+            if ~hasFrame(appData.videoObj)
+                break;
+            end
+            collected{k} = readFrame(appData.videoObj);
+            nGot = nGot + 1;
+        end
+    catch
+        % Reader desynced mid-sequence; fall back to a range decode of the
+        % remainder (rare path, acceptable one-off cost).
+        appData.readerFramePos = [];
+        frames = localDecodeRange(startFrame, startFrame + nGot - 1);
+        return;
+    end
+
+    appData.readerFramePos = startFrame + nGot - 1;
+    if nGot == 0
+        frames = [];
+        return;
+    end
+    frames = cat(4, collected{1:nGot});
+end
+
+function frames = localDecodeRange(startFrame, endFrame)
+    % Decode [startFrame endFrame] by exact frame index via read([s e]).
+    % The reader is recreated once on failure as a fallback.
+    frames = [];
+    startFrame = max(1, round(startFrame));
+    endFrame = max(startFrame, min(round(endFrame), totalFrames));
+    if startFrame > totalFrames
+        return;
+    end
+    try
+        frames = read(appData.videoObj, [startFrame, endFrame]);
+    catch
+        try
+            appData.videoObj = VideoReader(appData.videoFile);
+            frames = read(appData.videoObj, [startFrame, endFrame]);
+        catch
+            frames = [];
+        end
+    end
+    % After read([s e]) the reader is positioned at endFrame: the next
+    % readFrame continues from endFrame+1. Record this so subsequent tail
+    % extensions take the fast sequential path instead of re-seeking.
+    appData.readerFramePos = endFrame;
+end
+
+function frame = getBufferedFrame(frameNum)
+    %%GETBUFFEREDFRAME Return frame frameNum from the ring buffer, refilling on miss.
+    frame = [];
+    if frameNum < 1 || frameNum > totalFrames
+        return;
+    end
+
+    fb = appData.frameBuffer;
+    buffered = fb.len > 0 && frameNum >= fb.startIndex && ...
+        frameNum < fb.startIndex + fb.len;
+
+    if ~buffered
+        % Refill centered on the miss so immediate neighbors are also ready.
+        halfBack = max(1, floor(fb.capacity * 0.25));
+        bufStart = max(1, frameNum - halfBack);
+        bufEnd = bufStart + fb.capacity - 1;
+        bufferEnsure(bufStart, bufEnd);
+        fb = appData.frameBuffer;
+        buffered = fb.len > 0 && frameNum >= fb.startIndex && ...
+            frameNum < fb.startIndex + fb.len;
+        if ~buffered
+            return;
+        end
+    end
+
+    slot = mod(frameNum - 1, fb.capacity) + 1;
+    frame = fb.data(:, :, :, slot);
+end
+
+function startRefillTimer()
+    %%STARTREFILLTIMER Background timer keeps a read-ahead window buffered.
+    if ~isempty(appData.refillTimer) && isvalid(appData.refillTimer)
+        return;
+    end
+    % 50 ms tick with chunked refill (see refillAheadWindow): each tick
+    % decodes at most refillChunkFrames, so a refill never monopolizes the
+    % main thread long enough to stall rendering.
+    % 50 ms tick with chunked refill; BusyMode drop prevents queue buildup.
+    appData.refillTimer = timer('ExecutionMode', 'fixedRate', 'Period', 0.05, ...
+        'TimerFcn', @(~, ~) refillAheadWindow(), 'BusyMode', 'drop');
+    start(appData.refillTimer);
+end
+
+function stopRefillTimer()
+    if ~isempty(appData.refillTimer) && isvalid(appData.refillTimer)
+        stop(appData.refillTimer);
+        delete(appData.refillTimer);
+    end
+    appData.refillTimer = [];
+end
+
+function refillAheadWindow()
+    % Keep a read-ahead margin decoded ahead of the playhead.
+    %
+    % PERFORMANCE: hysteresis-gated and append-only. The buffer only refills
+    % when the ahead-margin drops below refillLowWater, and then only the
+    % missing tail is decoded (see bufferEnsure case 1). Steady-state cost is
+    % one decode of exactly the frames that were consumed -- not a full-window
+    % re-decode per tick.
+    if ~isvalid(fig) || isempty(appData.frameBuffer) || appData.frameBuffer.capacity <= 0
+        return;
+    end
+    fb = appData.frameBuffer;
+
+    if fb.len == 0
+        % Cold start: decode the initial window.
+        bufferEnsure(appData.currentFrame, appData.currentFrame + fb.capacity - 1);
+        return;
+    end
+
+    bufEnd = fb.startIndex + fb.len - 1;
+    aheadFrames = bufEnd - appData.currentFrame;
+
+    % Refill early (high low-water) so each individual decode stays small;
+    % and cap the per-tick decode to refillChunkFrames. Spreading the refill
+    % across ticks is what eliminates the "play smooth, stall, play smooth"
+    % pattern: previously one tick decoded the entire missing span at once,
+    % blocking rendering (MATLAB timers run on the main thread).
+    refillLowWater = max(4, round(fb.capacity * 0.7));
+    refillChunkFrames = max(2, round(fb.capacity * 0.25));
+
+    if aheadFrames < refillLowWater && appData.currentFrame >= fb.startIndex - max(1, round(fb.capacity * 0.25))
+        % MATLAB min takes only two arrays (third arg is dim) - nest for
+        % elementwise 3-way minimum.
+        chunkEnd = min(min(bufEnd + refillChunkFrames, appData.currentFrame + fb.capacity - 1), totalFrames);
+        if chunkEnd > bufEnd
+            bufferEnsure(fb.startIndex, chunkEnd);
+        end
+    end
+end
+
+function renderFrameWithTrack(frame, frameNum)
     % Create a persistent image object that fills the axes and simply update
     % its CData each frame. This avoids imshow's axis resets and margins.
     if isempty(appData.imgHandle) || ~isvalid(appData.imgHandle)
@@ -512,12 +751,20 @@ function renderFrameWithTrack(frame, realFrameTime)
         hold(appData.videoAxes, 'on');
 
         trackFrame = 1;
-        if ~isempty(realFrameTime) && ~isempty(appData.trackDataTime)
-            % Match this video PTS to the nearest tracking timestamp. The
-            % arrays may have different lengths and sampling frequencies.
-            [~, trackFrame] = min(abs(double(appData.trackDataTime(:)) - double(realFrameTime)));
+        nTrackRows = size(appData.trackData, 1);
+        if nTrackRows == totalFrames
+            % Tracking rows map 1:1 to decoded video frames (the SLEAP and
+            % DLC providers enforce this). Use the frame index directly; the
+            % timestamp match below drifts for VFR media because true PTS
+            % times deviate from VideoReader's CFR frame grid.
+            trackFrame = frameNum;
+        elseif ~isempty(appData.trackDataTime)
+            % Fallback for providers without a 1:1 row guarantee: match the
+            % frame's PTS to the nearest tracking timestamp.
+            framePTS = appData.frameTimestamps(min(frameNum, totalFrames));
+            [~, trackFrame] = min(abs(double(appData.trackDataTime(:)) - double(framePTS)));
         end
-        trackFrame = max(1, min(trackFrame, size(appData.trackData, 1)));
+        trackFrame = max(1, min(trackFrame, nTrackRows));
 
         % Draw the trail of the last N frames using the center bodypart (if present)
         trackHistoryLength = 125;
@@ -661,34 +908,17 @@ function renderFrameWithTrack(frame, realFrameTime)
     updateFpsDisplay();
 end
 
-function ensureVideoObjAtTime(t)
-    try
-        if ~isfinite(t) || t < 0
-            t = 0;
-        end
-        if isfinite(appData.lastSeekTime) && t < appData.lastSeekTime
-            appData.videoObj = VideoReader(appData.videoFile);
-            appData.videoFrameIndex = 0;
-        end
-        appData.videoObj.CurrentTime = t;
-        appData.lastSeekTime = t;
-    catch
-        try
-            appData.videoObj = VideoReader(appData.videoFile);
-            appData.videoObj.CurrentTime = t;
-            appData.videoFrameIndex = 0;
-            appData.lastSeekTime = t;
-        catch
-        end
-    end
-end
-
 function showFrameAtIndex(frameNum)
     frameNum = max(1, min(frameNum, totalFrames));
-    appData.currentFrame = frameNum;
-    displayFrameWithTrack(frameNum);
-    appData.slider.Value = frameNum;
-    appData.frameLabel.Value = frameNum;
+    actualFrameNum = displayFrameWithTrack(frameNum);
+    % Always display the frame that was actually rendered so the label,
+    % slider, and tracking overlay match the pixels on screen.
+    if isempty(actualFrameNum) || ~isfinite(actualFrameNum)
+        actualFrameNum = frameNum;
+    end
+    appData.currentFrame = actualFrameNum;
+    appData.slider.Value = actualFrameNum;
+    appData.frameLabel.Value = actualFrameNum;
 end
 
 function togglePlayback()
@@ -714,9 +944,17 @@ function togglePlayback()
         appData.fpsHistory = [repmat(frameRate, 1, round(frameRate))];
         appData.playbackStartPTS = appData.frameTimestamps(appData.currentFrame);
         appData.playbackClock = tic;
-        appData.timer = timer('ExecutionMode', 'fixedRate', 'Period', 0.001, ...
-            'TimerFcn', @(obj, event) updateFrame);
+        % Prime the buffer at the playhead so the first ticks render instantly.
+        bufferEnsure(appData.currentFrame, appData.currentFrame + appData.frameBuffer.capacity - 1);
+        % Tick at ~half the frame interval (rounded to the timer's 1 ms
+        % precision to avoid sub-millisecond warnings). Half-interval ticks
+        % give the pacing gate a second chance per frame, so jitter never
+        % caps the display rate below the video's true frame rate.
+        tickPeriod = max(0.001, round(500 / max(frameRate, 1)) / 1000);
+        appData.timer = timer('ExecutionMode', 'fixedRate', 'Period', tickPeriod, ...
+            'TimerFcn', @(obj, event) updateFrame, 'BusyMode', 'drop');
         start(appData.timer);
+        startRefillTimer();
     end
 end
 
@@ -730,36 +968,51 @@ function updateFrame()
         return;
     end
 
-    if appData.videoFrameIndex >= totalFrames
+    if appData.currentFrame >= totalFrames
         togglePlayback();
         return;
     end
 
-    % Pace decoding against absolute video PTS differences. This supports
-    % variable-frame-rate media and does not use FrameRate or CurrentTime.
-    nextFrameIndex = appData.videoFrameIndex + 1;
+    % Sequential playback pops frames from the buffer by index. PTS are used
+    % only for the wall-clock pacing schedule, never frame addressing.
+    nextFrameIndex = appData.currentFrame + 1;
     targetElapsed = appData.frameTimestamps(nextFrameIndex) - appData.playbackStartPTS;
-    if toc(appData.playbackClock) < targetElapsed
+    elapsed = toc(appData.playbackClock);
+    if elapsed < targetElapsed
         return;
     end
 
-    try
-        if ~hasFrame(appData.videoObj)
+    % If we fell behind (timer jitter, GC pause), skip ahead to the most
+    % recent due frame so the display rate tracks real time instead of
+    % accumulating lag.
+    while nextFrameIndex < totalFrames
+        nextDue = appData.frameTimestamps(nextFrameIndex + 1) - appData.playbackStartPTS;
+        if elapsed < nextDue
+            break;
+        end
+        nextFrameIndex = nextFrameIndex + 1;
+    end
+
+    frame = getBufferedFrame(nextFrameIndex);
+    if isempty(frame)
+        % Buffer miss (e.g. after a jump); synchronous refill once.
+        halfBack = max(1, floor(appData.frameBuffer.capacity * 0.25));
+        bufferEnsure(nextFrameIndex - halfBack, nextFrameIndex + appData.frameBuffer.capacity - 1);
+        frame = getBufferedFrame(nextFrameIndex);
+        if isempty(frame)
             togglePlayback();
             return;
         end
-        frame = readFrame(appData.videoObj);
-    catch
-        togglePlayback();
-        return;
     end
 
     appData.videoFrameIndex = nextFrameIndex;
-    renderFrameWithTrack(frame, appData.frameTimestamps(nextFrameIndex));
+    renderFrameWithTrack(frame, nextFrameIndex);
     appData.currentFrame = nextFrameIndex;
     appData.slider.Value = nextFrameIndex;
     appData.frameLabel.Value = nextFrameIndex;
-    drawnow limitrate nocallbacks;
+    % Limitrate caps redraw rate; callbacks are NOT suppressed so button and
+    % keyboard events stay responsive during playback.
+    drawnow limitrate;
 end
 
 function pauseAndJump(newValue)
@@ -1052,10 +1305,13 @@ function markStartFrame()
 end
 
 function closeFigure(src, ~)
-    % Clean up timer if running
+    % Clean up timers if running
     if isfield(appData, 'timer') && ~isempty(appData.timer) && isvalid(appData.timer)
         stop(appData.timer);
         delete(appData.timer);
+    end
+    if isfield(appData, 'refillTimer') && ~isempty(appData.refillTimer) && isvalid(appData.refillTimer)
+        stopRefillTimer();
     end
     delete(src);
 end

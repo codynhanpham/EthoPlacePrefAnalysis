@@ -55,6 +55,22 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     %                                     (default [5 95]).
     %       MinShrinkageLambda          : starting shrinkage lambda in [0,1]
     %                                     (default 0.1; auto-raised as needed).
+    %       OutlierMethod               : baseline outlier screening method:
+    %                                     "none" (default) | "multivariate" |
+    %                                     "mixedquality" | "baselinelocomotion".
+    %                                     Excluded baseline subjects are removed
+    %                                     BEFORE feature computation (see
+    %                                     outlier.excludeBaselineSubjects). Test
+    %                                     subjects are never excluded.
+    %       OutlierThresholdK           : robust MAD multiplier for outlier
+    %                                     detection (default 3.5).
+    %       MinValidBins                : "mixedquality" minimum valid progression
+    %                                     bins per baseline subject (default 2).
+    %       MinPreStimDistanceCm        : "baselinelocomotion" pre-stimulus distance
+    %                                     threshold in cm; NaN = auto MAD-based
+    %                                     (default NaN).
+    %       MinMeanSpeedCmS             : "mixedquality" near-zero locomotion
+    %                                     threshold (default 0.1 cm/s).
     %       OutputDir                   : if non-empty, export TSVs here (default "").
     %       FilePrefix                  : export filename prefix (default "similarity").
     %       RunStamp                    : optional run stamp included in filenames
@@ -76,7 +92,10 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     %           OutsideWT, ResidualAdj
     %       info : struct with diagnostics: FeatureNames, ShrinkageLambda,
     %           LOO_D2 (baseline leave-one-out D2), LOO_P, LocomotionCovariateColumn,
-    %           ProgressionMetricType, WTEnvelopePct, ExportedFiles
+    %           ProgressionMetricType, WTEnvelopePct, OutlierMethod,
+    %           OutlierThresholdK, ExcludedBaselineSubjects (exclusion report
+    %           table, one row per baseline subject), NBaselineExcluded,
+    %           ExportedFiles
     %
     %   See also: population.temp.rankSubjectProgression, cohort.metrics.progressionComponents,
     %             cohort.metrics.binnedProgression, cohort.metrics.preferenceIndex,
@@ -92,11 +111,31 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
         kvargs.LocomotionCovariateColumn (1,1) string {mustBeTextScalar} = "Speed Mean During Stimulus (cm/s)"
         kvargs.WTEnvelopePct (1,2) double {mustBeInRange(kvargs.WTEnvelopePct, 0, 100), mustBeEnvelopeSorted(kvargs.WTEnvelopePct)} = [5 95]
         kvargs.MinShrinkageLambda (1,1) double {mustBeNonnegative, mustBeLessThanOrEqual(kvargs.MinShrinkageLambda, 1)} = 0.1
+        kvargs.OutlierMethod (1,1) string {mustBeMember(kvargs.OutlierMethod, ["none", "multivariate", "mixedquality", "baselinelocomotion"])} = "none"
+        kvargs.OutlierThresholdK (1,1) double {mustBePositive} = 3.5
+        kvargs.MinValidBins (1,1) double {mustBePositive, mustBeInteger} = 2
+        kvargs.MinPreStimDistanceCm (1,1) double {mustBeReal} = NaN
+        kvargs.MinMeanSpeedCmS (1,1) double {mustBeNonnegative} = 0.1
         kvargs.OutputDir (1,1) string {mustBeTextScalar} = ""
         kvargs.FilePrefix (1,1) string {mustBeTextScalar} = "similarity"
         kvargs.RunStamp (1,1) string {mustBeTextScalar} = ""
         kvargs.Verbose (1,1) logical = true
     end
+
+    %% Baseline outlier pre-filter (baseline group only; test subjects always ranked)
+    [baselineStdTables, exclusionReport] = outlier.excludeBaselineSubjects(baselineStdTables, ...
+        'OutlierMethod', kvargs.OutlierMethod, ...
+        'OutlierThresholdK', kvargs.OutlierThresholdK, ...
+        'MinValidBins', kvargs.MinValidBins, ...
+        'MinPreStimDistanceCm', kvargs.MinPreStimDistanceCm, ...
+        'MinMeanSpeedCmS', kvargs.MinMeanSpeedCmS, ...
+        'LocomotionCovariateColumn', kvargs.LocomotionCovariateColumn, ...
+        'MinShrinkageLambda', kvargs.MinShrinkageLambda, ...
+        'ProgressionMetricType', kvargs.ProgressionMetricType, ...
+        'BinWidth', kvargs.BinWidth, ...
+        'MeanWindowFrames', kvargs.MeanWindowFrames, ...
+        'StimulusIncludesTrailingISI', kvargs.StimulusIncludesTrailingISI, ...
+        'Verbose', kvargs.Verbose);
 
     %% Per-group feature computation
     [baseData, testData] = deal(buildGroupData(baselineStdTables, kvargs), buildGroupData(testStdTables, kvargs));
@@ -117,15 +156,15 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
 
     %% Layer 1+2+3: raw scoring
     [zTe, pctTe, outTe, degenerate, wtMed, wtScale] = zLayer(baseFeat, testFeat, kvargs.WTEnvelopePct);
-    [d2Te, lamTe] = mahalanobisScores(baseFeat, testFeat, kvargs.MinShrinkageLambda);
-    looD2 = looBaselineD2(baseFeat, kvargs.MinShrinkageLambda);
+    [d2Te, lamTe] = outlier.internal.mahalanobisScores(baseFeat, testFeat, kvargs.MinShrinkageLambda);
+    looD2 = outlier.internal.looBaselineD2(baseFeat, kvargs.MinShrinkageLambda);
     empP = empiricalPFromLOO(d2Te, looD2);
 
     %% Layer 4: adjusted (locomotion-residualized) scoring
     [baseAdj, testAdj, ~, ~, adjFitOk] = residualizeOnCovariate(baseFeat, testFeat, covWt, covTe);
     [~, ~, outTeAdj, ~, ~, ~] = zLayer(baseAdj, testAdj, kvargs.WTEnvelopePct);
-    [d2TeAdj, lamTeAdj] = mahalanobisScores(baseAdj, testAdj, kvargs.MinShrinkageLambda);
-    looD2Adj = looBaselineD2(baseAdj, kvargs.MinShrinkageLambda);
+    [d2TeAdj, lamTeAdj] = outlier.internal.mahalanobisScores(baseAdj, testAdj, kvargs.MinShrinkageLambda);
+    looD2Adj = outlier.internal.looBaselineD2(baseAdj, kvargs.MinShrinkageLambda);
     empPAdj = empiricalPFromLOO(d2TeAdj, looD2Adj);
 
     % Residualize trajectory features too (same baseline-only covariate fit).
@@ -153,6 +192,10 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     info.LocomotionCovariateColumn = kvargs.LocomotionCovariateColumn;
     info.ProgressionMetricType = kvargs.ProgressionMetricType;
     info.WTEnvelopePct = kvargs.WTEnvelopePct;
+    info.OutlierMethod = kvargs.OutlierMethod;
+    info.OutlierThresholdK = kvargs.OutlierThresholdK;
+    info.ExcludedBaselineSubjects = exclusionReport;
+    info.NBaselineExcluded = sum(exclusionReport.Excluded);
     info.DegenerateFeatures = featureNames(degenerate);
     info.AdjustedFitOK = adjFitOk;
     info.ExportedFiles = {};
@@ -171,6 +214,11 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
         writetable(rankedTbl, rankedPath, 'Delimiter', '\t');
         writetable(componentsLongTbl, longPath, 'Delimiter', '\t');
         exportedFiles = [string(rankedPath), string(longPath)]; %#ok<AGROW>
+        if ~isempty(exclusionReport) && any(exclusionReport.Excluded)
+            exclPath = fullfile(outputDir, [nameBase '_similarity_excluded_baseline.tsv']);
+            writetable(exclusionReport, exclPath, 'Delimiter', '\t');
+            exportedFiles = [exportedFiles, string(exclPath)]; %#ok<AGROW>
+        end
         info.ExportedFiles = {exportedFiles};
     end
 
@@ -178,6 +226,9 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     if kvargs.Verbose
         fprintf('\n========== Similarity-to-baseline ranking ==========\n');
         fprintf('Baseline subjects: %d | Test subjects: %d | Features: %d\n', nWT, nTe, numel(featureNames));
+        if info.NBaselineExcluded > 0
+            fprintf('Baseline outliers excluded (%s): %d\n', kvargs.OutlierMethod, info.NBaselineExcluded);
+        end
         fprintf('Progression metric: %s | Covariate: "%s"\n', kvargs.ProgressionMetricType, kvargs.LocomotionCovariateColumn);
         if ~isempty(info.DegenerateFeatures)
             fprintf('WARNING: degenerate (constant) baseline features flagged: %s\n', ...
@@ -233,7 +284,7 @@ function data = buildGroupData(stdTables, kvargs)
     % ---- Preference index features (from tPref rows) ----
     prefAllCol = findColumn(tPref, 'Preference Index During Active Stimulus', 'preferenceIndex');
     stim1Label = extractBefore(prefAllCol, ' Preference Index During Active Stimulus');
-    keysPref = subjectKeysFromTable(tPref, commonHeaders);
+    keysPref = outlier.internal.subjectKeysFromTable(tPref, commonHeaders);
     entries = cell(0, 3);
     for r = 1:height(tPref)
         entries = appendEntry(entries, keysPref{r}, 'PrefIdx__All', tPref.(prefAllCol)(r));
@@ -246,7 +297,7 @@ function data = buildGroupData(stdTables, kvargs)
     end
 
     % ---- Rate-of-stay features (matched by subject key) ----
-    keysStay = subjectKeysFromTable(tStay, commonHeaders);
+    keysStay = outlier.internal.subjectKeysFromTable(tStay, commonHeaders);
     for g = 1:nStims
         colName = sprintf('Percent Time on %s Side During Active Stimulus (%%)', labels{g});
         if ~ismember(colName, tStay.Properties.VariableNames)
@@ -279,7 +330,7 @@ function data = buildGroupData(stdTables, kvargs)
             ['LocomotionCovariateColumn ''%s'' not found in cohort.metrics.speed output. ' ...
             'Available speed columns: %s'], kvargs.LocomotionCovariateColumn, strjoin(speedCols, ', '));
     end
-    keysSpeed = subjectKeysFromTable(tSpeed, commonHeaders);
+    keysSpeed = outlier.internal.subjectKeysFromTable(tSpeed, commonHeaders);
     covEntries = cell(0, 3);
     for r = 1:height(tSpeed)
         covEntries = appendEntry(covEntries, keysSpeed{r}, 'LocomotionCovariate', ...
@@ -287,7 +338,7 @@ function data = buildGroupData(stdTables, kvargs)
     end
 
     % ---- Aggregate per subject (mean omitnan across stimset rows) ----
-    [featWide, meta] = pivotEntries(entries, tPref, commonHeaders);
+    [featWide, meta] = outlier.internal.pivotEntries(entries, tPref, commonHeaders);
     cov = pivotCovariate(covEntries, meta.SubjectKey);
 
     % ---- Trajectory RMSE features (curves from this group's long table) ----
@@ -300,26 +351,6 @@ function entries = appendEntry(entries, subjKey, featName, value)
     entries(end+1, :) = {subjKey, featName, value}; %#ok<AGROW>
 end
 
-function keys = subjectKeysFromTable(T, commonHeaders)
-    n = height(T);
-    keys = repmat({''}, n, 1);
-    for r = 1:n
-        parts = cell(1, numel(commonHeaders));
-        for h = 1:numel(commonHeaders)
-            parts{h} = valueToKeyChar(T.(commonHeaders{h})(r));
-        end
-        keys{r} = strjoin(parts, '|');
-    end
-end
-
-function out = valueToKeyChar(value)
-    if isempty(value) || (isscalar(value) && ismissing(value)) || (ischar(value) && strlength(value) == 0) || (isstring(value) && strlength(value) == 0)
-        out = '<EMPTY>';
-    else
-        out = char(string(value));
-    end
-end
-
 function colName = findColumn(T, pattern, metricName)
     hits = T.Properties.VariableNames(contains(T.Properties.VariableNames, pattern, 'IgnoreCase', false));
     if isempty(hits)
@@ -327,50 +358,6 @@ function colName = findColumn(T, pattern, metricName)
             'Could not find a ''%s'' column in the %s output table.', pattern, metricName);
     end
     colName = hits{1};
-end
-
-function [featWide, meta] = pivotEntries(entries, refTable, commonHeaders)
-    % Pivot (subjKey, featName, value) entries into a wide per-subject table.
-    subjKeys = unique(entries(:, 1), 'stable');
-    featNames = unique(entries(:, 2), 'stable');
-
-    % Subject metadata from the first matching refTable row.
-    refKeys = subjectKeysFromTable(refTable, commonHeaders);
-    n = numel(subjKeys);
-    meta = table();
-    meta.('SubjectKey') = subjKeys;
-    meta.('Mouse_ID') = strings(n, 1);
-    meta.('Gene') = strings(n, 1);
-    meta.('Cage #') = strings(n, 1);
-    meta.('Gene_ID') = strings(n, 1);
-    meta.('Sex$') = strings(n, 1);
-    meta.('Genotype$') = strings(n, 1);
-    meta.('Litter') = strings(n, 1);
-    meta.('Toe_ID') = strings(n, 1);
-    meta.('Group') = strings(n, 1);
-    for si = 1:n
-        hit = find(strcmp(refKeys, subjKeys{si}), 1);
-        if isempty(hit)
-            continue;
-        end
-        for h = 1:numel(commonHeaders)
-            meta.(commonHeaders{h})(si) = string(refTable.(commonHeaders{h})(hit));
-        end
-        % Group = strain (Gene column), matching plotProgressionInTab convention.
-        meta.('Group')(si) = string(refTable.('Gene')(hit));
-    end
-
-    featWide = table(subjKeys, 'VariableNames', {'SubjectKey'});
-    for f = 1:numel(featNames)
-        vals = nan(n, 1);
-        for si = 1:n
-            m = strcmp(entries(:, 1), subjKeys{si}) & strcmp(entries(:, 2), featNames{f});
-            if any(m)
-                vals(si) = mean(cell2mat(entries(m, 3)), 'omitnan');
-            end
-        end
-        featWide.(featNames{f}) = vals;
-    end
 end
 
 function cov = pivotCovariate(covEntries, subjKeys)
@@ -520,92 +507,12 @@ function [zMat, pctMat, outMat, degenerateMask, wtMed, wtScale] = zLayer(Xwt, Xt
 end
 
 %% ==================================================================
-%% Layer 2: shrinkage Mahalanobis D2 (pairwise-complete)
+%% Layer 2+3: shrinkage Mahalanobis D2 and LOO null
+%% (moved to outlier.internal for reuse by outlier.excludeBaselineSubjects)
 %% ==================================================================
-function [d2, lambdaUsed] = mahalanobisScores(Xwt, Xtargets, minLambda)
-    nTe = size(Xtargets, 1);
-    d2 = nan(nTe, 1);
-    lambdaUsed = nan(nTe, 1);
-    cache = containers.Map('KeyType', 'char', 'ValueType', 'any');
-
-    for i = 1:nTe
-        pat = isfinite(Xtargets(i, :));
-        key = mat2str(pat);
-        if isKey(cache, key)
-            fit = cache(key);
-        else
-            fit = fitShrunkInverse(Xwt, pat, minLambda);
-            cache(key) = fit;
-        end
-        if isempty(fit)
-            continue;
-        end
-        lambdaUsed(i) = fit.lambda;
-        x = Xtargets(i, pat)' - fit.mu;
-        d2(i) = x' * fit.Sinv * x;
-    end
-end
-
-function fit = fitShrunkInverse(Xwt, pat, minLambda)
-    fit = struct('mu', [], 'Sinv', [], 'lambda', NaN);
-    cols = find(pat);
-    p = numel(cols);
-    if p == 0
-        return;
-    end
-    Xw = Xwt(:, cols);
-    ok = all(isfinite(Xw), 2);
-    Xw = Xw(ok, :);
-    n = size(Xw, 1);
-    if n < p + 2
-        return;   % not enough complete baseline rows for this feature subset
-    end
-
-    mu = mean(Xw, 1)';
-    Xc = Xw - mu';
-    S = (Xc' * Xc) / (n - 1);
-
-    % Shrink toward (trace(S)/p) * I; raise lambda until well-conditioned.
-    shrinkTarget = trace(S) / p;
-    lambdas = minLambda:0.1:1;
-    Sinv = [];
-    lamUsed = NaN;
-    for lam = lambdas
-        Ss = (1 - lam) * S + lam * shrinkTarget * eye(p);
-        if rcond(Ss) > 1e-10
-            Sinv = inv(Ss);
-            lamUsed = lam;
-            break;
-        end
-    end
-    if isempty(Sinv)
-        % Last resort: full shrinkage to scaled identity.
-        if shrinkTarget > 0
-            Sinv = eye(p) / shrinkTarget;
-            lamUsed = 1;
-        else
-            return;
-        end
-    end
-    fit.mu = mu;
-    fit.Sinv = Sinv;
-    fit.lambda = lamUsed;
-end
-
 %% ==================================================================
 %% Layer 3: leave-one-out baseline null
 %% ==================================================================
-function looD2 = looBaselineD2(Xwt, minLambda)
-    nWT = size(Xwt, 1);
-    looD2 = nan(nWT, 1);
-    for i = 1:nWT
-        keep = true(nWT, 1);
-        keep(i) = false;
-        [d2i, ~] = mahalanobisScores(Xwt(keep, :), Xwt(i, :), minLambda);
-        looD2(i) = d2i;
-    end
-end
-
 function p = empiricalPFromLOO(d2Targets, looD2)
     nWT = numel(looD2);
     p = nan(size(d2Targets));

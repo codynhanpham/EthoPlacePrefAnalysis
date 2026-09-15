@@ -435,8 +435,9 @@ classdef DeepLabCut < ui.trackingPlatforms.TrackingProvider
 
             % timestampSec = (0:(nFrames-1))' / FPS; % This assumes constant FPS!!!
             % Slightly slower (need to extract PTS first), but more reliable for variable frame rate videos. The timestamps will reflect the actual real world frame times
-            [pts, timebase] = ffprobe.pts(header('Video file'));
-            timestampSec = double(pts) * double(timebase);
+            % start_time is subtracted so timestamps are in VideoReader's 0-based domain.
+            [pts, timebase, startTime] = ffprobe.pts(header('Video file'));
+            timestampSec = double(pts) * double(timebase) - double(startTime);
 
             metadata = struct();
             metadata.FPS = FPS;

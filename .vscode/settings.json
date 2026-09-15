@@ -2,5 +2,6 @@
   "rust-analyzer.linkedProjects": [
     "lib/trigger-extract/private/trigger-extract/Cargo.toml",
   ],
-  "svg.preview.background": "transparent"
+  "svg.preview.background": "transparent",
+  "pendant.runtimeSource": "external"
 }
