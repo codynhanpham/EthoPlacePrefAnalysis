@@ -28,8 +28,8 @@ function fit = fitShrunkInverse(Xwt, pat, minLambda)
     ok = all(isfinite(Xw), 2);
     Xw = Xw(ok, :);
     n = size(Xw, 1);
-    if n < p + 2
-        return;   % not enough complete baseline rows for this feature subset
+    if n < 2
+        return;   % at least two rows are needed to estimate covariance
     end
 
     mu = mean(Xw, 1)';

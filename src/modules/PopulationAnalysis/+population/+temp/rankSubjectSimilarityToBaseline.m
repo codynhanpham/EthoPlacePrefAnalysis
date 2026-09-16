@@ -1,7 +1,7 @@
-function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(baselineStdTables, testStdTables, kvargs)
+function [rankedTbl, componentsLongTbl, info, baselineData] = rankSubjectSimilarityToBaseline(baselineStdTables, testStdTables, kvargs)
     %%RANKSUBJECTSIMILARITYTOBASELINE Rank test subjects by similarity to a baseline population
     %
-    %   [rankedTbl, componentsLongTbl, info] = ...
+    %   [rankedTbl, componentsLongTbl, info, baselineData] = ...
     %       population.temp.rankSubjectSimilarityToBaseline(baselineStdTables, testStdTables)
     %   [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(..., Name=Value)
     %
@@ -50,6 +50,9 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     %       LocomotionCovariateColumn   : column of cohort.metrics.speed output used
     %                                     as the covariate (default
     %                                     "Speed Mean During Stimulus (cm/s)").
+    %       AdjustmentLabel             : human-readable label for the adjusted
+    %                                     scoring layer (default
+    %                                     "Locomotion covariate-controlled").
     %       WTEnvelopePct               : [lo hi] empirical percentile envelope of the
     %                                     baseline used for the OutsideWT flags
     %                                     (default [5 95]).
@@ -96,6 +99,9 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     %           OutlierThresholdK, ExcludedBaselineSubjects (exclusion report
     %           table, one row per baseline subject), NBaselineExcluded,
     %           ExportedFiles
+    %       baselineData : post-filter baseline representation for visualization,
+    %           including FeatureMatrix, ZMatrix, adjusted matrices, robust
+    %           centers/scales, trajectory tables, metadata, and covariate.
     %
     %   See also: population.temp.rankSubjectProgression, cohort.metrics.progressionComponents,
     %             cohort.metrics.binnedProgression, cohort.metrics.preferenceIndex,
@@ -109,6 +115,7 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
         kvargs.MeanWindowFrames (1,1) double {mustBePositive, mustBeInteger} = 30
         kvargs.StimulusIncludesTrailingISI (1,1) logical = true
         kvargs.LocomotionCovariateColumn (1,1) string {mustBeTextScalar} = "Speed Mean During Stimulus (cm/s)"
+        kvargs.AdjustmentLabel (1,1) string {mustBeTextScalar} = ""
         kvargs.WTEnvelopePct (1,2) double {mustBeInRange(kvargs.WTEnvelopePct, 0, 100), mustBeEnvelopeSorted(kvargs.WTEnvelopePct)} = [5 95]
         kvargs.MinShrinkageLambda (1,1) double {mustBeNonnegative, mustBeLessThanOrEqual(kvargs.MinShrinkageLambda, 1)} = 0.1
         kvargs.OutlierMethod (1,1) string {mustBeMember(kvargs.OutlierMethod, ["none", "multivariate", "mixedquality", "baselinelocomotion"])} = "none"
@@ -142,7 +149,7 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
 
     % Align feature sets across groups (identical processing requirement).
     [featureNames, baseFeat, testFeat] = alignFeatures(baseData.featWide, testData.featWide);
-    [trajNames, baseTraj, testTraj] = alignFeatureTables(baseData.trajWide, testData.trajWide);
+    [trajNames, ~, testTraj] = alignFeatureTables(baseData.trajWide, testData.trajWide);
 
     nWT = height(baseData.meta);
     nTe = height(testData.meta);
@@ -167,8 +174,31 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     looD2Adj = outlier.internal.looBaselineD2(baseAdj, kvargs.MinShrinkageLambda);
     empPAdj = empiricalPFromLOO(d2TeAdj, looD2Adj);
 
-    % Residualize trajectory features too (same baseline-only covariate fit).
-    [~, testTrajAdj] = residualizeTablesOnCovariate(baseTraj, testTraj, covWt, covTe);
+    % Residualize progression curves before recomputing trajectory RMSE. RMSE
+    % itself must remain nonnegative; residualizing already-computed RMSE
+    % columns does not preserve that property.
+    [baseProgressionAdj, testProgressionAdj] = residualizeProgressionOnCovariate( ...
+        baseData.progressionLongTable, testData.progressionLongTable, ...
+        covWt, covTe, baseData.meta.SubjectKey, testData.meta.SubjectKey);
+    baseTrajAdj = trajRmseWide(baseProgressionAdj, baseProgressionAdj, ...
+        baseData.meta.SubjectKey, numel(unique(string(baseProgressionAdj.StimulusProtocol))) > 1);
+    testTrajAdj = trajRmseWide(baseProgressionAdj, testProgressionAdj, ...
+        testData.meta.SubjectKey, numel(unique(string(baseProgressionAdj.StimulusProtocol))) > 1);
+
+    % Expose the post-filter baseline representation for aggregate-reference plots.
+    [baseZ, ~, ~, ~, ~, ~] = zLayer(baseFeat, baseFeat, kvargs.WTEnvelopePct);
+    [baseZAdj, ~, ~, ~, ~, ~] = zLayer(baseAdj, baseAdj, kvargs.WTEnvelopePct);
+    baselineData = baseData;
+    baselineData.FeatureNames = featureNames;
+    baselineData.FeatureMatrix = baseFeat;
+    baselineData.FeatureMatrixAdj = baseAdj;
+    baselineData.ZMatrix = baseZ;
+    baselineData.ZMatrixAdj = baseZAdj;
+    baselineData.WTMedian = wtMed;
+    baselineData.WTScale = wtScale;
+    baselineData.TrajectoryFeatureNames = trajNames;
+    baselineData.progressionLongTableAdj = baseProgressionAdj;
+    baselineData.TrajectoryTableAdj = baseTrajAdj;
 
     %% Assemble ranked table (test subjects, most-baseline-like first)
     rankedTbl = assembleRankedTable(testData.meta, featureNames, trajNames, ...
@@ -190,6 +220,15 @@ function [rankedTbl, componentsLongTbl, info] = rankSubjectSimilarityToBaseline(
     info.LOO_D2_Adj = looD2Adj;
     info.LOO_P = empiricalPFromLOO(looD2, looD2);   % each WT vs the LOO null
     info.LocomotionCovariateColumn = kvargs.LocomotionCovariateColumn;
+    adjustmentLabel = kvargs.AdjustmentLabel;
+    if strlength(adjustmentLabel) == 0
+        adjustmentLabel = "Locomotion covariate-controlled";
+    end
+    info.Adjustment = struct( ...
+        'Label', adjustmentLabel, ...
+        'Method', "Baseline-only OLS residualization", ...
+        'CovariateColumns', kvargs.LocomotionCovariateColumn, ...
+        'Description', "Features residualized against the baseline-only locomotion covariate fit");
     info.ProgressionMetricType = kvargs.ProgressionMetricType;
     info.WTEnvelopePct = kvargs.WTEnvelopePct;
     info.OutlierMethod = kvargs.OutlierMethod;
@@ -344,7 +383,8 @@ function data = buildGroupData(stdTables, kvargs)
     % ---- Trajectory RMSE features (curves from this group's long table) ----
     trajWide = trajRmseWide(longTbl, longTbl, meta.SubjectKey, multiProto);
 
-    data = struct('featWide', {featWide}, 'trajWide', {trajWide}, 'meta', {meta}, 'cov', cov);
+    data = struct('featWide', {featWide}, 'trajWide', {trajWide}, ...
+        'progressionLongTable', {longTbl}, 'meta', {meta}, 'cov', cov);
 end
 
 function entries = appendEntry(entries, subjKey, featName, value)
@@ -382,6 +422,8 @@ function trajWide = trajRmseWide(longTblWt, longTblEval, evalSubjectKeys, multiP
         proto = string(wtPairs.StimulusProtocol(pi));
         stim = string(wtPairs.Stimulus(pi));
         pairMask = protoCol == proto & stimCol == stim;
+        evalPairMask = string(longTblEval.StimulusProtocol) == proto & ...
+            string(longTblEval.Stimulus) == stim;
         wtRows = longTblWt(pairMask, :);
         wtRows = wtRows(isfinite(wtRows.Progression), :);
         if isempty(wtRows)
@@ -398,7 +440,7 @@ function trajWide = trajRmseWide(longTblWt, longTblEval, evalSubjectKeys, multiP
 
         vals = nan(numel(evalSubjectKeys), 1);
         for si = 1:numel(evalSubjectKeys)
-            rows = longTblEval(pairMask & strcmp(longTblEval.SubjectKey, evalSubjectKeys{si}), :);
+            rows = longTblEval(evalPairMask & strcmp(longTblEval.SubjectKey, evalSubjectKeys{si}), :);
             if isempty(rows)
                 continue;
             end
@@ -568,17 +610,69 @@ function b = corrCoefSlope(x, y)
     end
 end
 
-function [wtR, teR] = residualizeTablesOnCovariate(wtWide, teWide, covWt, covTe)
-    % Residualize trajectory-feature tables using the same per-feature approach.
-    names = wtWide.Properties.VariableNames(2:end);
-    Xwt = featureMatrix(wtWide, names);
-    Xte = featureMatrix(teWide, names);
-    [XwtR, XteR] = residualizeOnCovariate(Xwt, Xte, covWt, covTe);
-    wtR = wtWide;
-    teR = teWide;
-    for j = 1:numel(names)
-        wtR.(names{j}) = XwtR(:, j);
-        teR.(names{j}) = XteR(:, j);
+function [wtR, teR] = residualizeProgressionOnCovariate(wtLong, teLong, covWt, covTe, wtKeys, teKeys)
+    % Fit one baseline-only locomotion slope per protocol/stimulus, with bin
+    % effects preserved. This is more stable than fitting a separate slope at
+    % every bin and keeps the baseline mean trajectory at each bin unchanged.
+    wtR = wtLong;
+    teR = teLong;
+    wtSubjectKeys = string(wtKeys);
+    teSubjectKeys = string(teKeys);
+    wtRowKeys = string(wtLong.SubjectKey);
+    teRowKeys = string(teLong.SubjectKey);
+    pairs = unique(wtLong(:, {'StimulusProtocol', 'Stimulus'}), 'stable');
+
+    for pi = 1:height(pairs)
+        protocol = string(pairs.StimulusProtocol(pi));
+        stimulus = string(pairs.Stimulus(pi));
+        wtMask = string(wtLong.StimulusProtocol) == protocol & string(wtLong.Stimulus) == stimulus;
+        teMask = string(teLong.StimulusProtocol) == protocol & string(teLong.Stimulus) == stimulus;
+        if ~any(wtMask)
+            continue;
+        end
+
+        wtCovRows = covariateForSubjects(wtRowKeys(wtMask), wtSubjectKeys, covWt);
+        wtValues = wtLong.Progression(wtMask);
+        fitOK = isfinite(wtValues) & isfinite(wtCovRows);
+        nSubjects = numel(unique(wtRowKeys(fitOK)));
+        if nSubjects >= 3 && std(wtCovRows(fitOK), 'omitnan') > 0
+            meanCov = mean(wtCovRows(fitOK), 'omitnan');
+            binMeans = binMeansForRows(wtLong.BinIdx(wtMask), wtValues);
+            centeredValues = wtValues - binMeans;
+            fitOK = fitOK & isfinite(centeredValues);
+            centeredCov = wtCovRows - meanCov;
+            slope = sum(centeredCov(fitOK) .* centeredValues(fitOK)) / ...
+                sum(centeredCov(fitOK) .^ 2);
+            wtR.Progression(wtMask) = wtValues - slope * centeredCov;
+
+            if any(teMask)
+                teCovRows = covariateForSubjects(teRowKeys(teMask), teSubjectKeys, covTe);
+                teValues = teLong.Progression(teMask);
+                teR.Progression(teMask) = teValues - slope * (teCovRows - meanCov);
+            end
+        else
+            % No stable locomotion fit: retain the raw curve rather than
+            % creating an artificial adjusted trajectory.
+        end
+    end
+end
+
+function means = binMeansForRows(binIdx, values)
+    means = nan(size(values));
+    bins = unique(binIdx, 'stable');
+    for i = 1:numel(bins)
+        mask = binIdx == bins(i);
+        means(mask) = mean(values(mask), 'omitnan');
+    end
+end
+
+function covRows = covariateForSubjects(subjectKeys, referenceKeys, referenceCov)
+    covRows = nan(size(subjectKeys));
+    for i = 1:numel(subjectKeys)
+        hit = find(referenceKeys == subjectKeys(i), 1, 'first');
+        if ~isempty(hit)
+            covRows(i) = referenceCov(hit);
+        end
     end
 end
 
