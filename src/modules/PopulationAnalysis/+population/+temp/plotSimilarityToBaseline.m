@@ -177,7 +177,7 @@ function renderRankTab(parent, rankedTbl, ~, info, ~, kvargs)
     labels = subjectLabels(rankedTbl);
     labels = labels(subjectOrder);
     set(ax, 'XLim', [0.5, max(n + 0.5, 1.5)], 'XTick', x, 'XTickLabel', labels);
-    xtickangle(ax, 45);
+    xtickangle(ax, 35);
     ylabel(ax, 'Mahalanobis D^2');
     xlabel(ax, sprintf('Test subjects, ordered by %s D^2', kvargs.D2RankLayer));
     title(ax, sprintf('Similarity rank relative to the aggregate baseline; ordered by %s D^2', ...
@@ -207,7 +207,7 @@ function renderHeatmapTab(parent, rankedTbl, componentsLongTbl, info, baselineDa
     set(ax, 'XTick', 1:numel(featureNames), 'XTickLabel', displayFeatureNames);
     ax.XAxis.TickLabelInterpreter = 'none';
     ax.YAxis.TickLabelInterpreter = 'none';
-    xtickangle(ax, 60);
+    xtickangle(ax, 35);
     ylabel(ax, 'Subjects');
     title(ax, sprintf('Feature deviations from baseline; test rows are ranked by %s D^2', ...
         kvargs.D2RankLayer));
@@ -244,7 +244,7 @@ function renderHeatmapTab(parent, rankedTbl, componentsLongTbl, info, baselineDa
         'XTick', 1:numel(featureNames), 'XTickLabel', displayFeatureNames);
     axSpread.XAxis.TickLabelInterpreter = 'none';
     axSpread.YAxis.TickLabelInterpreter = 'none';
-    xtickangle(axSpread, 60);
+    xtickangle(axSpread, 35);
     ylabel(axSpread, 'Baseline robust z');
     xlabel(axSpread, 'Feature');
     title(axSpread, 'Baseline feature spread used as the reference');
@@ -360,7 +360,7 @@ function renderProfileTab(parent, rankedTbl, componentsLongTbl, info, baselineDa
             'XTickLabel', displayFeatureNames(featureOrder));
         ax.XAxis.TickLabelInterpreter = 'none';
         ax.YAxis.TickLabelInterpreter = 'none';
-        xtickangle(ax, 60);
+        xtickangle(ax, 35);
         title(ax, labels(i), 'Interpreter', 'none');
         ylabel(ax, 'Robust z');
         grid(ax, 'on');
@@ -429,7 +429,7 @@ function renderTrajectoryTab(parent, rankedTbl, ~, info, baselineData, kvargs)
         set(ax, 'XTick', 1:numel(labels), 'XTickLabel', labels);
         ax.XAxis.TickLabelInterpreter = 'none';
         ax.YAxis.TickLabelInterpreter = 'none';
-        xtickangle(ax, 60);
+        xtickangle(ax, 35);
         title(ax, simplifyFeatureLabels(strrep(rawName, 'TrajRMSE__', ''), ...
             kvargs.StandardizedTables), 'Interpreter', 'none');
         ylabel(ax, 'RMSE');
@@ -480,6 +480,11 @@ function labels = subjectLabels(tbl)
         labels = string(tbl.Mouse_ID);
     else
         labels = string(tbl.SubjectKey);
+    end
+    if ismember('Cage #', tbl.Properties.VariableNames)
+        cageLabels = string(tbl.('Cage #'));
+        hasCage = ~(ismissing(cageLabels) | strlength(strtrim(cageLabels)) == 0);
+        labels(hasCage) = strtrim(cageLabels(hasCage) + " " + labels(hasCage));
     end
     missing = ismissing(labels) | strlength(labels) == 0;
     labels(missing) = "subject_" + string(find(missing));
