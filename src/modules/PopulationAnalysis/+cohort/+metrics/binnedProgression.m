@@ -39,7 +39,7 @@ function t = binnedProgression(standardizedTables, kvargs)
 		standardizedTables struct {sdTable.mustBeStandardizedTable}
 		kvargs.MetricType (1,1) string {mustBeMember(kvargs.MetricType, ["distance", "state"])} = "distance"
 		kvargs.BinWidth (1,1) {mustBePositive, mustBeInteger} = 6
-		kvargs.MeanWindowFrames (1,1) {mustBePositive, mustBeInteger} = 15
+		kvargs.MeanWindowFrames (1,1) {mustBePositive, mustBeInteger} = 30
 		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
 	end
 
