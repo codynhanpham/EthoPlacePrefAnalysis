@@ -60,7 +60,7 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
     %   Name-Value Pair Arguments:
     %       'ResponseWindow' : 1x2 double array specifying the time window (in seconds, relative to bout onset) to analyze. Default is [-1, 6]. This range should cover the full bout duration and ends before the next bout starts.
     %       'PostOnsetWindow' : 1x2 double array specifying the time window (in seconds, relative to bout onset) in which to search for the peak speed/acceleration. Default is [0, 1.5].
-    %       'ReactionMetric' : Text scalar, 'acceleration' or 'velocity', selecting which metric's peak latency is used as the reaction time. Default is 'velocity'.
+    %       'ReactionMetric' : Text scalar, 'velocity', 'acceleration', 'angularVelocity', or 'mixed', selecting which metric's peak latency is used as the reaction time. Default is 'mixed': per replicate, the lowest finite latency that is strictly > 0 across velocity / acceleration / angular velocity (NaN when none qualify). 'angularVelocity' uses the head bearing (ear midpoint -> nose, image convention Y down) wrapped derivative in deg/s; requires nose columns in bodyparts.
     %       'PeakSource' : Text scalar, 'replicateMean' or 'bout'. 'replicateMean' (default, recommended) takes the peak of each replicate's bout-averaged trace; 'bout' takes the peak of each single-bout trace and averages latencies across bouts (legacy, noise-sensitive). Applies symmetrically to both metrics.
     %       'BaselineWindow' : 1x2 double array specifying the time window (in seconds, relative to bout onset) whose mean speed is subtracted from each replicate's speed trace before the peak search. Default is [-1, 0]. Must lie within ResponseWindow and end at or before 0.
     %       'SmoothWindow' : Scalar double specifying the moving-average smoothing window in seconds applied to the baseline-corrected speed before the peak search. Default is NaN (no smoothing). 0 or NaN disables smoothing. Applied to the speed before the acceleration derivative is taken, mirroring graphics.headAccelerationByBout().
@@ -90,7 +90,7 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
 
         kvargs.ResponseWindow (1,2) double = [-1, 6] % in seconds, relative to bout onset
         kvargs.PostOnsetWindow (1,2) double = [0, 1.5] % in seconds, relative to bout onset. Search window for peak speed/acceleration used for reaction time.
-        kvargs.ReactionMetric {mustBeMember(kvargs.ReactionMetric, {'velocity', 'acceleration'}), mustBeTextScalar} = 'velocity' % which metric's peak latency to use as reaction time
+        kvargs.ReactionMetric {mustBeMember(kvargs.ReactionMetric, {'velocity', 'acceleration', 'angularVelocity', 'mixed'}), mustBeTextScalar} = 'mixed' % which metric's peak latency to use as reaction time; 'mixed' (default) takes the lowest finite non-zero latency per replicate across all three metrics
         kvargs.PeakSource {mustBeMember(kvargs.PeakSource, {'replicateMean', 'bout'}), mustBeTextScalar} = 'replicateMean' % whether to peak each subject/replicate's bout-averaged trace ('replicateMean', recommended) or each single-bout trace ('bout', legacy)
         kvargs.ResponseSDThreshold (1,1) double = 2 % responder criterion: peak |metric change| must exceed this multiple of the matched baseline SD; NaN disables filtering
         kvargs.LatencyMethod {mustBeMember(kvargs.LatencyMethod, {'peak', 'firstCrossing', 'fractionalPeak', 'responseEnergy'}), mustBeTextScalar} = 'peak' % latency estimator applied to the replicate-mean |metric| trace
@@ -225,6 +225,22 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
         trialTime = bodypartTable{:, 'Trial time'};
         headXMatrix = bodypartTable{:, 'Head X'};
         headYMatrix = bodypartTable{:, 'Head Y'};
+        % Nose columns (optional): required only for the angularVelocity and
+        % mixed ReactionMetric modes. Missing nose columns make the angular
+        % latencies all NaN; 'mixed' then falls back to the other two metrics.
+        noseXMatrix = [];
+        noseYMatrix = [];
+        hasNose = false;
+        varNames = bodypartTable.Properties.VariableNames;
+        noseXVar = findBodypartVar(string(varNames(startsWith(varNames, 'X '))), {'nose'});
+        if strlength(noseXVar) > 0
+            noseYVar = "Y " + extractAfter(noseXVar, "X ");
+            if ismember(noseYVar, string(varNames))
+                noseXMatrix = bodypartTable{:, char(noseXVar)};
+                noseYMatrix = bodypartTable{:, char(noseYVar)};
+                hasNose = true;
+            end
+        end
         columnByStrainOrder = {thisStdTable.animalMetadata.values().strain};
         columnByGenotypeOrder = {thisStdTable.animalMetadata.values().genotype};
         columnBySexOrder = {thisStdTable.animalMetadata.values().sex};
@@ -354,10 +370,11 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                             continue;
                         end
 
-                        % Per-replicate accumulators: latency to peak speed and to peak signed acceleration
+                        % Per-replicate accumulators: latency to peak speed, peak signed acceleration, and peak |angular velocity|
                         nreplicates = size(headX, 2);
                         peakSpeedLatencies = nan(nBouts, nreplicates);
                         peakAccelLatencies = nan(nBouts, nreplicates);
+                        peakAngularVelocityLatencies = nan(nBouts, nreplicates);
 
                         % Trace accumulators: kept for every bout (not just diagnostics) since the
                         % 'replicateMean' PeakSource bout-averages them before the argmax, and the
@@ -365,8 +382,10 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                         boutTimeCells = {};
                         boutSpeedCells = {};
                         boutAccelCells = {};
+                        boutAngularVelocityCells = {};
                         baselineSpeedSamples = []; % baseline-window samples pooled over bouts, for the noise-floor SD
                         baselineAccelSamples = [];
+                        baselineAngularVelocitySamples = [];
 
                         for boutIdx = 1:nBouts
                             startIdx = responseWindowStartIdx(boutIdx);
@@ -405,14 +424,29 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                             accelSeries = NaN(size(speedSeries));
                             accelSeries(2:end, :) = diff(speedSeries, 1, 1) ./ dt;
 
+                            % Angular velocity from the head bearing (ear midpoint -> nose,
+                            % image convention Y down; 0 deg = up, +90 = right, -90 = left).
+                            % Mirrors cohort.metrics.headAngularVelocity: wrapped derivative of
+                            % the baseline-corrected (circular mean) and optionally smoothed
+                            % bearing series. Missing nose columns -> all NaN.
+                            if hasNose
+                                boutNoseX = noseXMatrix(startIdx:endIdx, combinedMask);
+                                boutNoseY = noseYMatrix(startIdx:endIdx, combinedMask);
+                                angularVelocitySeries = calcAngularVelocityFromBearing(boutNoseX, boutNoseY, boutX, boutY, timeVector, baselineMask, kvargs.SmoothWindow);
+                            else
+                                angularVelocitySeries = nan(size(speedSeries));
+                            end
+
                             boutTimeCells{end+1} = timeRelativeToBout; %#ok<AGROW>
                             boutSpeedCells{end+1} = speedSeries; %#ok<AGROW>
                             boutAccelCells{end+1} = accelSeries; %#ok<AGROW>
+                            boutAngularVelocityCells{end+1} = angularVelocitySeries; %#ok<AGROW>
 
                             % Pool baseline-window samples (post-correction) across bouts for the
                             % group's noise-floor SD used by the responder criterion
                             baselineSpeedSamples = [baselineSpeedSamples; speedSeries(baselineMask, :)]; %#ok<AGROW>
                             baselineAccelSamples = [baselineAccelSamples; accelSeries(baselineMask, :)]; %#ok<AGROW>
+                            baselineAngularVelocitySamples = [baselineAngularVelocitySamples; angularVelocitySeries(baselineMask, :)]; %#ok<AGROW>
 
                             % Restrict the peak search to the post-onset window
                             searchMask = timeRelativeToBout >= kvargs.PostOnsetWindow(1) & ...
@@ -441,6 +475,17 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                                     peakAccelLatencies(boutIdx, repIdx) = timeRelativeToBout(searchIdx(thisIdx));
                                 end
                             end
+
+                            % Latency to peak |angular velocity| per replicate (abs argmax:
+                            % a strong counter-clockwise braking turn counts too)
+                            angularVelocityInWindow = angularVelocitySeries(searchIdx, :);
+                            [~, maxAngularVelocityIdx] = max(abs(angularVelocityInWindow), [], 1, 'omitnan');
+                            for repIdx = 1:nreplicates
+                                thisIdx = maxAngularVelocityIdx(repIdx);
+                                if isfinite(angularVelocityInWindow(thisIdx, repIdx))
+                                    peakAngularVelocityLatencies(boutIdx, repIdx) = timeRelativeToBout(searchIdx(thisIdx));
+                                end
+                            end
                         end
 
                         % Average latencies per replicate across bouts (avoid pseudo-replication).
@@ -453,6 +498,7 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                         % peak of the pooled group-mean trace (population marker).
                         meanPeakSpeedLatency = mean(peakSpeedLatencies, 1, 'omitnan'); % 1 x nreplicates
                         meanPeakAccelLatency = mean(peakAccelLatencies, 1, 'omitnan'); % 1 x nreplicates
+                        meanPeakAngularVelocityLatency = mean(peakAngularVelocityLatencies, 1, 'omitnan'); % 1 x nreplicates
 
                         % Matched noise floor: SD across replicates of each replicate's bout-averaged
                         % baseline level. This matches the noise statistic to the replicate-mean
@@ -469,24 +515,32 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                             % 1 x nreplicates row even when nreplicates == 1.
                             baseBlockSpeed = reshape(baselineSpeedSamples, [], nreplicates, nBouts);
                             baseBlockAccel = reshape(baselineAccelSamples, [], nreplicates, nBouts);
+                            baseBlockAngularVelocity = reshape(baselineAngularVelocitySamples, [], nreplicates, nBouts);
                             repMeanBaseSpeed = reshape(mean(mean(baseBlockSpeed, 3, 'omitnan'), 1, 'omitnan'), 1, []);
                             repMeanBaseAccel = reshape(mean(mean(baseBlockAccel, 3, 'omitnan'), 1, 'omitnan'), 1, []);
+                            repMeanBaseAngularVelocity = reshape(mean(mean(baseBlockAngularVelocity, 3, 'omitnan'), 1, 'omitnan'), 1, []);
                             baselineSpeedSD = std(repMeanBaseSpeed, 0, 2, 'omitnan');
                             baselineAccelSD = std(repMeanBaseAccel, 0, 2, 'omitnan');
+                            baselineAngularVelocitySD = std(repMeanBaseAngularVelocity, 0, 2, 'omitnan');
                         else
                             baselineSpeedSD = std(baselineSpeedSamples(:), 'omitnan');
                             baselineAccelSD = std(baselineAccelSamples(:), 'omitnan');
+                            baselineAngularVelocitySD = std(baselineAngularVelocitySamples(:), 'omitnan');
                         end
 
                         repMeanSpeedLatencies = nan(1, nreplicates);
                         repMeanAccelLatencies = nan(1, nreplicates);
+                        repMeanAngularVelocityLatencies = nan(1, nreplicates);
                         tracePeakAmplitude = nan(1, nreplicates);
                         tracePeakAmplitudeAccel = nan(1, nreplicates);
+                        tracePeakAmplitudeAngularVelocity = nan(1, nreplicates);
                         responderAmp = tracePeakAmplitude;
                         populationSpeedPeakLatency = NaN;
                         populationAccelPeakLatency = NaN;
+                        populationAngularVelocityPeakLatency = NaN;
                         populationSpeedPeakZ = NaN; % pooled-peak amplitude / matched baseline SD
                         populationAccelPeakZ = NaN;
+                        populationAngularVelocityPeakZ = NaN;
 
                         nGrid = 300;
                         gridT = linspace(kvargs.PostOnsetWindow(1), kvargs.PostOnsetWindow(2), nGrid)';
@@ -494,10 +548,12 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                         if nTraces > 0
                             speedStack = nan(nGrid, nreplicates, nTraces);
                             accelStack = nan(nGrid, nreplicates, nTraces);
+                            angularVelocityStack = nan(nGrid, nreplicates, nTraces);
                             for traceIdx = 1:nTraces
                                 tThis = boutTimeCells{traceIdx};
                                 sGrid = nan(nGrid, nreplicates);
                                 aGrid = nan(nGrid, nreplicates);
+                                wGrid = nan(nGrid, nreplicates);
                                 for repIdx = 1:nreplicates
                                     validMask = isfinite(boutSpeedCells{traceIdx}(:, repIdx));
                                     if nnz(validMask) >= 2
@@ -513,13 +569,22 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                                         [tu, iu] = unique(tu);
                                         aGrid(:, repIdx) = interp1(tu, au(iu), gridT, 'linear', NaN);
                                     end
+                                    validMaskW = isfinite(boutAngularVelocityCells{traceIdx}(:, repIdx));
+                                    if nnz(validMaskW) >= 2
+                                        tu = tThis(validMaskW);
+                                        wu = boutAngularVelocityCells{traceIdx}(validMaskW, repIdx);
+                                        [tu, iu] = unique(tu);
+                                        wGrid(:, repIdx) = interp1(tu, wu(iu), gridT, 'linear', NaN);
+                                    end
                                 end
                                 speedStack(:, :, traceIdx) = sGrid;
                                 accelStack(:, :, traceIdx) = aGrid;
+                                angularVelocityStack(:, :, traceIdx) = wGrid;
                             end
 
                             repMeanSpeedTrace = mean(speedStack, 3, 'omitnan'); % grid x nreplicates
                             repMeanAccelTrace = mean(accelStack, 3, 'omitnan'); % grid x nreplicates
+                            repMeanAngularVelocityTrace = mean(angularVelocityStack, 3, 'omitnan'); % grid x nreplicates
 
                             searchMaskGrid = gridT >= kvargs.PostOnsetWindow(1) & gridT <= kvargs.PostOnsetWindow(2);
                             searchGridT = gridT(searchMaskGrid);
@@ -541,20 +606,48 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                                 abs(repMeanAccelTrace(searchMaskGrid, :)), searchGridT, kvargs.LatencyMethod, ...
                                 currentK * baselineAccelSD, kvargs.FirstCrossingPersistenceWindow, ...
                                 kvargs.FractionalPeakLevel, kvargs.ResponseEnergyFraction);
+                            [repMeanAngularVelocityLatencies, tracePeakAmplitudeAngularVelocity] = computeLatencyPerReplicate( ...
+                                abs(repMeanAngularVelocityTrace(searchMaskGrid, :)), searchGridT, kvargs.LatencyMethod, ...
+                                currentK * baselineAngularVelocitySD, kvargs.FirstCrossingPersistenceWindow, ...
+                                kvargs.FractionalPeakLevel, kvargs.ResponseEnergyFraction);
 
                             % Responder criterion: peak |change| of the replicate-mean trace vs
                             % ResponseSDThreshold x baseline SD (metric-specific noise floor). When
                             % enabled, BOTH the box-plot latencies and the pooled population trace
-                            % (black triangle) are restricted to responders.
+                            % (black triangle) are restricted to responders. In 'mixed' mode the
+                            % criterion is applied per metric first, then the mixed latency takes
+                            % the min over metrics that passed.
                             if isfinite(kvargs.ResponseSDThreshold)
                                 if strcmpi(kvargs.ReactionMetric, 'velocity')
                                     noiseSD = baselineSpeedSD;
                                     responderAmp = tracePeakAmplitude;
-                                else
+                                elseif strcmpi(kvargs.ReactionMetric, 'acceleration')
                                     noiseSD = baselineAccelSD;
                                     responderAmp = tracePeakAmplitudeAccel;
+                                elseif strcmpi(kvargs.ReactionMetric, 'angularVelocity')
+                                    noiseSD = baselineAngularVelocitySD;
+                                    responderAmp = tracePeakAmplitudeAngularVelocity;
+                                else % mixed: per-metric responder masks, combined below
+                                    noiseSD = NaN;
+                                    responderAmp = tracePeakAmplitude;
                                 end
-                                if isfinite(noiseSD) && noiseSD > 0
+                                if strcmpi(kvargs.ReactionMetric, 'mixed')
+                                    responderMaskVelocity = true(1, nreplicates);
+                                    responderMaskAccel = true(1, nreplicates);
+                                    responderMaskAngularVelocity = true(1, nreplicates);
+                                    if isfinite(baselineSpeedSD) && baselineSpeedSD > 0
+                                        responderMaskVelocity = tracePeakAmplitude >= kvargs.ResponseSDThreshold * baselineSpeedSD;
+                                    end
+                                    if isfinite(baselineAccelSD) && baselineAccelSD > 0
+                                        responderMaskAccel = tracePeakAmplitudeAccel >= kvargs.ResponseSDThreshold * baselineAccelSD;
+                                    end
+                                    if isfinite(baselineAngularVelocitySD) && baselineAngularVelocitySD > 0
+                                        responderMaskAngularVelocity = tracePeakAmplitudeAngularVelocity >= kvargs.ResponseSDThreshold * baselineAngularVelocitySD;
+                                    end
+                                    % A replicate is a responder if ANY metric qualified; the mixed
+                                    % latency below then takes the min over the qualifying metrics.
+                                    responderMask = responderMaskVelocity | responderMaskAccel | responderMaskAngularVelocity;
+                                elseif isfinite(noiseSD) && noiseSD > 0
                                     responderMask = responderAmp >= kvargs.ResponseSDThreshold * noiseSD;
                                 else
                                     responderMask = true(1, nreplicates); % no estimable noise floor: do not filter
@@ -575,6 +668,7 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                             if any(responderMask)
                                 pooledSpeedTrace = mean(reshape(speedStack(:, responderMask, :), nGrid, []), 2, 'omitnan');
                                 pooledAccelTrace = mean(reshape(accelStack(:, responderMask, :), nGrid, []), 2, 'omitnan');
+                                pooledAngularVelocityTrace = mean(reshape(angularVelocityStack(:, responderMask, :), nGrid, []), 2, 'omitnan');
                                 [populationSpeedPeakLatency, pooledSpeedPeakAmp] = computeLatencyPerReplicate( ...
                                     abs(pooledSpeedTrace), searchGridT, kvargs.LatencyMethod, ...
                                     currentK * baselineSpeedSD, kvargs.FirstCrossingPersistenceWindow, ...
@@ -583,13 +677,21 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                                     abs(pooledAccelTrace), searchGridT, kvargs.LatencyMethod, ...
                                     currentK * baselineAccelSD, kvargs.FirstCrossingPersistenceWindow, ...
                                     kvargs.FractionalPeakLevel, kvargs.ResponseEnergyFraction);
+                                [populationAngularVelocityPeakLatency, pooledAngularVelocityPeakAmp] = computeLatencyPerReplicate( ...
+                                    abs(pooledAngularVelocityTrace), searchGridT, kvargs.LatencyMethod, ...
+                                    currentK * baselineAngularVelocitySD, kvargs.FirstCrossingPersistenceWindow, ...
+                                    kvargs.FractionalPeakLevel, kvargs.ResponseEnergyFraction);
                                 populationSpeedPeakLatency = populationSpeedPeakLatency(1);
                                 populationAccelPeakLatency = populationAccelPeakLatency(1);
+                                populationAngularVelocityPeakLatency = populationAngularVelocityPeakLatency(1);
                                 if isfinite(baselineSpeedSD) && baselineSpeedSD > 0
                                     populationSpeedPeakZ = pooledSpeedPeakAmp / baselineSpeedSD;
                                 end
                                 if isfinite(baselineAccelSD) && baselineAccelSD > 0
                                     populationAccelPeakZ = pooledAccelPeakAmp / baselineAccelSD;
+                                end
+                                if isfinite(baselineAngularVelocitySD) && baselineAngularVelocitySD > 0
+                                    populationAngularVelocityPeakZ = pooledAngularVelocityPeakAmp / baselineAngularVelocitySD;
                                 end
                             end
                         else
@@ -600,6 +702,18 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                         if strcmpi(kvargs.PeakSource, 'replicateMean')
                             meanPeakSpeedLatency = repMeanSpeedLatencies;
                             meanPeakAccelLatency = repMeanAccelLatencies;
+                            meanPeakAngularVelocityLatency = repMeanAngularVelocityLatencies;
+                        end
+
+                        % 'mixed' mode: per replicate, the lowest finite latency that is
+                        % strictly > 0 across velocity / acceleration / angular velocity.
+                        % NaN when no metric qualifies for that replicate.
+                        meanPeakMixedLatency = nan(1, nreplicates);
+                        if strcmpi(kvargs.ReactionMetric, 'mixed')
+                            candidateLatencies = cat(1, meanPeakSpeedLatency, meanPeakAccelLatency, meanPeakAngularVelocityLatency);
+                            candidateLatencies(~isfinite(candidateLatencies) | candidateLatencies <= 0) = Inf;
+                            meanPeakMixedLatency = min(candidateLatencies, [], 1);
+                            meanPeakMixedLatency(meanPeakMixedLatency == Inf) = NaN;
                         end
 
                         % Store results for this stimulus and sex
@@ -608,18 +722,25 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                         genotypeSexData(compositeKey) = struct(...
                             'peakSpeedLatency', meanPeakSpeedLatency, ...
                             'peakAccelLatency', meanPeakAccelLatency, ...
+                            'peakAngularVelocityLatency', meanPeakAngularVelocityLatency, ...
+                            'peakMixedLatency', meanPeakMixedLatency, ...
                             'boutPeakLatencies', peakSpeedLatencies, ...
                             'repMeanSpeedLatencies', repMeanSpeedLatencies, ...
                             'repMeanAccelLatencies', repMeanAccelLatencies, ...
+                            'repMeanAngularVelocityLatencies', repMeanAngularVelocityLatencies, ...
                             'tracePeakAmplitude', tracePeakAmplitude, ...
                             'tracePeakAmplitudeAccel', tracePeakAmplitudeAccel, ...
+                            'tracePeakAmplitudeAngularVelocity', tracePeakAmplitudeAngularVelocity, ...
                             'responderAmp', responderAmp, ...
                             'responderMask', responderMask, ...
                             'baselineSpeedSD', baselineSpeedSD, ...
+                            'baselineAngularVelocitySD', baselineAngularVelocitySD, ...
                             'populationSpeedPeakLatency', populationSpeedPeakLatency, ...
                             'populationAccelPeakLatency', populationAccelPeakLatency, ...
+                            'populationAngularVelocityPeakLatency', populationAngularVelocityPeakLatency, ...
                             'populationSpeedPeakZ', populationSpeedPeakZ, ...
                             'populationAccelPeakZ', populationAccelPeakZ, ...
+                            'populationAngularVelocityPeakZ', populationAngularVelocityPeakZ, ...
                             'nreplicates', nreplicates, ...
                             'boutTimeCells', {boutTimeCells}, ...
                             'boutSpeedCells', {boutSpeedCells} ...
@@ -641,8 +762,12 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                     dHere = genotypeSexData(keyListAll{keyIdx});
                     if strcmpi(kvargs.ReactionMetric, 'velocity')
                         thisZ = dHere.populationSpeedPeakZ;
-                    else
+                    elseif strcmpi(kvargs.ReactionMetric, 'acceleration')
                         thisZ = dHere.populationAccelPeakZ;
+                    elseif strcmpi(kvargs.ReactionMetric, 'angularVelocity')
+                        thisZ = dHere.populationAngularVelocityPeakZ;
+                    else % mixed: use the max z across the three pooled traces
+                        thisZ = max([dHere.populationSpeedPeakZ, dHere.populationAccelPeakZ, dHere.populationAngularVelocityPeakZ], [], 'omitnan');
                     end
                     if isfinite(thisZ)
                         maxPopPeakZ = max(maxPopPeakZ, thisZ);
@@ -701,10 +826,25 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                             latencyValues = data.peakSpeedLatency;
                             popLatency = data.populationSpeedPeakLatency;
                             popPeakZ = data.populationSpeedPeakZ;
-                        else
+                        elseif strcmpi(kvargs.ReactionMetric, 'acceleration')
                             latencyValues = data.peakAccelLatency;
                             popLatency = data.populationAccelPeakLatency;
                             popPeakZ = data.populationAccelPeakZ;
+                        elseif strcmpi(kvargs.ReactionMetric, 'angularVelocity')
+                            latencyValues = data.peakAngularVelocityLatency;
+                            popLatency = data.populationAngularVelocityPeakLatency;
+                            popPeakZ = data.populationAngularVelocityPeakZ;
+                        else % mixed
+                            latencyValues = data.peakMixedLatency;
+                            % Population marker: min of the three pooled-trace latencies
+                            % (finite, strictly > 0), matching the per-replicate rule.
+                            popCandidates = [data.populationSpeedPeakLatency, data.populationAccelPeakLatency, data.populationAngularVelocityPeakLatency];
+                            popCandidates(~isfinite(popCandidates) | popCandidates <= 0) = Inf;
+                            popLatency = min(popCandidates);
+                            if popLatency == Inf
+                                popLatency = NaN;
+                            end
+                            popPeakZ = max([data.populationSpeedPeakZ, data.populationAccelPeakZ, data.populationAngularVelocityPeakZ], [], 'omitnan');
                         end
 
                         % Restrict the box to responders when a threshold is set (the population
@@ -798,9 +938,14 @@ function f = headReactionTimeByBout(standardizedTable, kvargs)
                     otherwise
                         methodLabel = kvargs.LatencyMethod;
                 end
-                title(a, sprintf('[%s]\n%s  %s\n%s, %s method (%s)\nBlack triangle = pooled responder-mean latency (same method; opacity = peak z vs baseline SD) | (Bout Range = %s)', strjoin(thisStimSet, ' / '), strain, genotype, [upper(kvargs.ReactionMetric(1)), lower(kvargs.ReactionMetric(2:end))], methodLabel, peakSourceLabel, percentRangeStr), 'Interpreter', 'none');
+                if strcmpi(kvargs.ReactionMetric, 'mixed')
+                    metricLabel = 'Mixed (min latency per replicate)';
+                else
+                    metricLabel = [upper(kvargs.ReactionMetric(1)), lower(kvargs.ReactionMetric(2:end))];
+                end
+                title(a, sprintf('[%s]\n%s  %s\n%s, %s method (%s)\nBlack triangle = pooled responder-mean latency (same method; opacity = peak z vs baseline SD) | (Bout Range = %s)', strjoin(thisStimSet, ' / '), strain, genotype, metricLabel, methodLabel, peakSourceLabel, percentRangeStr), 'Interpreter', 'none');
                 xlabel(a, 'Stimulus');
-                ylabel(a, sprintf('Reaction Latency (%s) (s)\nSearch Window = [%.2f, %.2f] s, Baseline = [%.2f, %.2f] s', kvargs.ReactionMetric, kvargs.PostOnsetWindow(1), kvargs.PostOnsetWindow(2), kvargs.BaselineWindow(1), kvargs.BaselineWindow(2)));
+                ylabel(a, sprintf('Reaction Latency (%s) (s)\nSearch Window = [%.2f, %.2f] s, Baseline = [%.2f, %.2f] s', metricLabel, kvargs.PostOnsetWindow(1), kvargs.PostOnsetWindow(2), kvargs.BaselineWindow(1), kvargs.BaselineWindow(2)));
 
                 if ~isempty(xTickPos)
                     xticks(a, xTickPos);
@@ -1136,6 +1281,54 @@ function speed = calcInstantaneousSpeedFromXY(xSeries, ySeries, timeVector)
     dx = diff(xSeries, 1, 1);
     dy = diff(ySeries, 1, 1);
     speed(2:end, :) = sqrt(dx.^2 + dy.^2) ./ dt;
+end
+
+function angularVelocity = calcAngularVelocityFromBearing(noseX, noseY, earMidX, earMidY, timeVector, baselineMask, smoothWindowSec)
+    % Angular velocity from the head bearing (ear midpoint -> nose), mirroring
+    % cohort.metrics.headAngularVelocity: image convention (Y down), 0 deg = up,
+    % +90 = right, -90 = left; wrapped derivative in deg/s (CW positive).
+    % The bearing is baseline-corrected by subtracting the CIRCULAR mean of the
+    % baseline-window frames, optionally smoothed, then differentiated with
+    % wrapTo180 on the diffs so a 359 -> 1 deg transition yields +2 deg/s.
+
+    dx = noseX - earMidX;
+    dy = noseY - earMidY;
+    frameValid = isfinite(dx) & isfinite(dy) & ~(dx == 0 & dy == 0);
+
+    bearing = nan(size(dx));
+    bearing(frameValid) = wrapTo180(atan2d(dx(frameValid), -dy(frameValid)));
+
+    % Baseline-correct with the circular mean of the baseline window
+    if any(baselineMask)
+        baselineRadians = deg2rad(bearing(baselineMask, :));
+        baselineMean = rad2deg(atan2(mean(sin(baselineRadians), 1, 'omitnan'), mean(cos(baselineRadians), 1, 'omitnan')));
+        baselineMean = wrapTo180(baselineMean);
+        bearing = wrapTo180(bearing - baselineMean); % 1 x R broadcast
+    end
+
+    % Optional smoothing of the (wrapped) bearing series
+    if ~isnan(smoothWindowSec) && smoothWindowSec > 0
+        bearing = smoothBySeconds(bearing, timeVector, smoothWindowSec);
+    end
+
+    dt = diff(timeVector);
+    dt(dt <= 0) = NaN;
+    angularVelocity = NaN(size(bearing));
+    angularVelocity(2:end, :) = wrapTo180(diff(bearing)) ./ dt;
+end
+
+function foundVar = findBodypartVar(xVars, nameCandidates)
+    % Fuzzy-match an X bodypart variable by normalized name (separators and
+    % case-insensitive), mirroring graphics.private.getHeadPositionMatrix.
+    foundVar = "";
+    for v = 1:numel(xVars)
+        bodypartName = extractAfter(xVars(v), "X ");
+        normalized = lower(regexprep(char(bodypartName), '[-_ ]', ''));
+        if any(strcmpi(normalized, nameCandidates))
+            foundVar = xVars(v);
+            return;
+        end
+    end
 end
 
 function smoothed = smoothBySeconds(values, timeAxis, windowSec)

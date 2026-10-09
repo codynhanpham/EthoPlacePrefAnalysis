@@ -88,7 +88,7 @@ function metricFcns = resolveMetricFunctions(metricsToInclude)
             metricName = ['cohort.metrics.' metricName];
         end
 
-        if exist(metricName, 'file') ~= 2
+        if isempty(which(metricName))
             error('cohort:summary:MetricNotFound', ...
                 'MetricsToInclude{%d} could not be resolved: %s', i, metricName);
         end
@@ -104,6 +104,10 @@ function metricFcns = defaultMetricFunctions()
         @cohort.metrics.preferenceIndex
         @cohort.metrics.speed
         @cohort.metrics.acceleration
+        @cohort.metrics.headSpeed
+        @cohort.metrics.headAcceleration
+        @cohort.metrics.headAngularVelocity
+        @cohort.metrics.headBearingAngle
         @cohort.metrics.inactivity
         @cohort.metrics.midlineCrossingFreq
         @cohort.metrics.rateofstay
