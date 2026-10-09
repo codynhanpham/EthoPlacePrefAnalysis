@@ -109,7 +109,7 @@ function [status, message] = makeSingleSubjectHdf5(standardizedTable, subjectMet
     H5F.close(createFid);
 
     % Root attributes
-    h5writeatt(tempPath, '/', 'format_version', int32(1));
+    h5writeatt(tempPath, '/', 'format_version', int32(2));
     h5writeatt(tempPath, '/', 'created', char(datetime('now', 'Format', 'yyyy-MM-dd HH:mm:ss')));
 
     % /obs: subject metadata as scalar datasets (anndata-style observation metadata)
@@ -376,10 +376,12 @@ function writeScalarDataset(filePath, datasetPath, value)
 end
 
 function writeIntDataset(filePath, datasetPath, values)
-    % Write an int32 column vector dataset with gzip compression
+    % MATLAB's high-level HDF5 API reverses axes on disk. Write a row vector here
+    % so external readers see an N-by-1 column vector.
     n = numel(values);
-    h5create(filePath, datasetPath, [n 1], 'DataType', 'int32', 'ChunkSize', [min(n, 4096) 1], 'Deflate', 6);
-    h5write(filePath, datasetPath, values(:));
+    h5create(filePath, datasetPath, [1 n], 'DataType', 'int32', ...
+        'ChunkSize', [1 min(n, 4096)], 'Deflate', 6);
+    h5write(filePath, datasetPath, values(:).');
 end
 
 function writeStringDataset(filePath, datasetPath, value)
@@ -390,21 +392,20 @@ function writeStringDataset(filePath, datasetPath, value)
 end
 
 function writeStringArrayDataset(filePath, datasetPath, values)
-    % Write a string array as an Nx1 variable-length UTF-8 string dataset.
-    % h5write requires a string array for string datasets.
-    h5create(filePath, datasetPath, [numel(values) 1], 'DataType', 'string');
-    h5write(filePath, datasetPath, string(values(:)));
+    % MATLAB's high-level HDF5 API reverses axes on disk. Write a row vector here
+    % so external readers see an N-by-1 string vector.
+    values = string(values(:).');
+    h5create(filePath, datasetPath, [1 numel(values)], 'DataType', 'string');
+    h5write(filePath, datasetPath, values);
 end
 
 function writeMatrixDataset(filePath, datasetPath, matrix)
-    % Write a 2D double matrix dataset with gzip compression.
-    % MATLAB h5write uses row-major HDF5 dimension order: dataset dims are
-    % [rows cols] and h5write expects the data array transposed relative to
-    % HDF5 dimension order, so a MATLAB NxM matrix is stored as an MxN HDF5
-    % dataset. Readers should transpose or use the stored orientation attribute.
+    % MATLAB's high-level HDF5 API reverses axes on disk. Transpose before writing
+    % so external readers see rows as frames and columns as variables.
+    matrix = matrix.';
     dims = size(matrix);
-    chunk = [min(dims(1), 4096) dims(2)];
+    chunk = [dims(1) min(dims(2), 4096)];
     h5create(filePath, datasetPath, dims, 'DataType', 'double', 'ChunkSize', chunk, 'Deflate', 6);
     h5write(filePath, datasetPath, matrix);
-    h5writeatt(filePath, datasetPath, 'matlab_orientation', 'rows=frames, cols=variables');
+    h5writeatt(filePath, datasetPath, 'hdf5_axis_order', 'rows=frames, columns=variables');
 end

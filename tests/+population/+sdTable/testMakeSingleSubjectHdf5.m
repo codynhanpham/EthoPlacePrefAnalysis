@@ -76,7 +76,7 @@ function testWritesCenterpointAndBodyparts(testCase)
     testCase.verifyTrue(isfile(outputPath));
 
     % Root attributes
-    testCase.verifyEqual(h5readatt(outputPath, '/', 'format_version'), int32(1));
+    testCase.verifyEqual(h5readatt(outputPath, '/', 'format_version'), int32(2));
     testCase.verifyEqual(string(h5readatt(outputPath, '/', 'stimfileNames')), "stimfile1.flac");
 
     % /obs metadata (string datasets read back as string)
@@ -103,12 +103,12 @@ function testCenterpointValuesMatchSubject(testCase)
     sdTable.makeSingleSubjectHdf5(standardizedTables, makeSubjectMetadata(2), outputPath);
 
     groupPath = '/stimfile1.flac';
-    data = h5read(outputPath, [groupPath '/centerpoint']); % NxC, same shape as written
+    data = h5read(outputPath, [groupPath '/centerpoint']).'; % MATLAB reads raw HDF5 CxN dimensions
     columns = string(h5read(outputPath, [groupPath '/centerpoint_columns']));
 
     testCase.verifyEqual(size(data, 2), 4); % 4 data variables
     testCase.verifyEqual(numel(columns), 4);
-    testCase.verifyEqual(columns, ["X center"; "Y center"; "Arena Grid Score"; "Distance from Midline"]);
+    testCase.verifyEqual(columns(:), ["X center"; "Y center"; "Arena Grid Score"; "Distance from Midline"]);
 
     % Subject 2 column values: X=2, Y=12, Grid=1002, Dist=102 (constant across frames)
     testCase.verifyEqual(data(:, 1), repmat(2, 12, 1));
@@ -125,11 +125,11 @@ function testBodypartsValuesMatchSubject(testCase)
     sdTable.makeSingleSubjectHdf5(standardizedTables, makeSubjectMetadata(3), outputPath);
 
     groupPath = '/stimfile1.flac';
-    data = h5read(outputPath, [groupPath '/bodyparts']); % NxC, same shape as written
+    data = h5read(outputPath, [groupPath '/bodyparts']).'; % MATLAB reads raw HDF5 CxN dimensions
     columns = string(h5read(outputPath, [groupPath '/bodyparts_columns']));
 
     testCase.verifyEqual(size(data, 2), 2);
-    testCase.verifyEqual(columns, ["X nose"; "Y nose"]);
+    testCase.verifyEqual(columns(:), ["X nose"; "Y nose"]);
     testCase.verifyEqual(data(:, 1), repmat(2003, 12, 1));
     testCase.verifyEqual(data(:, 2), repmat(3003, 12, 1));
 end
@@ -168,7 +168,7 @@ function testTimeRangeSubsetting(testCase)
     data = h5read(outputPath, [groupPath '/centerpoint']);
 
     testCase.verifyTrue(all(time >= -0.1 & time <= 0.1));
-    testCase.verifyEqual(size(data, 1), numel(time));
+    testCase.verifyEqual(size(data, 2), numel(time));
 end
 
 function testDataTableSelection(testCase)
@@ -205,7 +205,7 @@ function testArenaBackgroundWritten(testCase)
         ArenaBackgound=background);
 
     written = h5read(outputPath, '/uns/arenaBackground');
-    testCase.verifyEqual(written, background);
+    testCase.verifyEqual(written.', background);
 end
 
 function testMultiTableSubjectMergedAcrossStimfiles(testCase)
@@ -213,7 +213,7 @@ function testMultiTableSubjectMergedAcrossStimfiles(testCase)
     outputPath = [tempname, '.hdf5'];
     cleanup = onCleanup(@() localDeleteIfExists(outputPath));
 
-    [status, message] = sdTable.makeSingleSubjectHdf5( ...
+    [status, ~] = sdTable.makeSingleSubjectHdf5( ...
         standardizedTables, makeSubjectMetadata(2), outputPath);
     testCase.verifyTrue(status);
     testCase.verifyEqual(string(h5readatt(outputPath, '/', 'stimfileNames')), "stimfile1.flac;stimfile2.flac");
@@ -231,7 +231,7 @@ function testSkipsTablesWithoutSubject(testCase)
     outputPath = [tempname, '.hdf5'];
     cleanup = onCleanup(@() localDeleteIfExists(outputPath));
 
-    [status, message] = sdTable.makeSingleSubjectHdf5( ...
+    [status, ~] = sdTable.makeSingleSubjectHdf5( ...
         standardizedTables, makeSubjectMetadata(2), outputPath);
     testCase.verifyTrue(status);
     testCase.verifyEqual(string(h5readatt(outputPath, '/', 'stimfileNames')), "stimfile1.flac");
@@ -306,7 +306,7 @@ function testJoinedStimfileNameCellArray(testCase)
     outputPath = [tempname, '.hdf5'];
     cleanup = onCleanup(@() localDeleteIfExists(outputPath)); %#ok<NASGU>
 
-    [status, message] = sdTable.makeSingleSubjectHdf5( ...
+    [status, ~] = sdTable.makeSingleSubjectHdf5( ...
         standardizedTables, makeSubjectMetadata(1), outputPath);
     testCase.verifyTrue(status);
 
@@ -319,8 +319,8 @@ function testJoinedStimfileNameCellArray(testCase)
 
     % Data readable under the joined group name
     data = h5read(outputPath, [expectedGroup '/centerpoint']);
-    testCase.verifyEqual(size(data, 1), 8);
-    testCase.verifyEqual(data(:, 1), repmat(1, 8, 1)); % subject 1 X center
+    testCase.verifyEqual(size(data, 2), 8);
+    testCase.verifyEqual(data(1, :), repmat(1, 1, 8)); % MATLAB view of subject 1 X center
 end
 
 function testJoinedStimfileNameFilterMatchesJoinedForm(testCase)

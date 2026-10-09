@@ -37,6 +37,8 @@ The layout is inspired by [anndata](https://anndata.readthedocs.io/) (AnnData): 
     └── bodyparts_columns          M×1 string, column names for bodyparts
 ```
 
+These shapes describe the raw HDF5 datasets as seen by readers such as h5py. MATLAB's high-level HDF5 API reverses dimension order: `h5info`/`h5read` therefore report time and string vectors as `1×N`, and data matrices as `C×N`/`M×N`.
+
 `<stimfileName>` is the stimfile's base name + extension (e.g. `20260204_Normal-WhiteNoise_27x_[5-10s]ISI_v3.flac`), with any `/` characters replaced by `_`.
 
 When the source `standardizedTable` was produced by `population.temp.joinStdTableByStim`, its `stimfileName` is a cell array of the included stimfile names (e.g. `{"stim-v1.flac"; "stim-v2.flac"}`). In that case the elements are joined with `++` to form the final stimfileName string used for the group name and the `stimfileNames` root attribute — e.g. `stim-v1.flac++stim-v2.flac`. The `StimfileName` filter must likewise use the joined form (a single string with `++`, or a cell array whose elements joined with `++` equal the table's joined name).
@@ -45,7 +47,7 @@ When the source `standardizedTable` was produced by `population.temp.joinStdTabl
 
 | Attribute | Type | Meaning |
 |---|---|---|
-| `format_version` | int32 | Format version, currently `1` |
+| `format_version` | int32 | Format version, currently `2` |
 | `created` | string | Write timestamp, `yyyy-MM-dd HH:mm:ss` |
 | `stimfileNames` | string | `;`-separated list of stimfiles written as groups |
 
@@ -79,14 +81,15 @@ Same structure as `centerpoint`, for the source `bodyparts` table (paired `X <no
 ```matlab
 filePath = 'subject.hdf5';
 time = h5read(filePath, '/<stimfileName>/time');
-data = h5read(filePath, '/<stimfileName>/centerpoint');   % C×N (transposed)
-columns = h5read(filePath, '/<stimfileName>/centerpoint_columns');
+time = time(:);  % MATLAB reports raw N×1 as 1×N
+data = h5read(filePath, '/<stimfileName>/centerpoint').';  % MATLAB reports raw N×C as C×N
+columns = h5read(filePath, '/<stimfileName>/centerpoint_columns').';
 codes = h5read(filePath, '/<stimfileName>/stimulus');      % 1-based codes
 categories = h5read(filePath, '/<stimfileName>/stimulus_categories');
 stimNames = categories(codes);
 ```
 
-Note: MATLAB `h5write`/`h5read` use HDF5 dimension order, so an `N×C` MATLAB matrix is stored as a `C×N` HDF5 dataset; transpose after reading. The `matlab_orientation` attribute on each matrix dataset documents this (`rows=frames, cols=variables` in MATLAB orientation).
+The raw HDF5 shapes are `time (N, 1)`, `stimulus (N, 1)`, categories/column names `(count, 1)`, and data matrices `(N, columns)`. MATLAB `h5read` returns the reversed axis order, so reshape vectors to columns and transpose matrices/column-name arrays when reading in MATLAB. Matrix datasets have an `hdf5_axis_order` attribute (`rows=frames, columns=variables`).
 
 ## Matching semantics
 
