@@ -13,6 +13,10 @@ function [status, message] = audio2hdf5(audioFiles, hdf5File, kvargs)
     %   Audio files that contain no chapter metadata yield no stimuli and are skipped
     %   with a warning; if no stimuli are found at all, an error is raised.
     %
+    %   Each file's chapter metadata is stored storage-efficiently as its protocol
+    %   under /<stimfileName>/protocol (repeated chapter titles and descriptions are
+    %   deduplicated into int32 codes + category lists; see io.stimuli.spectrogram.exportHdf5).
+    %
     %   This function requires either the 'nidaq_audioplayer' or 'metadata_extract'
     %   binary to be available for metadata extraction (see io.stimuli.extractMetadata).
     %
@@ -96,8 +100,10 @@ function [status, message] = audio2hdf5(audioFiles, hdf5File, kvargs)
             audioFiles{1}, sampleRates(1), mismatchedFiles{1}, sampleRates(find(sampleRates ~= sampleRates(1), 1)));
     end
 
-    % Convert each file's unique stimuli into spectrogram databases.
+    % Convert each file's unique stimuli into spectrogram databases, collecting each
+    % file's chapter metadata as its protocol for the HDF5 export.
     databases = {};
+    protocols = struct('stimfileName', {}, 'chapters', {});
     for f = 1:numel(audioFiles)
         stimuli = io.stimuli.metadata2stimsamples(metadataList{f});
         if isempty(stimuli)
@@ -106,6 +112,8 @@ function [status, message] = audio2hdf5(audioFiles, hdf5File, kvargs)
             continue;
         end
         fprintf('(%d/%d) %s: %d unique stimuli\n', f, numel(audioFiles), audioFiles{f}, numel(stimuli));
+        protocols(end+1).stimfileName = stimuli(1).stimfileName; %#ok<AGROW>
+        protocols(end).chapters = metadataList{f}.chapters; %#ok<AGROW>
         for s = 1:numel(stimuli)
             databases{end+1, 1} = io.stimuli.spectrogram.precompute(stimuli(s).samples, stimuli(s).sample_rate, ...
                 'StimfileName', stimuli(s).stimfileName, 'Title', stimuli(s).title, ...
@@ -119,5 +127,6 @@ function [status, message] = audio2hdf5(audioFiles, hdf5File, kvargs)
             "None of the provided audio files contain stimulus chapters. Nothing to export.");
     end
 
-    [status, message] = io.stimuli.spectrogram.exportHdf5(databases, hdf5File, 'Overwrite', kvargs.Overwrite);
+    [status, message] = io.stimuli.spectrogram.exportHdf5(databases, hdf5File, ...
+        'Overwrite', kvargs.Overwrite, 'Protocols', protocols);
 end

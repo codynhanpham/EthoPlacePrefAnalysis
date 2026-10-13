@@ -105,6 +105,55 @@ function testStructArrayInput(testCase)
     testCase.verifyTrue(any(stimNames == "/stimA.flac") && any(stimNames == "/stimB.wav"));
 end
 
+%% Protocols
+
+function testProtocolExport(testCase)
+    [databases, outputFilePath, cleanup] = makeExportFixture(3); %#ok<ASGLU>
+    chapterData = struct( ...
+        'title', {'Alpha', 'isi', 'Beta', 'Alpha'}, ...
+        'startsample', {1, 8001, 16001, 24001}, ...
+        'timestamp', {0, 5, 10.5, 15}, ...
+        'description', {[], [], [], []});
+    protocols = struct('stimfileName', {'stimA.flac'}, 'chapters', {chapterData});
+
+    [status, ~] = io.stimuli.spectrogram.exportHdf5(databases, outputFilePath, 'Protocols', protocols);
+    testCase.verifyTrue(status);
+
+    protocolPath = '/stimA.flac/protocol';
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_title'])), [1, 2, 3, 1]);
+    testCase.verifyEqual(string(h5read(outputFilePath, [protocolPath, '/title_categories'])), ["Alpha", "isi", "Beta"]);
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_start_sample'])), [1, 8001, 16001, 24001]);
+    testCase.verifyEqual(h5read(outputFilePath, [protocolPath, '/chapter_timestamp']), [0, 5, 10.5, 15], 'AbsTol', 1e-6);
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_description'])), [1, 1, 1, 1]);
+    testCase.verifyEqual(string(h5read(outputFilePath, [protocolPath, '/description_categories'])), "[]");
+
+    stimBInfo = h5info(outputFilePath, '/stimB.wav');
+    testCase.verifyTrue(~any(string({stimBInfo.Groups.Name}) == "/stimB.wav/protocol"));
+end
+
+function testProtocolOrphanWarning(testCase)
+    [databases, outputFilePath, cleanup] = makeExportFixture(1); %#ok<ASGLU>
+    protocols = struct('stimfileName', {'missing.wav'}, 'chapters', {struct('title', {'X'}, 'startsample', {1})});
+    testCase.verifyWarning(...
+        @() io.stimuli.spectrogram.exportHdf5(databases, outputFilePath, 'Protocols', protocols), ...
+        'io:stimuli:spectrogram:exportHdf5:ProtocolWithoutStimuli');
+    info = h5info(outputFilePath);
+    testCase.verifyTrue(~any(string({info.Groups.Name}) == "/missing.wav"));
+end
+
+function testReservedTitleErrors(testCase)
+    fs = 8000;
+    db = io.stimuli.spectrogram.precompute(0.1 * randn(fs, 1), fs, 'StimfileName', 'stimA.flac', 'Title', 'protocol');
+    testCase.verifyError(@() io.stimuli.spectrogram.exportHdf5(db, localTempPath()), ...
+        'io:stimuli:spectrogram:exportHdf5:ReservedTitle');
+end
+
+function testInvalidProtocolsErrors(testCase)
+    [databases, ~, ~] = makeExportFixture(1);
+    testCase.verifyError(@() io.stimuli.spectrogram.exportHdf5(databases, localTempPath(), 'Protocols', 5), ...
+        'io:stimuli:spectrogram:exportHdf5:InvalidProtocols');
+end
+
 %% Validation and errors
 
 function testConfigMismatchErrors(testCase)

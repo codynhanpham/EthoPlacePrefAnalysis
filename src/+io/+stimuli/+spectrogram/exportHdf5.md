@@ -37,6 +37,13 @@ readers see rows = time frames.
 │   ├── precision                      string, "uint8" | "single" | "double"
 │   └── reference                      string, "peak"
 └── <stimfileName>/                    one group per source stimulus file
+    ├── protocol/                      (optional) the stimfile's chapter metadata
+    │   ├── chapter_start_sample       N×1 double, start sample per chapter (see below)
+    │   ├── chapter_timestamp          N×1 double, chapter timestamp in seconds (NaN if absent)
+    │   ├── chapter_title              N×1 int32, zero/one-based codes into title_categories
+    │   ├── title_categories           T×1 string, unique chapter titles
+    │   ├── chapter_description        N×1 int32, codes into description_categories
+    │   └── description_categories     D×1 string, unique chapter descriptions (JSON-serialized)
     └── <title>/                       one group per unique stimulus title
         ├── time                       F×1 double, frame-center times (s, segment start = 0)
         ├── frequency                  B×1 double, bin centers (Hz), 0..Nyquist inclusive
@@ -83,6 +90,25 @@ Per-channel noise-floor estimate (the `DisplayFloorPercentile` percentile of tha
 stimulus's dB values). Viewers should use `[display_floor(c), 0]` as default color
 limits so quiet areas render white (`io.stimuli.spectrogram.plot` does this, with a
 live slider).
+
+### `protocol`
+
+Optional per-stimfile chapter metadata (filled by `audio2hdf5` from the extraction
+metadata; only present when provided via the `'Protocols'` kvarg). The full chapter
+list is stored compactly: numeric per-chapter vectors plus anndata-style categoricals,
+so repeated chapter titles and descriptions cost nothing beyond one category entry:
+
+- `chapter_start_sample`: the chapter's `startsample`, or `round(timestamp * fs) + 1`
+  when only a timestamp is present (same resolution as `metadata2stimsamples`), or
+  `NaN` when neither exists.
+- `chapter_title` / `title_categories`: the chapter titles as int32 codes (one-based
+  when read with MATLAB `h5read`) into the unique-title list.
+- `chapter_description` / `description_categories`: each chapter's `description` value
+  JSON-serialized into a category list (e.g. empty descriptions all collapse to one
+  `"[]"` category).
+
+`protocol` is a reserved group name: a stimulus titled `protocol` is rejected. Unknown
+chapter fields are warned about and not stored.
 
 ## Storage details
 

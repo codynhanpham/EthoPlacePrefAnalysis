@@ -23,7 +23,7 @@ function [wavFiles, binaryFile, cleanup] = makeAudioFixture(fileSpecs)
         wavFiles{k} = wavFile;
 
         jsonPath = strrep(wavFile, '\', '\\');
-        chapterJson = strjoin(arrayfun(@(c) sprintf('{"title": "%s", "startsample": %d, "description": []}', c.title, c.start), spec.chapters, 'UniformOutput', false), ', ');
+        chapterJson = strjoin(arrayfun(@(c) sprintf('{"title": "%s", "startsample": %d, "timestamp": %.6f, "description": []}', c.title, c.start, c.timestamp), spec.chapters, 'UniformOutput', false), ', ');
         batLines{end+1} = sprintf('if /I "%%~2"=="%s" echo {"sample_rate": %d, "path": "%s", "chapters": [%s]}', ...
             wavFile, spec.fs, jsonPath, chapterJson);
     end
@@ -60,8 +60,8 @@ function testEndToEndExport(testCase)
         'fs', {fs, fs}, ...
         'fileTag', {'fake1', 'fake2'}, ...
         'chapters', { ...
-            struct('title', {'Alpha', 'isi', 'Beta'}, 'start', {1, 8001, 16001}), ...
-            struct('title', {'Gamma'}, 'start', {1})});
+            struct('title', {'Alpha', 'isi', 'Beta'}, 'start', {1, 8001, 16001}, 'timestamp', {0, 5, 10.5}), ...
+            struct('title', {'Gamma'}, 'start', {1}, 'timestamp', {0})});
     [wavFiles, binaryFile, cleanup] = makeAudioFixture(fileSpecs); %#ok<ASGLU>
 
     outputFilePath = localTempFilePath();
@@ -90,6 +90,13 @@ function testEndToEndExport(testCase)
     [wavData2, ~] = audioread(wavFiles{2});
     expectedGamma = io.stimuli.spectrogram.precompute(wavData2, fs, 'StimfileName', 'fake2.wav', 'Title', 'Gamma');
     testCase.verifyEqual(permute(h5read(outputFilePath, '/fake2.wav/Gamma/spectrogram'), [2, 3, 1]), expectedGamma.spectrogram);
+
+    protocolPath = '/fake1.wav/protocol';
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_start_sample'])), [1, 8001, 16001]);
+    testCase.verifyEqual(h5read(outputFilePath, [protocolPath, '/chapter_timestamp']), [0, 5, 10.5], 'AbsTol', 1e-6);
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_title'])), [1, 2, 3]);
+    testCase.verifyEqual(string(h5read(outputFilePath, [protocolPath, '/title_categories'])), ["Alpha", "isi", "Beta"]);
+    testCase.verifyEqual(double(h5read(outputFilePath, [protocolPath, '/chapter_description'])), [1, 1, 1]);
 end
 
 %% Validation and errors
@@ -99,8 +106,8 @@ function testSampleRateMismatchErrors(testCase)
         'fs', {8000, 16000}, ...
         'fileTag', {'low', 'high'}, ...
         'chapters', { ...
-            struct('title', {'Alpha'}, 'start', {1}), ...
-            struct('title', {'Gamma'}, 'start', {1})});
+            struct('title', {'Alpha'}, 'start', {1}, 'timestamp', {0}), ...
+            struct('title', {'Gamma'}, 'start', {1}, 'timestamp', {0})});
     [wavFiles, binaryFile, cleanup] = makeAudioFixture(fileSpecs); %#ok<ASGLU>
     try
         io.stimuli.spectrogram.audio2hdf5(wavFiles, localTempFilePath(), 'BinaryPath', binaryFile);
@@ -124,7 +131,7 @@ function testDeduplication(testCase)
     fileSpecs = struct( ...
         'fs', {8000}, ...
         'fileTag', {'fake1'}, ...
-        'chapters', {struct('title', {'Alpha'}, 'start', {1})});
+        'chapters', {struct('title', {'Alpha'}, 'start', {1}, 'timestamp', {0})});
     [wavFiles, binaryFile, cleanup] = makeAudioFixture(fileSpecs); %#ok<ASGLU>
     outputFilePath = localTempFilePath();
     cleanupFile = onCleanup(@() localDeleteIfExists(outputFilePath)); %#ok<NASGU>

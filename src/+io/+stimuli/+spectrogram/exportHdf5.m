@@ -34,6 +34,14 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
     %   Name-Value Pair Arguments:
     %       'Overwrite': (logical) Whether to replace an existing output file.
     %           Default false: an existing file is an error.
+    %       'Protocols': (struct array) Optional per-stimfile chapter metadata to store,
+    %           one element per stimfile with fields 'stimfileName' (matching a database's
+    %           stimfileName) and 'chapters' (the struct array from the 'chapters' field
+    %           of io.stimuli.extractMetadata). Default empty stores nothing. Stored
+    %           storage-efficiently under /<stimfileName>/protocol: chapter start
+    %           samples and timestamps as numeric vectors, and repeated titles and
+    %           descriptions deduplicated into anndata-style int32 codes + category
+    %           lists. The stimulus title 'protocol' is reserved and cannot be used.
     %
     %   OUTPUTS:
     %       status: logical indicating success.
@@ -45,6 +53,7 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
         spectrogramDb {mustBeNonempty}
         outputFilePath {validator.mustBeValidFilepath}
         kvargs.Overwrite (1,1) logical = false
+        kvargs.Protocols = []
     end
 
     if isstruct(spectrogramDb)
@@ -88,6 +97,7 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
     end
 
     % Group placement: /<stimfileName>/<title>, both sanitized for HDF5.
+    protocolMap = localNormalizeProtocols(kvargs.Protocols);
     groupPaths = strings(numel(databases), 1);
     stimfileNames = strings(numel(databases), 1);
     for k = 1:numel(databases)
@@ -99,6 +109,10 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
         title = char(string(databases{k}.title));
         if strtrim(title) == ""
             title = 'untitled';
+        end
+        if strcmpi(title, 'protocol')
+            error("io:stimuli:spectrogram:exportHdf5:ReservedTitle", ...
+                "Stimulus title 'protocol' is reserved for per-stimfile protocol storage. Rename the stimulus title.");
         end
         stimfileNames(k) = string(stimfileName);
         groupPaths(k) = string(['/' localSanitizeGroupName(stimfileName) '/' localSanitizeGroupName(title)]);
@@ -186,6 +200,21 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
         end
     end
 
+    % Optional per-stimfile protocols (chapter metadata), written under
+    % /<stimfileName>/protocol for stimfiles that have exported stimuli. Repeated
+    % chapter titles and descriptions are deduplicated into int32 codes + category
+    % lists instead of per-chapter JSON.
+    exportedStimfiles = arrayfun(@(k) char(string(databases{k}.stimfileName)), 1:numel(databases), 'UniformOutput', false);
+    for key = protocolMap.keys
+        if ~ismember(key{1}, exportedStimfiles)
+            warning("io:stimuli:spectrogram:exportHdf5:ProtocolWithoutStimuli", ...
+                "Protocol for stimfile '%s' has no exported stimuli; skipping.", key{1});
+            continue;
+        end
+        localWriteProtocolGroup(tempPath, ['/' localSanitizeGroupName(key{1}) '/protocol'], ...
+            protocolMap(key{1}), reference.fs);
+    end
+
     % Move the temp file into its final location.
     movefile(tempPath, finalPath, 'f');
     clear cleanupTemp;
@@ -264,4 +293,111 @@ function writeMatrixDataset(filePath, datasetPath, matrix)
     h5create(filePath, datasetPath, dims, 'DataType', 'double', 'ChunkSize', chunk, 'Deflate', 6);
     h5write(filePath, datasetPath, matrix);
     h5writeatt(filePath, datasetPath, 'hdf5_axis_order', 'rows=time frames, columns=channels');
+end
+
+
+function protocolMap = localNormalizeProtocols(protocols)
+    % Normalizes the 'Protocols' kvarg (struct array with 'stimfileName' and 'chapters'
+    % fields) into a containers.Map keyed by stimfileName. Default empty means no
+    % protocol storage.
+    protocolMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    if isempty(protocols)
+        return;
+    end
+    if ~isstruct(protocols) || (numel(protocols) > 0 && ~all(isfield(protocols, 'stimfileName'))) ...
+            || (numel(protocols) > 0 && ~all(isfield(protocols, 'chapters')))
+        error("io:stimuli:spectrogram:exportHdf5:InvalidProtocols", ...
+            "'Protocols' must be a struct array with 'stimfileName' and 'chapters' fields.");
+    end
+    for k = 1:numel(protocols)
+        key = char(string(protocols(k).stimfileName));
+        if isKey(protocolMap, key)
+            error("io:stimuli:spectrogram:exportHdf5:DuplicateProtocol", ...
+                "Duplicate protocol provided for stimfile '%s'.", key);
+        end
+        protocolMap(key) = protocols(k).chapters;
+    end
+end
+
+
+function localWriteProtocolGroup(filePath, groupPath, chapters, fs)
+    % Writes a stimfile's chapter metadata as a compact protocol group: numeric
+    % per-chapter vectors plus anndata-style categorical encoding for the repeated
+    % titles and descriptions.
+    knownFields = {'title', 'startsample', 'timestamp', 'description'};
+    nChapters = numel(chapters);
+    if nChapters == 0
+        return;
+    end
+    titles = strings(nChapters, 1);
+    descriptions = strings(nChapters, 1);
+    startSamples = nan(nChapters, 1);
+    timestamps = nan(nChapters, 1);
+    extraFields = strings(0, 1);
+    for k = 1:nChapters
+        chapter = chapters(k);
+        extraFields = union(extraFields, string(setdiff(fieldnames(chapter), knownFields)));
+        titles(k) = string(localProtocolField(chapter, 'title', ''));
+        if isfield(chapter, 'startsample') && ~isempty(chapter.startsample)
+            startSamples(k) = double(chapter.startsample);
+        elseif isfield(chapter, 'timestamp') && ~isempty(chapter.timestamp)
+            startSamples(k) = round(double(chapter.timestamp) * fs) + 1;
+        end
+        if isfield(chapter, 'timestamp') && ~isempty(chapter.timestamp)
+            timestamps(k) = double(chapter.timestamp);
+        end
+        if isfield(chapter, 'description')
+            descriptions(k) = string(jsonencode(chapter.description));
+        end
+    end
+    if ~isempty(extraFields)
+        warning("io:stimuli:spectrogram:exportHdf5:ProtocolFieldsIgnored", ...
+            "Protocol chapters contain unsupported field(s) %s; they are not stored in the HDF5 protocol.", ...
+            strjoin(extraFields, ', '));
+    end
+
+    [titleCategories, titleCodes] = localEncodeCategorical(titles);
+    [descriptionCategories, descriptionCodes] = localEncodeCategorical(descriptions);
+
+    writeCodeVectorDataset(filePath, [groupPath, '/chapter_title'], titleCodes);
+    writeStringArrayDataset(filePath, [groupPath, '/title_categories'], titleCategories);
+    writeCodeVectorDataset(filePath, [groupPath, '/chapter_description'], descriptionCodes);
+    writeStringArrayDataset(filePath, [groupPath, '/description_categories'], descriptionCategories);
+    writeVectorDataset(filePath, [groupPath, '/chapter_start_sample'], startSamples);
+    writeVectorDataset(filePath, [groupPath, '/chapter_timestamp'], timestamps);
+end
+
+
+function value = localProtocolField(chapter, fieldName, default)
+    if isfield(chapter, fieldName) && ~isempty(chapter.(fieldName))
+        value = char(string(chapter.(fieldName)));
+    else
+        value = default;
+    end
+end
+
+
+function [categories, codes] = localEncodeCategorical(values)
+    [uniqueValues, ~, codes] = unique(values, 'stable');
+    categories = string(uniqueValues);
+    codes = int32(codes);
+end
+
+
+function writeCodeVectorDataset(filePath, datasetPath, values)
+    % MATLAB's high-level HDF5 API reverses axes on disk. Write a row vector here
+    % so external readers see an N-by-1 column vector.
+    values = int32(values(:).');
+    n = numel(values);
+    h5create(filePath, datasetPath, [1 n], 'DataType', 'int32', 'ChunkSize', [1 min(n, 4096)], 'Deflate', 6);
+    h5write(filePath, datasetPath, values);
+end
+
+
+function writeStringArrayDataset(filePath, datasetPath, values)
+    % MATLAB's high-level HDF5 API reverses axes on disk. Write a row vector here
+    % so external readers see an N-by-1 string vector.
+    values = string(values(:).');
+    h5create(filePath, datasetPath, [1 numel(values)], 'DataType', 'string');
+    h5write(filePath, datasetPath, values);
 end
