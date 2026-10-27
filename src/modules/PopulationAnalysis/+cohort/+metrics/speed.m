@@ -3,16 +3,25 @@ function t = speed(standardizedTables, kvargs)
 	% Reports min/max/mean/std of point-to-point instantaneous speed (cm/s)
 	% during all stimulus periods and during each stimuliSorted(i) period.
 
-	arguments
-		standardizedTables struct {sdTable.mustBeStandardizedTable}
-		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
-		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
-	end
+    arguments
+        standardizedTables struct {sdTable.mustBeStandardizedTable}
+        kvargs.StimulusIncludesTrailingISI (1,1) logical = true
+        kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+        kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
+    end
 
-	if isempty(standardizedTables)
-		t = table();
-		return;
-	end
+    if isempty(standardizedTables)
+        t = table();
+        return;
+    end
+
+    isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+    if isPreStim
+        periodPhrase = 'Pre-Stimulus';
+    else
+        periodPhrase = 'Stimulus';
+    end
+
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
 	overrideSpec = sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -62,15 +71,15 @@ function t = speed(standardizedTables, kvargs)
 		localStimNames = string(stdTable.stimuliSorted);
 		localStimNames = localStimNames(:);
 
-		allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
-		stimPointMasks = cell(numel(localStimNames), 1);
-		for s = 1:numel(localStimNames)
-			stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
-		end
-		stimBoutMasks = cell(numel(localStimNames), 1);
-		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
-		end
+        allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
+        stimPointMasks = cell(numel(localStimNames), 1);
+        for s = 1:numel(localStimNames)
+            stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
+        end
+        stimBoutMasks = cell(numel(localStimNames), 1);
+        for s = 1:numel(localStimNames)
+            stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
+        end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
 		if hasOverride
@@ -204,12 +213,13 @@ function t = speed(standardizedTables, kvargs)
 	t.('Age') = ageCol;
 	t.('Stimulus Protocol') = stimProtocolCol;
 
-	t.('Speed Min During Stimulus (cm/s)') = speedAllMin;
-	t.('Speed Max During Stimulus (cm/s)') = speedAllMax;
-	t.('Speed Mean During Stimulus (cm/s)') = speedAllMean;
-	t.('Speed Std During Stimulus (cm/s)') = speedAllStd;
+    t.(sprintf('Speed Min During %s (cm/s)', periodPhrase)) = speedAllMin;
+    t.(sprintf('Speed Max During %s (cm/s)', periodPhrase)) = speedAllMax;
+    t.(sprintf('Speed Mean During %s (cm/s)', periodPhrase)) = speedAllMean;
+    t.(sprintf('Speed Std During %s (cm/s)', periodPhrase)) = speedAllStd;
 
-	for g = 1:nOutputStims
+    if ~isPreStim
+    for g = 1:nOutputStims
 		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
 		t.(sprintf('Speed Min During %s (cm/s)', stimLabel)) = speedByStimMin(:, g);
 		t.(sprintf('Speed Max During %s (cm/s)', stimLabel)) = speedByStimMax(:, g);
@@ -226,8 +236,9 @@ function t = speed(standardizedTables, kvargs)
 		t.(sprintf('Speed Min Last-First During %s Bouts (cm/s)', stimLabel)) = speedByStimDeltaLastFirstMin(:, g);
 		t.(sprintf('Speed Max Last-First During %s Bouts (cm/s)', stimLabel)) = speedByStimDeltaLastFirstMax(:, g);
 		t.(sprintf('Speed Mean Last-First During %s Bouts (cm/s)', stimLabel)) = speedByStimDeltaLastFirstMean(:, g);
-		t.(sprintf('Speed Std Last-First During %s Bouts (cm/s)', stimLabel)) = speedByStimDeltaLastFirstStd(:, g);
-	end
+        t.(sprintf('Speed Std Last-First During %s Bouts (cm/s)', stimLabel)) = speedByStimDeltaLastFirstStd(:, g);
+    end
+    end
 end
 
 

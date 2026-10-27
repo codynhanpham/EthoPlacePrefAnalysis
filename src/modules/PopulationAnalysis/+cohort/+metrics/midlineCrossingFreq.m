@@ -4,16 +4,25 @@ function t = midlineCrossingFreq(standardizedTables, kvargs)
 	% plus the number of crossings into the side of stimuliSorted(i) while that
 	% stimulus is active.
 
-	arguments
-		standardizedTables struct {sdTable.mustBeStandardizedTable}
-		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
-		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
-	end
+    arguments
+        standardizedTables struct {sdTable.mustBeStandardizedTable}
+        kvargs.StimulusIncludesTrailingISI (1,1) logical = true
+        kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+        kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
+    end
 
-	if isempty(standardizedTables)
-		t = table();
-		return;
-	end
+    if isempty(standardizedTables)
+        t = table();
+        return;
+    end
+
+    isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+    if isPreStim
+        aggPeriodPhrase = 'Pre-Stimulus';
+    else
+        aggPeriodPhrase = 'Active Stimulus';
+    end
+
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
 	overrideSpec = sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -32,13 +41,13 @@ function t = midlineCrossingFreq(standardizedTables, kvargs)
 	rowIdx = 0;
 	for i = 1:length(standardizedTables)
 		stdTable = standardizedTables(i);
-		midlineInfo = cohort.metrics.utils.getMidlineSideInfo(stdTable, StimulusIncludesTrailingISI=kvargs.StimulusIncludesTrailingISI);
+        midlineInfo = cohort.metrics.utils.getMidlineSideInfo(stdTable, StimulusIncludesTrailingISI=kvargs.StimulusIncludesTrailingISI, Period=kvargs.Period);
 
-		localStimNames = midlineInfo.localStimNames;
-		stimBoutMasks = cell(numel(localStimNames), 1);
-		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(midlineInfo.stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
-		end
+        localStimNames = midlineInfo.localStimNames;
+        stimBoutMasks = cell(numel(localStimNames), 1);
+        for s = 1:numel(localStimNames)
+            stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(midlineInfo.stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
+        end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
 		if hasOverride
@@ -132,14 +141,19 @@ function t = midlineCrossingFreq(standardizedTables, kvargs)
 	t.('Age') = ageCol;
 	t.('Stimulus Protocol') = stimProtocolCol;
 
-	t.('Midline Crossings During Active Stimulus (count)') = stimAllCrossCol;
-	for g = 1:nOutputStims
-		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
-		t.(sprintf('Midline Crossings Into %s During Active Stimulus (count)', stimLabel)) = stimCrossCols(:, g);
-		t.(sprintf('Midline Crossings Into %s During First Bout (count)', stimLabel)) = stimCrossFirstBoutCols(:, g);
-		t.(sprintf('Midline Crossings Into %s During Last Bout (count)', stimLabel)) = stimCrossLastBoutCols(:, g);
-		t.(sprintf('Midline Crossings Into %s Last-First Across Bouts (count)', stimLabel)) = stimCrossDeltaLastFirstCols(:, g);
-	end
+    t.(sprintf('Midline Crossings During %s (count)', aggPeriodPhrase)) = stimAllCrossCol;
+    for g = 1:nOutputStims
+        stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
+        t.(sprintf('Midline Crossings Into %s During %s (count)', stimLabel, aggPeriodPhrase)) = stimCrossCols(:, g);
+    end
+    if ~isPreStim
+    for g = 1:nOutputStims
+        stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
+        t.(sprintf('Midline Crossings Into %s During First Bout (count)', stimLabel)) = stimCrossFirstBoutCols(:, g);
+        t.(sprintf('Midline Crossings Into %s During Last Bout (count)', stimLabel)) = stimCrossLastBoutCols(:, g);
+        t.(sprintf('Midline Crossings Into %s Last-First Across Bouts (count)', stimLabel)) = stimCrossDeltaLastFirstCols(:, g);
+    end
+    end
 end
 
 

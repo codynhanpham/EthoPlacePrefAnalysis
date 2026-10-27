@@ -29,6 +29,14 @@ switch metricKind
 end
 isCircular = strcmp(metricKind, 'bearingAngle');
 
+if isfield(kvargs, 'Period') && strcmpi(string(kvargs.Period), 'pre-stimulus')
+    isPreStim = true;
+    periodPhrase = 'Pre-Stimulus';
+else
+    isPreStim = false;
+    periodPhrase = 'Stimulus';
+end
+
 hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
 overrideSpec = sdTable.mustBeStimuliSortedDisplayOverride( ...
     standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -66,16 +74,16 @@ for tableIndex = 1:numel(standardizedTables)
     localStimNames = string(stdTable.stimuliSorted);
     localStimNames = localStimNames(:);
     allStimPointMask = cohort.metrics.utils.periodMaskAllStim( ...
-        stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
+        stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
     stimPointMasks = cell(numel(localStimNames), 1);
     stimBoutMasks = cell(numel(localStimNames), 1);
     for stimIndex = 1:numel(localStimNames)
         stimPointMasks{stimIndex} = cohort.metrics.utils.periodMaskForStim( ...
             stimSequence, localStimNames(stimIndex), localStimNames, ...
-            kvargs.StimulusIncludesTrailingISI);
+            kvargs.StimulusIncludesTrailingISI, kvargs.Period);
         stimBoutMasks{stimIndex} = cohort.metrics.utils.stimBoutMasksForStim( ...
             stimSequence, localStimNames(stimIndex), localStimNames, ...
-            kvargs.StimulusIncludesTrailingISI);
+            kvargs.StimulusIncludesTrailingISI, kvargs.Period);
     end
 
     localIdxByOutputStim = zeros(nOutputStims, 1);
@@ -220,11 +228,12 @@ t.('Stimulus Protocol') = stimProtocolCol;
 for componentIndex = 1:nComponents
     componentName = componentNames{componentIndex};
     unit = units{componentIndex};
-    t.(sprintf('%s Min During Stimulus (%s)', componentName, unit)) = allStats(:, 1, componentIndex);
-    t.(sprintf('%s Max During Stimulus (%s)', componentName, unit)) = allStats(:, 2, componentIndex);
-    t.(sprintf('%s Mean During Stimulus (%s)', componentName, unit)) = allStats(:, 3, componentIndex);
-    t.(sprintf('%s Std During Stimulus (%s)', componentName, unit)) = allStats(:, 4, componentIndex);
+    t.(sprintf('%s Min During %s (%s)', componentName, periodPhrase, unit)) = allStats(:, 1, componentIndex);
+    t.(sprintf('%s Max During %s (%s)', componentName, periodPhrase, unit)) = allStats(:, 2, componentIndex);
+    t.(sprintf('%s Mean During %s (%s)', componentName, periodPhrase, unit)) = allStats(:, 3, componentIndex);
+    t.(sprintf('%s Std During %s (%s)', componentName, periodPhrase, unit)) = allStats(:, 4, componentIndex);
 
+    if ~isPreStim
     for outputIndex = 1:nOutputStims
         stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(outputIndex), outputIndex);
         t.(sprintf('%s Min During %s (%s)', componentName, stimLabel, unit)) = ...
@@ -259,6 +268,7 @@ for componentIndex = 1:nComponents
             deltaStats(:, outputIndex, 3, componentIndex);
         t.(sprintf('%s Std Last-First During %s Bouts (%s)', componentName, stimLabel, unit)) = ...
             deltaStats(:, outputIndex, 4, componentIndex);
+    end
     end
 end
 

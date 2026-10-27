@@ -13,6 +13,7 @@ function t = inactivity(standardizedTables, kvargs)
 		standardizedTables struct {sdTable.mustBeStandardizedTable}
 		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
 		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+		kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 		kvargs.InactiveThresholds = []
 		kvargs.ActiveThresholds = []
 	end
@@ -20,6 +21,13 @@ function t = inactivity(standardizedTables, kvargs)
 	if isempty(standardizedTables)
 		t = table();
 		return;
+	end
+
+	isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+	if isPreStim
+		periodPhrase = 'Pre-Stimulus';
+	else
+		periodPhrase = 'Stimulus';
 	end
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -69,14 +77,14 @@ function t = inactivity(standardizedTables, kvargs)
 		localStimNames = string(stdTable.stimuliSorted);
 		localStimNames = localStimNames(:);
 
-		allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
+		allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		stimPointMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 		stimBoutMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
@@ -216,12 +224,13 @@ function t = inactivity(standardizedTables, kvargs)
 
 	statNames = {'Min', 'Max', 'Mean', 'Std'};
 	for s = 1:4
-		t.(sprintf('Inactive Total %s During Stimulus (s)', statNames{s})) = inactiveTotalAll(:, s);
-		t.(sprintf('Inactive Continuous %s During Stimulus (s)', statNames{s})) = inactiveContAll(:, s);
-		t.(sprintf('Active Total %s During Stimulus (s)', statNames{s})) = activeTotalAll(:, s);
-		t.(sprintf('Active Continuous %s During Stimulus (s)', statNames{s})) = activeContAll(:, s);
+		t.(sprintf('Inactive Total %s During %s (s)', statNames{s}, periodPhrase)) = inactiveTotalAll(:, s);
+		t.(sprintf('Inactive Continuous %s During %s (s)', statNames{s}, periodPhrase)) = inactiveContAll(:, s);
+		t.(sprintf('Active Total %s During %s (s)', statNames{s}, periodPhrase)) = activeTotalAll(:, s);
+		t.(sprintf('Active Continuous %s During %s (s)', statNames{s}, periodPhrase)) = activeContAll(:, s);
 	end
 
+	if ~isPreStim
 	for g = 1:nOutputStims
 		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
 		for s = 1:4
@@ -242,6 +251,7 @@ function t = inactivity(standardizedTables, kvargs)
 			t.(sprintf('Active Total %s Last-First During %s Bouts (s)', statNames{s}, stimLabel)) = activeTotalByStimDeltaLastFirst(:, g, s);
 			t.(sprintf('Active Continuous %s Last-First During %s Bouts (s)', statNames{s}, stimLabel)) = activeContByStimDeltaLastFirst(:, g, s);
 		end
+	end
 	end
 end
 

@@ -25,6 +25,7 @@ arguments
     standardizedTables struct {sdTable.mustBeStandardizedTable}
     kvargs.StimulusIncludesTrailingISI (1,1) logical = false
     kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+    kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 end
 
 [t, histogram] = cohort.metrics.utils.headMetricSummary(standardizedTables, kvargs, 'bearingAngle');

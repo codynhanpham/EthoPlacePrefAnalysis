@@ -1,7 +1,14 @@
-function boutMasks = stimBoutMasksForStim(stimSequence, stimName, allStimNames, includeTrailingISI)
+function boutMasks = stimBoutMasksForStim(stimSequence, stimName, allStimNames, includeTrailingISI, period)
 %STIMBOUTMASKSFORSTIM Return one point-mask per detected stimulus bout.
 % Each bout starts at a source-stimulus onset. If includeTrailingISI is true,
 % the bout extends until the sample before the next stimulus onset.
+% When period is 'pre-stimulus', returns an empty cell array (no bouts exist
+% outside the stimulus period).
+
+    if nargin >= 5 && strcmpi(string(period), 'pre-stimulus')
+        boutMasks = {};
+        return;
+    end
 
     n = numel(stimSequence);
     boutMasks = {};

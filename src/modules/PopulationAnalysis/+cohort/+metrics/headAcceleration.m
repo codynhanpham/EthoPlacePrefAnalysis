@@ -10,6 +10,7 @@ arguments
     standardizedTables struct {sdTable.mustBeStandardizedTable}
     kvargs.StimulusIncludesTrailingISI (1,1) logical = true
     kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+    kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 end
 
 t = cohort.metrics.utils.headMetricSummary(standardizedTables, kvargs, 'acceleration');

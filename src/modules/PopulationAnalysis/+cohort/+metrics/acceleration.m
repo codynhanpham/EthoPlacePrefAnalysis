@@ -8,11 +8,19 @@ function t = acceleration(standardizedTables, kvargs)
 		standardizedTables struct {sdTable.mustBeStandardizedTable}
 		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
 		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+		kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 	end
 
 	if isempty(standardizedTables)
 		t = table();
 		return;
+	end
+
+	isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+	if isPreStim
+		periodPhrase = 'Pre-Stimulus';
+	else
+		periodPhrase = 'Stimulus';
 	end
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -83,14 +91,14 @@ function t = acceleration(standardizedTables, kvargs)
 		localStimNames = string(stdTable.stimuliSorted);
 		localStimNames = localStimNames(:);
 
-		allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
+		allStimPointMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		stimPointMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimPointMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 		stimBoutMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
@@ -274,15 +282,16 @@ function t = acceleration(standardizedTables, kvargs)
 	t.('Age') = ageCol;
 	t.('Stimulus Protocol') = stimProtocolCol;
 
-	t.('Acceleration Min During Stimulus (cm/s^2)') = accAllMin;
-	t.('Acceleration Max During Stimulus (cm/s^2)') = accAllMax;
-	t.('Acceleration Mean During Stimulus (cm/s^2)') = accAllMean;
-	t.('Acceleration Std During Stimulus (cm/s^2)') = accAllStd;
-	t.('Deceleration Min During Stimulus (cm/s^2)') = decelAllMin;
-	t.('Deceleration Max During Stimulus (cm/s^2)') = decelAllMax;
-	t.('Deceleration Mean During Stimulus (cm/s^2)') = decelAllMean;
-	t.('Deceleration Std During Stimulus (cm/s^2)') = decelAllStd;
+	t.(sprintf('Acceleration Min During %s (cm/s^2)', periodPhrase)) = accAllMin;
+	t.(sprintf('Acceleration Max During %s (cm/s^2)', periodPhrase)) = accAllMax;
+	t.(sprintf('Acceleration Mean During %s (cm/s^2)', periodPhrase)) = accAllMean;
+	t.(sprintf('Acceleration Std During %s (cm/s^2)', periodPhrase)) = accAllStd;
+	t.(sprintf('Deceleration Min During %s (cm/s^2)', periodPhrase)) = decelAllMin;
+	t.(sprintf('Deceleration Max During %s (cm/s^2)', periodPhrase)) = decelAllMax;
+	t.(sprintf('Deceleration Mean During %s (cm/s^2)', periodPhrase)) = decelAllMean;
+	t.(sprintf('Deceleration Std During %s (cm/s^2)', periodPhrase)) = decelAllStd;
 
+	if ~isPreStim
 	for g = 1:nOutputStims
 		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
 		t.(sprintf('Acceleration Min During %s (cm/s^2)', stimLabel)) = accByStimMin(:, g);
@@ -317,6 +326,7 @@ function t = acceleration(standardizedTables, kvargs)
 		t.(sprintf('Deceleration Max Last-First During %s Bouts (cm/s^2)', stimLabel)) = decelByStimDeltaLastFirstMax(:, g);
 		t.(sprintf('Deceleration Mean Last-First During %s Bouts (cm/s^2)', stimLabel)) = decelByStimDeltaLastFirstMean(:, g);
 		t.(sprintf('Deceleration Std Last-First During %s Bouts (cm/s^2)', stimLabel)) = decelByStimDeltaLastFirstStd(:, g);
+	end
 	end
 end
 

@@ -1,6 +1,16 @@
-function mask = periodMaskAllStim(stimSequence, localStimNames, includeTrailingISI)
+function mask = periodMaskAllStim(stimSequence, localStimNames, includeTrailingISI, period)
+    if nargin < 4
+        period = 'stimulus';
+    end
+
     if isempty(stimSequence)
         mask = false(0, 1);
+        return;
+    end
+
+    if strcmpi(string(period), 'pre-stimulus')
+        mask = strcmpi(strtrim(string(stimSequence)), "NONE | Pre-Stimulus");
+        mask = mask(:);
         return;
     end
 

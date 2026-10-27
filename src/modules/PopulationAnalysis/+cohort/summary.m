@@ -8,10 +8,14 @@ function t = summary(standardizedTables, kvargs)
 
         kvargs.StimulusIncludesTrailingISI (1,1) logical = true % whether the immediately following ISI after a stimulus should be included in the stimulus period
         kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+        kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus' % which standardized block the metrics are computed over
 
         % Metric-Specific Parameters:
         kvargs.InactiveThresholds (1,1) struct = struct()
         kvargs.ActiveThresholds (1,1) struct = struct()
+        kvargs.EntropyBinSizeCm (1,1) double {mustBePositive, mustBeFinite} = 5
+        kvargs.MidlineZoneHalfWidthCm (1,1) double {mustBePositive, mustBeFinite} = 10
+        kvargs.SlopeBinSec (1,1) double {mustBePositive, mustBeFinite} = 60
     end
 
 	if isempty(standardizedTables)
@@ -111,6 +115,10 @@ function metricFcns = defaultMetricFunctions()
         @cohort.metrics.inactivity
         @cohort.metrics.midlineCrossingFreq
         @cohort.metrics.rateofstay
+        @cohort.metrics.tortuosity
+        @cohort.metrics.arenaEntropy
+        @cohort.metrics.zoneOccupancy
+        @cohort.metrics.speedSlope
     };
 end
 
@@ -119,6 +127,7 @@ function metricKvargs = commonMetricArguments(kvargs)
     metricKvargs = struct();
     metricKvargs.StimulusIncludesTrailingISI = kvargs.StimulusIncludesTrailingISI;
     metricKvargs.StimuliSortedColumnNameDisplayOverride = kvargs.StimuliSortedColumnNameDisplayOverride;
+    metricKvargs.Period = kvargs.Period;
 end
 
 
@@ -150,4 +159,7 @@ end
 function specMap = metricSpecificArgumentSpecs()
     specMap = struct();
     specMap.inactivity = {'InactiveThresholds', 'ActiveThresholds'};
+    specMap.arenaentropy = {'EntropyBinSizeCm'};
+    specMap.zoneoccupancy = {'MidlineZoneHalfWidthCm'};
+    specMap.speedslope = {'SlopeBinSec'};
 end

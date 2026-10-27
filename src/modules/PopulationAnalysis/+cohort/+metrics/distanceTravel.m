@@ -12,6 +12,7 @@ function t = distanceTravel(standardizedTables, kvargs)
         standardizedTables struct {sdTable.mustBeStandardizedTable}
         kvargs.StimulusIncludesTrailingISI (1,1) logical = true % whether the immediately following ISI after a stimulus should be included in the stimulus period
         kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+        kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
     end
 
     %% Common Headers:
@@ -47,6 +48,8 @@ function t = distanceTravel(standardizedTables, kvargs)
         return;
     end
 
+    isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+
     hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
     overrideSpec = sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride);
     outputStimNames = cohort.metrics.utils.getOutputStimNames(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -65,14 +68,20 @@ function t = distanceTravel(standardizedTables, kvargs)
     distByStimDeltaLastFirstNormCols = nan(nRowsEstimate, nOutputStims);
 
     preStimTables = sdTable.subsetByStimBlock(standardizedTables, 'pre-stimulus');
-    postStimTables = sdTable.subsetByStimBlock(standardizedTables, 'post-stimulus');
+    postStimTables = [];
+    if ~isPreStim
+        postStimTables = sdTable.subsetByStimBlock(standardizedTables, 'post-stimulus');
+    end
 
     rowIdx = 0;
     for i = 1:length(standardizedTables)
         stdTable = standardizedTables(i);
         cp = stdTable.centerpointData;
         preCp = preStimTables(i).centerpointData;
-        postCp = postStimTables(i).centerpointData;
+        postCp = table();
+        if ~isPreStim
+            postCp = postStimTables(i).centerpointData;
+        end
 
         trialTime = cp{:, 'Trial time'};
         stimSequence = string(cp{:, 'Stimulus name'});
@@ -104,14 +113,14 @@ function t = distanceTravel(standardizedTables, kvargs)
         localStimNames = localStimNames(:);
 
         % Precompute masks and local->reference stimulus index mapping once per table.
-        allStimMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
+        allStimMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
         stimMasks = cell(numel(localStimNames), 1);
         for s = 1:numel(localStimNames)
-            stimMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+            stimMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
         end
         stimBoutMasks = cell(numel(localStimNames), 1);
         for s = 1:numel(localStimNames)
-            stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+            stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
         end
 
         localIdxByOutputStim = zeros(nOutputStims, 1);
@@ -158,15 +167,18 @@ function t = distanceTravel(standardizedTables, kvargs)
                 distDuringPreStimCol(rowIdx) = distPre;
             end
 
-            if ~isempty(postTrialTime)
-                [distPost, ~] = distanceWithinMask(postXData(:, col), postYData(:, col), postTrialTime, true(size(postTrialTime)));
-                distDuringPostStimCol(rowIdx) = distPost;
+            if ~isPreStim
+                if ~isempty(postTrialTime)
+                    [distPost, ~] = distanceWithinMask(postXData(:, col), postYData(:, col), postTrialTime, true(size(postTrialTime)));
+                    distDuringPostStimCol(rowIdx) = distPost;
+                end
+
+                [distTotal, ~] = distanceWithinMask(thisX, thisY, trialTime, ...
+                    allStimMask);
+                distDuringStimCol(rowIdx) = distTotal;
             end
 
-            [distTotal, ~] = distanceWithinMask(thisX, thisY, trialTime, ...
-                allStimMask);
-            distDuringStimCol(rowIdx) = distTotal;
-
+            if ~isPreStim
             % Compute normalized distance for each locally available stimulus
             localStimNorm = nan(numel(localStimNames), 1);
             localStimNormFirst = nan(numel(localStimNames), 1);
@@ -192,13 +204,16 @@ function t = distanceTravel(standardizedTables, kvargs)
                     end
                 end
             end
+            end
 
             % Map local stimulus metrics onto global output stimulus columns.
-            for g = 1:nOutputStims
-                distByStimNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNorm, localIdxByOutputStim(g));
-                distByStimFirstBoutNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNormFirst, localIdxByOutputStim(g));
-                distByStimLastBoutNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNormLast, localIdxByOutputStim(g));
-                distByStimDeltaLastFirstNormCols(rowIdx, g) = distByStimLastBoutNormCols(rowIdx, g) - distByStimFirstBoutNormCols(rowIdx, g);
+            if ~isPreStim
+                for g = 1:nOutputStims
+                    distByStimNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNorm, localIdxByOutputStim(g));
+                    distByStimFirstBoutNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNormFirst, localIdxByOutputStim(g));
+                    distByStimLastBoutNormCols(rowIdx, g) = cohort.metrics.utils.metricByIndex(localStimNormLast, localIdxByOutputStim(g));
+                    distByStimDeltaLastFirstNormCols(rowIdx, g) = distByStimLastBoutNormCols(rowIdx, g) - distByStimFirstBoutNormCols(rowIdx, g);
+                end
             end
         end
     end
@@ -240,6 +255,7 @@ function t = distanceTravel(standardizedTables, kvargs)
     t.('Stimulus Protocol') = stimProtocolCol;
 
     t.('Distance During Pre-Stimulus (cm)') = distDuringPreStimCol;
+    if ~isPreStim
     t.('Distance During Stimulus (cm)') = distDuringStimCol;
     t.('Distance During Post-Stimulus (cm)') = distDuringPostStimCol;
     for g = 1:nOutputStims
@@ -248,6 +264,7 @@ function t = distanceTravel(standardizedTables, kvargs)
         t.(sprintf('Average Distance During First %s Bout (cm/s)', stimLabel)) = distByStimFirstBoutNormCols(:, g);
         t.(sprintf('Average Distance During Last %s Bout (cm/s)', stimLabel)) = distByStimLastBoutNormCols(:, g);
         t.(sprintf('Average Distance Last-First During %s Bouts (cm/s)', stimLabel)) = distByStimDeltaLastFirstNormCols(:, g);
+    end
     end
 end
 

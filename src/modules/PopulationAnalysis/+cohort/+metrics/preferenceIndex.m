@@ -8,11 +8,19 @@ function t = preferenceIndex(standardizedTables, kvargs)
 		standardizedTables struct {sdTable.mustBeStandardizedTable}
 		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
 		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+		kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 	end
 
 	if isempty(standardizedTables)
 		t = table();
 		return;
+	end
+
+	isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+	if isPreStim
+		aggPeriodPhrase = 'Pre-Stimulus';
+	else
+		aggPeriodPhrase = 'Active Stimulus';
 	end
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -41,14 +49,14 @@ function t = preferenceIndex(standardizedTables, kvargs)
 		localStimNames = string(stdTable.stimuliSorted);
 		localStimNames = localStimNames(:);
 
-		allStimMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI);
+		allStimMask = cohort.metrics.utils.periodMaskAllStim(stimSequence, localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		stimMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimMasks{s} = cohort.metrics.utils.periodMaskForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 		stimBoutMasks = cell(numel(localStimNames), 1);
 		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
+			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 		end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
@@ -147,13 +155,15 @@ function t = preferenceIndex(standardizedTables, kvargs)
 		stim1DisplayLabel = 'StimuliSorted(1)';
 	end
 
-	t.(sprintf('%s Preference Index During Active Stimulus', stim1DisplayLabel)) = prefAllCol;
+	t.(sprintf('%s Preference Index During %s', stim1DisplayLabel, aggPeriodPhrase)) = prefAllCol;
+	if ~isPreStim
 	for g = 1:nOutputStims
 		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
 		t.(sprintf('%s Preference Index During %s', stim1DisplayLabel, stimLabel)) = prefByStimCols(:, g);
 		t.(sprintf('%s Preference Index During First %s Bout', stim1DisplayLabel, stimLabel)) = prefByStimFirstBoutCols(:, g);
 		t.(sprintf('%s Preference Index During Last %s Bout', stim1DisplayLabel, stimLabel)) = prefByStimLastBoutCols(:, g);
 		t.(sprintf('%s Preference Index Last-First During %s Bouts', stim1DisplayLabel, stimLabel)) = prefByStimDeltaLastFirstCols(:, g);
+	end
 	end
 end
 

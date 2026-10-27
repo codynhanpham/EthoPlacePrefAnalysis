@@ -2,6 +2,7 @@ function info = getMidlineSideInfo(standardizedTable, kvargs)
 	arguments
 		standardizedTable (1,1) struct
 		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
+		kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 	end
 
 	cp = standardizedTable.centerpointData;
@@ -14,12 +15,12 @@ function info = getMidlineSideInfo(standardizedTable, kvargs)
 	info.localStimNames = info.localStimNames(:);
 
 	info.allStimMask = cohort.metrics.utils.periodMaskAllStim( ...
-		info.stimSequence, info.localStimNames, kvargs.StimulusIncludesTrailingISI);
+		info.stimSequence, info.localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 
 	info.stimMasks = cell(numel(info.localStimNames), 1);
 	for s = 1:numel(info.localStimNames)
 		info.stimMasks{s} = cohort.metrics.utils.periodMaskForStim( ...
-			info.stimSequence, info.localStimNames(s), info.localStimNames, kvargs.StimulusIncludesTrailingISI);
+			info.stimSequence, info.localStimNames(s), info.localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
 	end
 
 	info.midlineNegativeMask = info.distanceFromMidline < 0;

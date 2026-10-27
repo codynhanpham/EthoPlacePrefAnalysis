@@ -7,11 +7,19 @@ function t = rateofstay(standardizedTables, kvargs)
 		standardizedTables struct {sdTable.mustBeStandardizedTable}
 		kvargs.StimulusIncludesTrailingISI (1,1) logical = true
 		kvargs.StimuliSortedColumnNameDisplayOverride {sdTable.mustBeStimuliSortedDisplayOverride(standardizedTables, kvargs.StimuliSortedColumnNameDisplayOverride)} = {}
+		kvargs.Period {mustBeMember(kvargs.Period, {'stimulus', 'pre-stimulus'}), mustBeTextScalar} = 'stimulus'
 	end
 
 	if isempty(standardizedTables)
 		t = table();
 		return;
+	end
+
+	isPreStim = strcmpi(kvargs.Period, 'pre-stimulus');
+	if isPreStim
+		aggPeriodPhrase = 'Pre-Stimulus';
+	else
+		aggPeriodPhrase = 'Active Stimulus';
 	end
 
 	hasOverride = ~isempty(kvargs.StimuliSortedColumnNameDisplayOverride);
@@ -30,13 +38,13 @@ function t = rateofstay(standardizedTables, kvargs)
 	rowIdx = 0;
 	for i = 1:length(standardizedTables)
 		stdTable = standardizedTables(i);
-		midlineInfo = cohort.metrics.utils.getMidlineSideInfo(stdTable, StimulusIncludesTrailingISI=kvargs.StimulusIncludesTrailingISI);
+        midlineInfo = cohort.metrics.utils.getMidlineSideInfo(stdTable, StimulusIncludesTrailingISI=kvargs.StimulusIncludesTrailingISI, Period=kvargs.Period);
 
-		localStimNames = midlineInfo.localStimNames;
-		stimBoutMasks = cell(numel(localStimNames), 1);
-		for s = 1:numel(localStimNames)
-			stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(midlineInfo.stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI);
-		end
+        localStimNames = midlineInfo.localStimNames;
+        stimBoutMasks = cell(numel(localStimNames), 1);
+        for s = 1:numel(localStimNames)
+            stimBoutMasks{s} = cohort.metrics.utils.stimBoutMasksForStim(midlineInfo.stimSequence, localStimNames(s), localStimNames, kvargs.StimulusIncludesTrailingISI, kvargs.Period);
+        end
 
 		localIdxByOutputStim = zeros(nOutputStims, 1);
 		if hasOverride
@@ -130,10 +138,15 @@ function t = rateofstay(standardizedTables, kvargs)
 
 	for g = 1:nOutputStims
 		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
-		t.(sprintf('Percent Time on %s Side During Active Stimulus (%%)', stimLabel)) = stimStayCols(:, g);
+		t.(sprintf('Percent Time on %s Side During %s (%%)', stimLabel, aggPeriodPhrase)) = stimStayCols(:, g);
+	end
+	if ~isPreStim
+	for g = 1:nOutputStims
+		stimLabel = cohort.metrics.utils.makeMetricLabel(outputStimNames(g), g);
 		t.(sprintf('Percent Time on %s Side During First Bout (%%)', stimLabel)) = stimStayFirstBoutCols(:, g);
 		t.(sprintf('Percent Time on %s Side During Last Bout (%%)', stimLabel)) = stimStayLastBoutCols(:, g);
 		t.(sprintf('Percent Time on %s Side Last-First Across Bouts (%%)', stimLabel)) = stimStayDeltaLastFirstCols(:, g);
+	end
 	end
 end
 
