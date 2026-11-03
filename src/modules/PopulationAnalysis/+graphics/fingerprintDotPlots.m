@@ -6,8 +6,9 @@ function fig = fingerprintDotPlots(fp, kvargs)
     %   One panel per metric context (up to MaxPanels, in
     %   graphics.fingerprintContextOrder): per-animal z values as jittered
     %   points (color = genotype, marker = sex) grouped by strain, with the
-    %   matching sex-specific cohort median and bootstrap 95% CI drawn next to
-    %   each sex's point cloud. Only sex-specific cohorts are shown.
+    %   matching sex-specific cohort median z and bootstrap 95% CI in the
+    %   same z units (cohortTable Z/ZCiLo/ZCiHi) drawn next to each sex's
+    %   point cloud. Only sex-specific cohorts are shown.
     %
     %   See also: cohort.fingerprint, graphics.fingerprintContextOrder
 
@@ -43,7 +44,9 @@ function fig = fingerprintDotPlots(fp, kvargs)
     genotypes = categories(genotype);
     sexes = categories(sex);
     cmap = lines(numel(genotypes));
-    sexMarkers = containers.Map({'F', 'M'}, {'o', 's'});
+    sexMarkers = containers.Map( ...
+        {'F', 'M', 'Female', 'Male', 'female', 'male'}, ...
+        {'o', 's', 'o', 's', 'o', 's'});
     strainsList = unique(strain);
 
     cohortSexSpecific = cohortTable(~cohortTable.PooledSex, :);
@@ -92,7 +95,8 @@ function fig = fingerprintDotPlots(fp, kvargs)
                     scatter(ax, jitterPos, vals(sel), 24, cmap(gi, :), marker, ...
                         'filled', 'MarkerFaceAlpha', 0.7, 'HandleVisibility', 'off');
 
-                    % Matching sex-specific cohort median + bootstrap CI.
+                    % Matching sex-specific cohort median z + bootstrap CI in
+                    % z units (ZCiLo/ZCiHi), matching the per-animal z dots.
                     rowSel = string(cohortSexSpecific.Strain) == strainsList(s) & ...
                         string(cohortSexSpecific.Genotype) == genotypes{gi} & ...
                         string(cohortSexSpecific.Sex) == string(sx) & ...
@@ -102,13 +106,16 @@ function fig = fingerprintDotPlots(fp, kvargs)
                         string(cohortSexSpecific.Metric) == metricI;
                     idx = find(rowSel, 1, 'first');
                     if ~isempty(idx)
-                        medVal = cohortSexSpecific.Median(idx);
-                        errorbar(ax, sexCenter + 0.5, medVal, ...
-                            medVal - cohortSexSpecific.CiLo(idx), ...
-                            cohortSexSpecific.CiHi(idx) - medVal, ...
-                            'k-', 'LineWidth', 1, 'HandleVisibility', 'off');
-                        plot(ax, sexCenter + 0.5, medVal, 'k_', ...
-                            'LineWidth', 2, 'HandleVisibility', 'off');
+                        zVal = cohortSexSpecific.Z(idx);
+                        zCiLo = cohortSexSpecific.ZCiLo(idx);
+                        zCiHi = cohortSexSpecific.ZCiHi(idx);
+                        if all(isfinite([zVal, zCiLo, zCiHi]))
+                            errorbar(ax, sexCenter + 0.5, zVal, ...
+                                zVal - zCiLo, zCiHi - zVal, ...
+                                'k-', 'LineWidth', 1, 'HandleVisibility', 'off');
+                            plot(ax, sexCenter + 0.5, zVal, 'k_', ...
+                                'LineWidth', 2, 'HandleVisibility', 'off');
+                        end
                     end
                 end
 

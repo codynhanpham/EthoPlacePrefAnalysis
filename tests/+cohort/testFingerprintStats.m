@@ -28,8 +28,12 @@ classdef testFingerprintStats < matlab.unittest.TestCase
 
         function minCohortNGatingExcludesSmallCohorts(testCase)
             perAnimalLong = makeLongTable();
-            % Add a 1-animal genotype cohort.
-            perAnimalLong = [perAnimalLong; makeRows("strainA", "HET", "F", {"x1"}, 30, 31, 2)];
+            % Add a 1-animal genotype cohort with both metric contexts finite
+            % (Mahalanobis requires >= 2 usable features before flagging).
+            hetSpeed = makeRows("strainA", "HET", "F", {"x1"}, 30, 0, 1);
+            hetDist = makeRows("strainA", "HET", "F", {"x1"}, 130, 0, 1);
+            hetDist.Metric = repmat("Distance During Stimulus (cm)", height(hetDist), 1);
+            perAnimalLong = [perAnimalLong; hetSpeed; hetDist];
 
             fp = cohort.fingerprint(perAnimalLong, MinCohortN=2, NBoot=100);
 
@@ -40,6 +44,14 @@ classdef testFingerprintStats < matlab.unittest.TestCase
             % zMatrix rows contain only eligible cohorts.
             rowGenos = string(fp.rowLabels.Genotype);
             testCase.verifyFalse(ismember("HET", rowGenos));
+
+            % The small cohort must also survive fingerprintStats' Mahalanobis
+            % pass as a flagged row (regression: char Reason used to crash
+            % table() construction on this path).
+            st = cohort.fingerprintStats(perAnimalLong, fp, NPerm=50, MinCohortN=2);
+            hetMahal = st.mahalTable(st.mahalTable.Genotype == "HET", :);
+            testCase.verifyEqual(height(hetMahal), 1);
+            testCase.verifyEqual(string(hetMahal.Reason(1)), "cohortBelowN");
         end
 
         function pooledSexRowsAreFlaggedAndExcluded(testCase)
@@ -84,6 +96,35 @@ classdef testFingerprintStats < matlab.unittest.TestCase
                 fp.cohortTable.Metric == "Speed Mean During Stimulus (cm/s)";
             testCase.verifyTrue(all(string(fp.cohortTable.Reason(sel)) == "refDegenerate"));
             testCase.verifyTrue(all(isnan(fp.cohortTable.Z(sel))));
+            testCase.verifyTrue(all(isnan(fp.cohortTable.ZCiLo(sel))));
+            testCase.verifyTrue(all(isnan(fp.cohortTable.ZCiHi(sel))));
+        end
+
+        function zCiLoHiAreAffineTransformOfBootstrapCi(testCase)
+            perAnimalLong = makeLongTable();
+            fp = cohort.fingerprint(perAnimalLong, MinCohortN=2, NBoot=100);
+
+            wtVals = [10; 11; 12; 13; 14; 15];
+            refMedian = median(wtVals);
+            refScale = 1.4826 * mad(wtVals, 1);
+
+            sel = fp.cohortTable.Genotype == "MUT" & fp.cohortTable.Sex == "F" & ...
+                fp.cohortTable.Metric == "Speed Mean During Stimulus (cm/s)" & ~fp.cohortTable.PooledSex;
+            row = fp.cohortTable(sel, :);
+            testCase.verifyEqual(row.Z, (row.Median - refMedian) / refScale, 'AbsTol', 1e-12);
+            testCase.verifyEqual(row.ZCiLo, (row.CiLo - refMedian) / refScale, 'AbsTol', 1e-12);
+            testCase.verifyEqual(row.ZCiHi, (row.CiHi - refMedian) / refScale, 'AbsTol', 1e-12);
+
+            % Reference cohort: z is 0 by construction; its bootstrap CI is
+            % affine-mapped too and brackets 0.
+            selRef = fp.cohortTable.Genotype == "WT" & fp.cohortTable.Sex == "F" & ...
+                fp.cohortTable.Metric == "Speed Mean During Stimulus (cm/s)" & ~fp.cohortTable.PooledSex;
+            refRow = fp.cohortTable(selRef, :);
+            testCase.verifyEqual(refRow.Z, 0, 'AbsTol', 1e-12);
+            testCase.verifyEqual(refRow.ZCiLo, (refRow.CiLo - refMedian) / refScale, 'AbsTol', 1e-12);
+            testCase.verifyEqual(refRow.ZCiHi, (refRow.CiHi - refMedian) / refScale, 'AbsTol', 1e-12);
+            testCase.verifyLessThanOrEqual(refRow.ZCiLo, 0);
+            testCase.verifyGreaterThanOrEqual(refRow.ZCiHi, 0);
         end
 
         function perAnimalZHasSubjectsAsRows(testCase)

@@ -56,7 +56,9 @@ function [pcaStruct, fig] = fingerprintPca(fp)
     genotypes = categories(genotype);
     sexes = categories(sex);
     cmap = lines(numel(genotypes));
-    sexMarkers = containers.Map({'F', 'M'}, {'o', 's'});
+    sexMarkers = containers.Map( ...
+        {'F', 'M', 'Female', 'Male', 'female', 'male'}, ...
+        {'o', 's', 'o', 's', 'o', 's'});
     defaultMarker = 'o';
 
     for gi = 1:numel(genotypes)

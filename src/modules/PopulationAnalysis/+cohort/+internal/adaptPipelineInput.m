@@ -70,7 +70,7 @@ function strainLabel = singleStrainLabel(stdPair, elementIdx)
         for k = 1:numel(mdList)
             md = mdList(k);
             if isstruct(md) && isfield(md, 'strain')
-                strains(end+1, 1) = string(md.strain); %#ok<AGROW>
+                strains(end+1, 1) = cohort.internal.textScalar(md.strain, 'strain'); %#ok<AGROW>
             else
                 strains(end+1, 1) = ""; %#ok<AGROW>
             end

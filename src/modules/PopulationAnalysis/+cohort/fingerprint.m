@@ -26,8 +26,10 @@ function out = fingerprint(perAnimalLong, kvargs)
     %   Outputs (struct):
     %       cohortTable  - long descriptive table (Strain x Genotype x Sex x Tier x
     %                       Protocol x Stimulus x Metric) with NAnimals, NValid, Median,
-    %                       MAD, Q25, Q75, bootstrap 95% CI (CiLo/CiHi), Z, statsEligible,
-    %                       Reason, PooledSex. Native units for descriptives; Z is dimensionless.
+    %                       MAD, Q25, Q75, bootstrap 95% CI (CiLo/CiHi), Z plus the
+    %                       CI in z space (ZCiLo/ZCiHi), statsEligible, Reason,
+    %                       PooledSex. Native units for descriptives; Z, ZCiLo,
+    %                       ZCiHi are dimensionless (same robust-z transform as Z).
     %       zMatrix      - eligible sex-specific cohorts (rows) x metric contexts (cols) of Z.
     %       rowLabels    - table(Strain, Genotype, Sex) aligned with zMatrix rows.
     %       colLabels    - table(Tier, Protocol, Stimulus, Metric, Context) aligned with zMatrix cols.
@@ -387,6 +389,8 @@ function cohortTable = buildCohortTable(genotype, genoNormIdx, genoNormList, sex
                 [medVal, madVal, q25Val, q75Val, ciLo, ciHi] = cohortStats(vals, nBoot);
 
                 zVal = NaN;
+                zCiLo = NaN;
+                zCiHi = NaN;
                 reason = "";
                 if pooledFlag
                     reason = "pooledSex";
@@ -399,12 +403,19 @@ function cohortTable = buildCohortTable(genotype, genoNormIdx, genoNormList, sex
                         reason = ineligibleReason(nAnimals, nRef, minN);
                     elseif genoNormList(gIdx) == refGenoN
                         % The reference cohort vs its own distribution: z of
-                        % its median is 0 by construction.
+                        % its median is 0 by construction; its bootstrap CI
+                        % is still meaningful in z space.
                         zVal = 0;
+                        if isfinite(refScale(sti, sei, ug(u)))
+                            zCiLo = (ciLo - refMedian(sti, sei, ug(u))) / refScale(sti, sei, ug(u));
+                            zCiHi = (ciHi - refMedian(sti, sei, ug(u))) / refScale(sti, sei, ug(u));
+                        end
                     elseif ~isfinite(refScale(sti, sei, ug(u)))
                         reason = "refDegenerate";
                     else
                         zVal = (medVal - refMedian(sti, sei, ug(u))) / refScale(sti, sei, ug(u));
+                        zCiLo = (ciLo - refMedian(sti, sei, ug(u))) / refScale(sti, sei, ug(u));
+                        zCiHi = (ciHi - refMedian(sti, sei, ug(u))) / refScale(sti, sei, ug(u));
                     end
                 end
 
@@ -412,11 +423,11 @@ function cohortTable = buildCohortTable(genotype, genoNormIdx, genoNormList, sex
                 rowList{end+1} = table( ...
                     strainsIn, genoIn, sexIn, tier(firstIdx), protocol(firstIdx), ...
                     stimulus(firstIdx), metric(firstIdx), nAnimals, numel(vals), ...
-                    medVal, madVal, q25Val, q75Val, ciLo, ciHi, zVal, ...
+                    medVal, madVal, q25Val, q75Val, ciLo, ciHi, zVal, zCiLo, zCiHi, ...
                     ~pooledFlag && isfinite(zVal), reason, pooledFlag, ...
                     'VariableNames', {'Strain', 'Genotype', 'Sex', 'Tier', 'Protocol', ...
                     'Stimulus', 'Metric', 'NAnimals', 'NValid', 'Median', 'MAD', 'Q25', 'Q75', ...
-                    'CiLo', 'CiHi', 'Z', 'statsEligible', 'Reason', 'PooledSex'}); %#ok<AGROW>
+                    'CiLo', 'CiHi', 'Z', 'ZCiLo', 'ZCiHi', 'statsEligible', 'Reason', 'PooledSex'}); %#ok<AGROW>
             end
         end
     end
@@ -472,9 +483,9 @@ end
 function tOut = emptyCohortTable()
     tOut = table(strings(0,1), strings(0,1), strings(0,1), strings(0,1), strings(0,1), strings(0,1), strings(0,1), ...
         zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
-        zeros(0,1), false(0,1), strings(0,1), false(0,1), ...
+        zeros(0,1), zeros(0,1), zeros(0,1), false(0,1), strings(0,1), false(0,1), ...
         'VariableNames', {'Strain', 'Genotype', 'Sex', 'Tier', 'Protocol', 'Stimulus', 'Metric', ...
-        'NAnimals', 'NValid', 'Median', 'MAD', 'Q25', 'Q75', 'CiLo', 'CiHi', 'Z', ...
+        'NAnimals', 'NValid', 'Median', 'MAD', 'Q25', 'Q75', 'CiLo', 'CiHi', 'Z', 'ZCiLo', 'ZCiHi', ...
         'statsEligible', 'Reason', 'PooledSex'});
 end
 

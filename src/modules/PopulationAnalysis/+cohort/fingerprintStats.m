@@ -50,6 +50,8 @@ function out = fingerprintStats(perAnimalLong, fp, kvargs)
     [genoId, genoNames] = integerIds(genoNormS);
     [sexId, sexNames] = integerIds(sexS);
     [ctxId, ctxNames] = integerIds(ctxS);
+    [~, ~, subjId] = unique(subjectKey);
+    subjId = double(subjId(:));
 
     cohortTable = fp.cohortTable;
     referenceMap = fp.referenceMap;
@@ -57,64 +59,99 @@ function out = fingerprintStats(perAnimalLong, fp, kvargs)
     eligible = cohortTable.statsEligible & ~cohortTable.PooledSex;
     eligibleTable = cohortTable(eligible, :);
 
+    %% Group the long table ONCE by (strain, genotype, sex, context) and keep
+    % the finite values per group in contiguous slices. Comparisons below are
+    % then dictionary lookups instead of full-table masks per comparison.
+    groupMatrix = [strainId, genoId, sexId, ctxId];
+    [~, ~, groupId] = unique(groupMatrix, 'rows', 'stable');
+
+    finiteRows = find(finiteVals);
+    [~, sliceOrder] = sort(groupId(finiteRows));
+    rowsFinite = finiteRows(sliceOrder);
+    gidSorted = groupId(rowsFinite);
+    gStart = find([true; diff(gidSorted) ~= 0]);
+    gCount = [diff(gStart); numel(gidSorted) - gStart(end) + 1];
+
+    gKeyStr = strings(numel(gStart), 1);
+    groupVals = cell(numel(gStart), 1);
+    groupNSubj = zeros(numel(gStart), 1);
+    subjSorted = subjId(rowsFinite);
+    valsSorted = values(rowsFinite);
+    for i = 1:numel(gStart)
+        idx = gStart(i):(gStart(i) + gCount(i) - 1);
+        gKeyStr(i) = groupIdKey(groupMatrix(rowsFinite(idx(1)), :));
+        groupVals{i} = valsSorted(idx);
+        groupNSubj(i) = numel(unique(subjSorted(idx)));
+    end
+    idxByGroup = dictionary(gKeyStr, double((1:numel(gStart))'));
+
+    %% Map every eligible cohortTable row to its group ids (vectorized)
     ctStrain = string(eligibleTable.Strain);
     ctGeno = string(eligibleTable.Genotype);
     ctSex = string(eligibleTable.Sex);
     ctCtx = string(eligibleTable.Tier) + "|" + string(eligibleTable.Protocol) + ...
         "|" + string(eligibleTable.Stimulus) + "|" + string(eligibleTable.Metric);
 
-    statsRows = {};
-    comparisons = unique([ctStrain, ctGeno, ctSex], 'rows', 'stable');
+    stiCol = lookupIds(ctStrain, strainNames);
+    giCol = lookupIds(lower(strtrim(ctGeno)), genoNames);
+    sxiCol = lookupIds(ctSex, sexNames);
+    ciCol = lookupIds(ctCtx, ctxNames);
 
-    for c = 1:size(comparisons, 1)
-        strainI = comparisons(c, 1);
-        genoI = comparisons(c, 2);
-        sexI = comparisons(c, 3);
+    refDict = dictionary(string(referenceMap.Strain), ...
+        lower(strtrim(string(referenceMap.ReferenceGenotype))));
+    rgNCol = refDict(ctStrain);
+    rgNCol(ismissing(rgNCol)) = "";
+    rgCol = lookupIds(rgNCol, genoNames);
 
-        refGeno = referenceGenotypeFromMap(referenceMap, strainI);
-        refGenoN = lower(strtrim(refGeno));
+    %% One pass over comparisons with O(group size) work per row
+    nComp = height(eligibleTable);
 
-        sti = find(strainNames == strainI, 1);
-        sxi = find(sexNames == sexI, 1);
-        gi = find(genoNames == genoNormOf(genoI), 1);
-        rg = find(genoNames == refGenoN, 1);
+    outStrain = ctStrain;
+    outGeno = ctGeno;
+    outSex = ctSex;
+    outTier = string(eligibleTable.Tier);
+    outProtocol = string(eligibleTable.Protocol);
+    outStimulus = string(eligibleTable.Stimulus);
+    outMetric = string(eligibleTable.Metric);
+    outNC = nan(nComp, 1);
+    outNR = nan(nComp, 1);
+    outZ = eligibleTable.Z;
+    outDelta = nan(nComp, 1);
+    outP = nan(nComp, 1);
 
-        cohortRows = find(ctStrain == strainI & ctGeno == genoI & ctSex == sexI);
+    for r = 1:nComp
+        cohortKey = groupIdKey([stiCol(r), giCol(r), sxiCol(r), ciCol(r)]);
+        refKey = groupIdKey([stiCol(r), rgCol(r), sxiCol(r), ciCol(r)]);
 
-        for r = 1:numel(cohortRows)
-            rowIdx = cohortRows(r);
-            ci = find(ctxNames == ctCtx(rowIdx), 1);
-
-            inCohort = strainId == sti & genoId == gi & sexId == sxi & ctxId == ci & finiteVals;
-            inRef = strainId == sti & genoId == rg & sexId == sxi & ctxId == ci & finiteVals;
-
-            cohortVals = values(inCohort);
-            refVals = values(inRef);
-
-            nC = numel(unique(subjectKey(inCohort)));
-            nR = numel(unique(subjectKey(inRef)));
-
-            [delta, pVal] = cliffsDeltaPerm(cohortVals, refVals, kvargs.NPerm);
-
-            statsRows{end+1} = table(strainI, genoI, sexI, ...
-                string(eligibleTable.Tier(rowIdx)), string(eligibleTable.Protocol(rowIdx)), ...
-                string(eligibleTable.Stimulus(rowIdx)), string(eligibleTable.Metric(rowIdx)), ...
-                nC, nR, eligibleTable.Z(rowIdx), delta, pVal, NaN, ...
-                'VariableNames', {'Strain', 'Genotype', 'Sex', 'Tier', 'Protocol', 'Stimulus', ...
-                'Metric', 'NCohort', 'NRef', 'Z', 'CliffDelta', 'PPerm', 'QFDR'}); %#ok<AGROW>
+        cohortVals = [];
+        refVals = [];
+        if isKey(idxByGroup, cohortKey)
+            gIdx = idxByGroup(cohortKey);
+            cohortVals = groupVals{gIdx};
+            outNC(r) = groupNSubj(gIdx);
         end
+        if isKey(idxByGroup, refKey)
+            gIdx = idxByGroup(refKey);
+            refVals = groupVals{gIdx};
+            outNR(r) = groupNSubj(gIdx);
+        end
+
+        [outDelta(r), outP(r)] = cliffsDeltaPerm(cohortVals, refVals, kvargs.NPerm);
     end
 
-    if isempty(statsRows)
+    if nComp == 0
         statsTable = table(strings(0,1), strings(0,1), strings(0,1), strings(0,1), strings(0,1), ...
             strings(0,1), strings(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
             zeros(0,1), zeros(0,1), ...
             'VariableNames', {'Strain', 'Genotype', 'Sex', 'Tier', 'Protocol', 'Stimulus', ...
             'Metric', 'NCohort', 'NRef', 'Z', 'CliffDelta', 'PPerm', 'QFDR'});
     else
-        statsTable = vertcat(statsRows{:});
+        statsTable = table(outStrain, outGeno, outSex, outTier, outProtocol, ...
+            outStimulus, outMetric, outNC, outNR, outZ, outDelta, outP, nan(nComp, 1), ...
+            'VariableNames', {'Strain', 'Genotype', 'Sex', 'Tier', 'Protocol', 'Stimulus', ...
+            'Metric', 'NCohort', 'NRef', 'Z', 'CliffDelta', 'PPerm', 'QFDR'});
         % BH-FDR across metric contexts within each (Strain, Genotype, Sex) comparison.
-        groupKey = string(statsTable.Strain) + "|" + string(statsTable.Genotype) + "|" + string(statsTable.Sex);
+        groupKey = outStrain + "|" + outGeno + "|" + outSex;
         for gkey = unique(groupKey(:))'
             sel = groupKey == gkey;
             p = statsTable.PPerm(sel);
@@ -132,6 +169,19 @@ end
 
 function g = genoNormOf(x)
     g = lower(strtrim(string(x)));
+end
+
+
+function keyStr = groupIdKey(idRow)
+    % Compact numeric key "sti|gi|sxi|ci" for group dictionaries.
+    keyStr = join(string(double(idRow(:)))', "|");
+end
+
+
+function ids = lookupIds(valuesCol, names)
+    % Map a column of group labels to integer ids into names (0 = absent).
+    [~, ids] = ismember(string(valuesCol), string(names));
+    ids = double(ids(:));
 end
 
 
@@ -282,7 +332,7 @@ function mahalTable = mahalanobisByCohort(fp, referenceMap, minCohortN)
         nUsable = sum(completeTarget);
         if nUsable < minCohortN
             rows{end+1} = table(strainI, genoIRaw, sexI, refGenoRaw, nUsable, size(Xtarget, 2), ...
-                NaN, NaN, NaN, 'cohortBelowN', ...
+                NaN, NaN, NaN, "cohortBelowN", ...
                 'VariableNames', {'Strain', 'Genotype', 'Sex', 'ReferenceGenotype', 'NAnimals', ...
                 'NFeatures', 'MeanD2', 'MedianD2', 'MeanLambda', 'Reason'}); %#ok<AGROW>
             continue;
@@ -292,7 +342,7 @@ function mahalTable = mahalanobisByCohort(fp, referenceMap, minCohortN)
         d2Valid = d2(isfinite(d2));
 
         if isempty(d2Valid)
-            reason = 'noFit';
+            reason = "noFit";
             meanD2 = NaN; medianD2 = NaN; meanLambda = NaN;
         else
             reason = "";

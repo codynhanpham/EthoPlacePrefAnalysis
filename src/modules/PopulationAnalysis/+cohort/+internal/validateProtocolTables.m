@@ -85,7 +85,26 @@ function protocolLabels = validateProtocolTables(standardizedTables)
         error('cohort:internal:validateProtocolTables:SubjectSetMismatch', '%s', msg);
     end
 
-    protocolLabels = {standardizedTables(1).stimfileName, standardizedTables(2).stimfileName};
+    protocolLabels = { ...
+        displayLabelOf(standardizedTables(1).stimfileName, 1), ...
+        displayLabelOf(standardizedTables(2).stimfileName, 2)};
+end
+
+
+function label = displayLabelOf(stimfileName, tableIdx)
+    % Display label for a table's stimfileName. Tables joined with
+    % population.temp.joinStdTableByStim carry the original protocol
+    % variations in a cell; those are shown as 'a.flac + b.flac'.
+    variants = cohort.internal.stimfileNameVariants(stimfileName, 'stimfileName');
+    if isempty(variants)
+        error('cohort:internal:validateProtocolTables:EmptyStimfileName', ...
+            'standardizedTables(%d).stimfileName is empty; protocol labels must be non-empty text.', tableIdx);
+    end
+    if isscalar(variants)
+        label = variants(1);
+    else
+        label = strjoin(variants, ' + ');
+    end
 end
 
 
@@ -100,11 +119,11 @@ function keysOut = subjectKeys(stdTable)
     for k = 1:n
         md = mdList(k);
         parts = [ ...
-            string(getMetaField(md, 'strain'))
-            string(getMetaField(md, 'genotype'))
-            string(getMetaField(md, 'sex'))
-            string(getMetaField(md, 'cagecode'))
-            string(getMetaField(md, 'id'))];
+            cohort.internal.textScalar(getMetaField(md, 'strain'), 'strain')
+            cohort.internal.textScalar(getMetaField(md, 'genotype'), 'genotype')
+            cohort.internal.textScalar(getMetaField(md, 'sex'), 'sex')
+            cohort.internal.textScalar(getMetaField(md, 'cagecode'), 'cagecode')
+            cohort.internal.textScalar(getMetaField(md, 'id'), 'id')];
         keysOut(k) = strjoin(parts, "|");
     end
 end

@@ -26,6 +26,10 @@ function out = fingerprintPipeline(inputTables, kvargs)
     %       - 'MetricsToInclude': subset of cohort metrics. Default all.
     %       - 'IncludePooledSex': flagged pooled-sex cohort rows. Default true.
     %       - 'MakeFigures': generate the four fingerprint figures. Default true.
+    %       - 'RadarClampZ': display clamp (robust-z units) for the radar
+    %         figure. Default 3.
+    %       - 'RadarRadialUnit': radar effect unit, "z" (default) or
+    %         "cliffsDelta" (rank-based dominance from statsTable).
     %       - 'SavePath': full path to an output .mat; per-table CSVs are
     %         written alongside with the same basename. Empty = no save.
     %         The parent directory must exist. Errors if any output file
@@ -61,6 +65,9 @@ function out = fingerprintPipeline(inputTables, kvargs)
         kvargs.MetricsToInclude cell = {}
         kvargs.IncludePooledSex (1,1) logical = true
         kvargs.MakeFigures (1,1) logical = true
+        kvargs.RadarClampZ (1,1) double {mustBePositive, mustBeFinite} = 3
+        kvargs.RadarRadialUnit {mustBeTextScalar} = "z"
+        kvargs.AlignProtocols (1,1) logical = true % reorder per-strain protocol pairs by stimfileName similarity so protocol slots mean the same thing across strains
         kvargs.SavePath {mustBeTextScalar} = ''
         kvargs.Overwrite (1,1) logical = false % allow replacing existing SavePath output files
     end
@@ -69,6 +76,25 @@ function out = fingerprintPipeline(inputTables, kvargs)
     strainGroups = strings(numel(groups), 1);
     for g = 1:numel(groups)
         strainGroups(g) = groups{g}.strainLabel;
+    end
+
+    % Align each strain group's 2 protocol slots by stimfileName similarity
+    % (joined tables carry their variations in a cell; canonical keys make
+    % variations of the same protocol match each other). Reordering fixes
+    % strain pairs that were passed in flipped order; low similarity warns.
+    protocolAlignment = [];
+    if numel(groups) > 1
+        if kvargs.AlignProtocols
+            [groups, protocolAlignment] = cohort.internal.alignProtocolSlots(groups);
+            for g = 1:height(protocolAlignment)
+                if protocolAlignment.Swapped(g)
+                    fprintf(['Protocol alignment: group %s tables swapped to match the first strain group ' ...
+                        '(slot 1 similarity %.2f, slot 2 similarity %.2f).\n'], ...
+                        protocolAlignment.StrainGroup(g), ...
+                        protocolAlignment.Slot1Similarity(g), protocolAlignment.Slot2Similarity(g));
+                end
+            end
+        end
     end
 
     perAnimalWide = struct('StrainGroup', strings(0), 'Stimulus', cell(0), 'PreStimulus', cell(0));
@@ -140,7 +166,9 @@ function out = fingerprintPipeline(inputTables, kvargs)
         figHeat = graphics.fingerprintHeatmap(fp, st.statsTable);
         [pcaStruct, figPca] = graphics.fingerprintPca(fp);
         figDots = graphics.fingerprintDotPlots(fp);
-        figRadar = graphics.fingerprintRadar(fp);
+        figRadar = graphics.fingerprintRadar(fp, ...
+            StatsTable=st.statsTable, PerAnimalLong=perAnimalLong, ...
+            RadialUnit=kvargs.RadarRadialUnit, ClampZ=kvargs.RadarClampZ);
         figuresOut.heatmap = figHeat;
         figuresOut.pca = figPca;
         figuresOut.dotPlots = figDots;
@@ -157,6 +185,7 @@ function out = fingerprintPipeline(inputTables, kvargs)
     out.pcaStruct = pcaStruct;
     out.figures = figuresOut;
     out.strainGroups = strainGroups;
+    out.protocolAlignment = protocolAlignment;
 
     if strlength(string(kvargs.SavePath)) > 0
         savePathStr = char(string(kvargs.SavePath));

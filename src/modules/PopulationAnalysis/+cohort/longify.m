@@ -44,14 +44,13 @@ function perAnimalLong = longify(wideStim, widePre, kvargs)
         end
     end
 
-    protocolLabels = string(kvargs.ProtocolLabels);
-    protocolLabels = protocolLabels(:);
+    protocolLabels = coerceLabelCell(kvargs.ProtocolLabels, 'ProtocolLabels');
     if numel(protocolLabels) ~= 2
         error('cohort:longify:InvalidProtocolLabels', ...
             'ProtocolLabels must contain exactly 2 stimfileNames, got %d.', numel(protocolLabels));
     end
 
-    stimLabels = string(kvargs.StimLabels);
+    stimLabels = coerceLabelCell(kvargs.StimLabels, 'StimLabels');
     stimLabels = stimLabels(strlength(strtrim(stimLabels)) > 0);
     stimLabels = stimLabels(:);
     [~, order] = sort(strlength(stimLabels), 'descend');
@@ -170,6 +169,27 @@ function perAnimalLong = longify(wideStim, widePre, kvargs)
 end
 
 
+function labels = coerceLabelCell(inputValue, argName)
+    % Normalize a cell/string array of labels to a string column vector,
+    % coercing each element with cohort.internal.textScalar (handles char,
+    % string, and 1x1 cell wrapping per element).
+    if ischar(inputValue)
+        inputValue = {inputValue};
+    elseif isstring(inputValue)
+        inputValue = num2cell(inputValue(:));
+    elseif iscell(inputValue)
+        inputValue = inputValue(:);
+    else
+        error('cohort:longify:InvalidLabels', ...
+            '%s must be a cell array or string array of labels.', argName);
+    end
+    labels = cellfun(@(x) cohort.internal.textScalar(x, argName), inputValue, ...
+        'UniformOutput', false);
+    labels = string(labels);
+    labels = labels(:);
+end
+
+
 function tf = isNumericColumn(t, cols)
     tf = false(1, numel(cols));
     for i = 1:numel(cols)
@@ -182,11 +202,21 @@ end
 function protocolIdx = protocolIndexOf(stimProtocols, protocolLabels)
     n = numel(stimProtocols);
     protocolIdx = zeros(n, 1);
+    % Slot labels may be ' + '-joined displays of merged protocol variations
+    % (population.temp.joinStdTableByStim); metric-table rows carry the
+    % individual variation names, so match on any variant of a slot.
+    slotVariants = cell(1, numel(protocolLabels));
+    for slot = 1:numel(protocolLabels)
+        variants = split(string(protocolLabels(slot)), " + ");
+        slotVariants{slot} = strtrim(variants);
+    end
     for i = 1:n
-        if strcmpi(stimProtocols(i), protocolLabels(1))
-            protocolIdx(i) = 1;
-        elseif strcmpi(stimProtocols(i), protocolLabels(2))
-            protocolIdx(i) = 2;
+        rowProtocol = strtrim(string(stimProtocols(i)));
+        for slot = 1:numel(protocolLabels)
+            if any(rowProtocol == slotVariants{slot})
+                protocolIdx(i) = slot;
+                break;
+            end
         end
     end
 end
