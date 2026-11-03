@@ -7,8 +7,16 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
     %
     % Optional Name-Value Pair Arguments:
     %   'SleapUserConfig' - Struct containing user configuration options for SLEAP, this will modify the run-time behavior of SLEAP-NN. Default is an empty struct.
+    %   'Workers' - Number of videos to process in parallel, each in its own `sleap-nn predict` OS process. Default is 1.
+    %       Resolution order: an explicit 'Workers' value greater than 1 takes precedence; otherwise SleapUserConfig.workers is used when the field exists and is non-empty; otherwise 1.
+    %       The resolved value is clamped to the number of input videos. This is an app-side option and is never passed to the sleap-nn CLI.
+    %       GPU memory usage scales roughly with workers x batch_size, so consider lowering batch_size when raising workers.
     %   'ProgressDialogHandle' - Handle to a MATLAB uiprogressdlg object for displaying progress. Default is empty.
-    %   'UpdateCallbackFcn' - Additional callback function to be called during the execution of SLEAP-NN. Default is an empty function handle. This function must accept a single input argument, a text string, that is the stdout from the `sleap-nn predict` command for every progress update.
+    %   'UpdateCallbackFcn' - Additional callback function to be called during the execution of SLEAP-NN. Default is an empty function handle. This function must accept TWO input arguments: the index of the video in videoFiles, and a text string that is one stdout line from the corresponding `sleap-nn predict` process. (Breaking change from the previous single-argument contract.)
+    %
+    %   Failure policy: with Workers == 1, processing stops at the first failed video (fail-fast, previous behavior). With Workers > 1, all videos are attempted (finish-all); status is false if any video failed, and a summary warning listing the failures is issued at the end.
+    %
+    %   Cancellation: press Ctrl+C in the MATLAB Command Window or close the progress dialog to abort; all running sleap-nn process trees (including the python grandchildren that hold the GPU) are killed as soon as possible. Videos in flight may leave incomplete .predictions.slp files; re-run them to regenerate. status is false when a run is canceled.
     %
     % Outputs:
     %   status (logical) - true if processing was successful
@@ -22,6 +30,7 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
         videoFiles (1,:) {mustBeFile}
         modelPaths (1,:) {mustBeText} = {}
         kvargs.SleapUserConfig (1,1) struct = struct()
+        kvargs.Workers (1,1) double {mustBeInteger, mustBePositive} = 1
         kvargs.ProgressDialogHandle {mustBeProgressDialogHandleOrEmpty} = []
         kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin) []
     end
@@ -54,6 +63,7 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
     end
 
     videoFiles = cellstr(videoFiles);
+    workers = io.sleap.resolveWorkers(kvargs.Workers, kvargs.SleapUserConfig, numel(videoFiles));
     outputDestination = fullfile(fileparts(videoFiles{1}), 'sleap');
     if ~isfolder(outputDestination)
         mkdir(outputDestination);
@@ -76,12 +86,26 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
         prgdlg = [];
     end
 
+    % A dialog that was closed mid-run counts as a cancel request. The Cancel
+    % button is intentionally NOT enabled: its CancelRequested state does not
+    % sync reliably while the engine is busy, so Ctrl+C or closing the dialog
+    % are the supported abort paths.
+    isCancelRequested = @() ~isempty(prgdlg) && (~isvalid(prgdlg) || prgdlg.CancelRequested);
+
     % Scan over all video files and count the total number of frames, to estimate the total time for processing.
     % FFprobe scan is preferred as it is significantly faster than native VideoReader
     nFrames = NaN(1, numel(videoFiles));
     nFramesTotalEstimate = 0;
     hasFFmpeg = ~isempty(matlab.metadata.Namespace.fromName('ffmpeg'));
     for i = 1:numel(videoFiles)
+        if isCancelRequested()
+            warning('io:sleap:runSLEAP:Canceled', ...
+                'SLEAP processing canceled by user during the metadata scan; no videos were processed.');
+            status = false;
+            elapsedTime = 0;
+            return;
+        end
+        drawnow; % full drawnow: 'limitrate' can skip event processing, leaving Cancel dead
         try
             if hasFFmpeg
                 nFrames(i) = countFramesWithFFmpeg(videoFiles{i});
@@ -117,7 +141,11 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
         prgdlg.Indeterminate = nFramesTotalEstimate <= 0;
         prgdlg.ShowPercentage = nFramesTotalEstimate > 0;
         prgdlg.Value = 0;
-        prgdlg.Message = sprintf('Starting SLEAP processing for %d videos...', numel(videoFiles));
+        if workers > 1
+            prgdlg.Message = sprintf('Starting SLEAP processing for %d videos with %d workers...', numel(videoFiles), workers);
+        else
+            prgdlg.Message = sprintf('Starting SLEAP processing for %d videos...', numel(videoFiles));
+        end
     end
 
     % For each video file, run sleap-nn predict.
@@ -125,60 +153,105 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
     % uv run sleap-nn predict -m <model_path> [-m <model_path>...] -i <video_file> -o <output_file> [ predefined args ] [ additional args from kvargs.SleapUserConfig.additional_args ]
 
     status = true;
+    canceledByUser = false;
     elapsedTime = tic;
-    nProcessed = 0;
-    nProcessedCurrentVideo = 0;
-    currentProgressVideo = 0;
-    videoFileName = '';
-    for i = 1:numel(videoFiles)
-        [~, videoBaseName, videoExtension] = fileparts(videoFiles{i});
-        videoFileName = [videoBaseName videoExtension];
-        outputFile = fullfile(outputDestination, [videoBaseName '.predictions.slp']);
-        if ~isempty(prgdlg) && isvalid(prgdlg)
-            prgdlg.Message = sprintf('Processing video %d of %d\n%s', ...
-                i, numel(videoFiles), videoFileName);
+    if workers == 1
+        % Sequential path: one video at a time, fail-fast on first error.
+        nProcessed = 0;
+        nProcessedCurrentVideo = 0;
+        currentProgressVideo = 0;
+        videoFileName = '';
+        for i = 1:numel(videoFiles)
+            [~, videoBaseName, videoExtension] = fileparts(videoFiles{i});
+            videoFileName = [videoBaseName videoExtension];
+            outputFile = fullfile(outputDestination, [videoBaseName '.predictions.slp']);
+            if ~isempty(prgdlg) && isvalid(prgdlg)
+                prgdlg.Message = sprintf('Processing video %d of %d\n%s', ...
+                    i, numel(videoFiles), videoFileName);
+            end
+            cmd = buildPredictCommand(uvpath, modelPaths, videoFiles{i}, outputFile, confArgs);
+            [exitCode, stdout] = uv.run(cmd, Project=sleapdir, UpdateCallbackFcn=@updateOutput, ...
+                CancelCheckFcn=isCancelRequested);
+            if exitCode == -15
+                % Canceled by user: the in-flight sleap-nn process tree was killed.
+                status = false;
+                canceledByUser = true;
+                warning('io:sleap:runSLEAP:Canceled', ...
+                    'SLEAP processing canceled by user during video %d of %d ("%s"). Its output may be incomplete.', ...
+                    i, numel(videoFiles), videoFileName);
+                break;
+            end
+            if exitCode ~= 0
+                status = false;
+                warning('io:sleap:runSLEAP:VideoProcessError', ...
+                    'SLEAP processing failed for video "%s" with exit code %d. See stdout for details:\n%s', ...
+                    videoFiles{i}, exitCode, stdout);
+                break;
+            end
+            % Commit the final frame count for this video. If JSON progress was not
+            % emitted, this still lets the next video's progress start correctly.
+            if ~isnan(nFrames(i))
+                nProcessed = nProcessed - nProcessedCurrentVideo + nFrames(i);
+                nProcessedCurrentVideo = nFrames(i);
+            end
         end
-        cmd = buildPredictCommand(uvpath, modelPaths, videoFiles{i}, outputFile, confArgs);
-        [exitCode, stdout] = uv.run(cmd, Project=sleapdir, UpdateCallbackFcn=@updateOutput);
-        if exitCode ~= 0
-            status = false;
+    else
+        % Parallel path: up to `workers` concurrent sleap-nn predict processes,
+        % finish-all (every video is attempted even if some fail).
+        nVideos = numel(videoFiles);
+        poolCmds = cell(1, nVideos);
+        videoFileNames = cell(1, nVideos);
+        for i = 1:nVideos
+            [~, videoBaseName, videoExtension] = fileparts(videoFiles{i});
+            videoFileNames{i} = [videoBaseName videoExtension];
+            outputFile = fullfile(outputDestination, [videoBaseName '.predictions.slp']);
+            poolCmds{i} = buildPredictCommand(uvpath, modelPaths, videoFiles{i}, outputFile, confArgs);
+        end
+
+        poolProcessed = zeros(1, nVideos); % committed frame count per video
+        poolRate = zeros(1, nVideos);      % latest reported FPS per video
+        poolStarted = false(1, nVideos);   % video has produced any stdout
+        poolDone = false(1, nVideos);      % process has exited
+        poolHasActual = false(1, nVideos); % SLEAP's own n_total has replaced the estimate
+
+        [poolExitCodes, poolStdouts] = uv.runMany(poolCmds, Project=sleapdir, Workers=workers, ...
+            LineCallbackFcn=@onPoolLine, ProcessDoneFcn=@onPoolDone, ...
+            CancelCheckFcn=isCancelRequested);
+
+        poolCanceled = poolExitCodes == -15;
+        poolFailed = poolExitCodes ~= 0 & ~poolCanceled;
+        canceledByUser = any(poolCanceled);
+        status = ~any(poolFailed) && ~canceledByUser;
+        if canceledByUser
+            warning('io:sleap:runSLEAP:Canceled', ...
+                'SLEAP processing canceled by user. %d of %d videos completed. In-flight videos were killed and may have incomplete outputs: %s', ...
+                nnz(poolExitCodes == 0), nVideos, strjoin(videoFileNames(poolCanceled & poolStarted), ', '));
+        end
+        if any(poolFailed)
+            failIdx = find(poolFailed);
+            failReport = '';
+            for k = failIdx
+                failReport = [failReport, sprintf('  - "%s" (exit code %d):\n%s\n', ...
+                    videoFiles{k}, poolExitCodes(k), indentText(getStdoutTail(poolStdouts(k), 20), '    '))]; %#ok<AGROW>
+            end
             warning('io:sleap:runSLEAP:VideoProcessError', ...
-                'SLEAP processing failed for video "%s" with exit code %d. See stdout for details:\n%s', ...
-                videoFiles{i}, exitCode, stdout);
-            break;
-        end
-        % Commit the final frame count for this video. If JSON progress was not
-        % emitted, this still lets the next video's progress start correctly.
-        if ~isnan(nFrames(i))
-            nProcessed = nProcessed - nProcessedCurrentVideo + nFrames(i);
-            nProcessedCurrentVideo = nFrames(i);
+                'SLEAP processing failed for %d of %d videos:\n%s', numel(failIdx), nVideos, failReport);
         end
     end
     elapsedTime = toc(elapsedTime);
 
     if ~isempty(prgdlg) && isvalid(prgdlg)
-        prgdlg.Message = sprintf('SLEAP processing completed in %.2f seconds.\n\nFinalizing....', elapsedTime);
+        if canceledByUser
+            prgdlg.Message = sprintf('SLEAP processing canceled by user after %.2f seconds.', elapsedTime);
+        else
+            prgdlg.Message = sprintf('SLEAP processing completed in %.2f seconds.\n\nFinalizing....', elapsedTime);
+        end
     end
 
 
     function updateOutput(line)
         lineText = char(string(line));
-        try
-            progress = jsondecode(strtrim(lineText));
-            isProgressUpdate = isstruct(progress) && isscalar(progress) && ...
-                all(isfield(progress, {'n_processed', 'n_total', 'rate', 'eta'}));
-            if isProgressUpdate
-                progressValues = [progress.n_processed, progress.n_total, ...
-                    progress.rate, progress.eta];
-                isProgressUpdate = isnumeric(progressValues) && ...
-                    isscalar(progress.n_processed) && isscalar(progress.n_total) && ...
-                    isscalar(progress.rate) && isscalar(progress.eta) && ...
-                    all(~isnan(progressValues) & ~isinf(progressValues)) && ...
-                    progress.n_processed >= 0 && progress.n_total > 0 && progress.rate >= 0;
-            end
-        catch
-            isProgressUpdate = false;
-        end
+        [isProgressUpdate, progress] = parseSleapProgressLine(lineText);
 
         if isProgressUpdate
             % SLEAP's n_processed is relative to the current video. Replace
@@ -222,7 +295,101 @@ function [status, elapsedTime, outputDestination] = predict(videoFiles, modelPat
             prgdlg.Message = sprintf('Processing video %d of %d\n%s\n\n%s', ...
                 i, numel(videoFiles), videoFileName, lineText);
         end
-        kvargs.UpdateCallbackFcn(line);
+        kvargs.UpdateCallbackFcn(i, line);
+    end
+
+    function onPoolLine(idx, line)
+        %ONPOOLLINE Handle one stdout line from a pooled sleap-nn process (parallel path).
+        lineText = char(string(line));
+        poolStarted(idx) = true;
+        [isProgressUpdate, progress] = parseSleapProgressLine(lineText);
+        if isProgressUpdate
+            % The first JSON update from a video contains SLEAP's actual frame
+            % count. Replace the metadata-scan estimate so the job-wide progress
+            % is based on the same totals as SLEAP.
+            if ~poolHasActual(idx)
+                poolHasActual(idx) = true;
+                if ~isnan(nFrames(idx))
+                    nFramesTotalEstimate = nFramesTotalEstimate - nFrames(idx);
+                end
+                nFrames(idx) = progress.n_total;
+                nFramesTotalEstimate = nFramesTotalEstimate + nFrames(idx);
+            end
+
+            poolProcessed(idx) = progress.n_processed;
+            poolRate(idx) = progress.rate;
+            updatePoolDialog();
+        end
+        % Plain (non-JSON) lines are forwarded to the caller only: echoing
+        % interleaved lines from multiple videos into the dialog would be noise.
+        kvargs.UpdateCallbackFcn(idx, line);
+    end
+
+    function onPoolDone(idx, exitCode)
+        %ONPOOLDONE Handle exit of a pooled sleap-nn process (parallel path).
+        poolDone(idx) = true;
+        poolRate(idx) = 0;
+        % Commit the final frame count for this video, unless it was canceled
+        % mid-flight (-15). If JSON progress was not emitted, this still lets
+        % aggregate progress settle correctly.
+        if exitCode ~= -15 && ~isnan(nFrames(idx))
+            poolProcessed(idx) = nFrames(idx);
+        end
+        updatePoolDialog();
+    end
+
+    function updatePoolDialog()
+        %UPDATEPOOLDIALOG Refresh aggregate progress for the parallel path.
+        if isempty(prgdlg) || ~isvalid(prgdlg)
+            return;
+        end
+        if nFramesTotalEstimate > 0
+            prgdlg.Indeterminate = false;
+            prgdlg.Value = min(max(sum(poolProcessed) / nFramesTotalEstimate, 0), 1);
+        else
+            prgdlg.Indeterminate = true;
+        end
+
+        activeIdx = find(poolStarted & ~poolDone);
+        totalRate = sum(poolRate(activeIdx));
+        remainingFrames = 0;
+        for k = 1:nVideos
+            if ~poolDone(k) && ~isnan(nFrames(k))
+                remainingFrames = remainingFrames + max(nFrames(k) - poolProcessed(k), 0);
+            end
+        end
+        if totalRate > 0
+            etaText = sprintf('%.0fs', remainingFrames / totalRate);
+        else
+            etaText = 'estimating...';
+        end
+
+        msgLines = {sprintf('%d of %d videos done  |  %.1f FPS  |  Job ETA %s', ...
+            nnz(poolDone), nVideos, totalRate, etaText)};
+        maxShown = 6;
+        shownIdx = activeIdx(1:min(maxShown, numel(activeIdx)));
+        nShown = numel(shownIdx);
+        % The [j] prefix is a visual worker label only; it does not
+        % correspond to any underlying pool slot or process index. Labels are
+        % right-aligned so the brackets line up (e.g. ' [9]' sits above '[10]').
+        labelWidth = strlength(string(nShown)) + 2; % digits + the two brackets
+        for j = 1:nShown
+            k = shownIdx(j);
+            % Pad with U+2007 FIGURE SPACE (digit-width) so the labels align
+            % even in the dialog's proportional font (uiprogressdlg does not
+            % render HTML and offers no monospace option).
+            paddedLabel = strrep(sprintf('%*s', labelWidth, sprintf('[%d]', j)), ' ', char(8199));
+            if ~isnan(nFrames(k)) && nFrames(k) > 0
+                msgLines{end+1} = sprintf('%s %s - %.0f%%  |  %.1f FPS', ...
+                    paddedLabel, videoFileNames{k}, 100 * poolProcessed(k) / nFrames(k), poolRate(k)); %#ok<AGROW>
+            else
+                msgLines{end+1} = sprintf('%s %s - starting...', paddedLabel, videoFileNames{k}); %#ok<AGROW>
+            end
+        end
+        if numel(activeIdx) > maxShown
+            msgLines{end+1} = sprintf('... and %d more', numel(activeIdx) - maxShown);
+        end
+        prgdlg.Message = strjoin(msgLines, newline);
     end
 end
 
@@ -328,4 +495,48 @@ function nFrames = countFramesWithFFmpeg(videoFile)
         error('io:sleap:runSLEAP:FFmpegFrameCountError', ...
             'FFprobe did not return a valid frame count for video file "%s".', videoFile);
     end
+end
+
+function [isProgress, progress] = parseSleapProgressLine(lineText)
+    %PARSESLEAPPROGRESSLINE Validate and decode one SLEAP-NN JSON progress line.
+    %   Returns isProgress = false and progress = [] for any line that is not a
+    %   well-formed SLEAP JSON progress update.
+
+    isProgress = false;
+    progress = [];
+    try
+        decoded = jsondecode(strtrim(lineText));
+        isProgress = isstruct(decoded) && isscalar(decoded) && ...
+            all(isfield(decoded, {'n_processed', 'n_total', 'rate', 'eta'}));
+        if isProgress
+            progressValues = [decoded.n_processed, decoded.n_total, ...
+                decoded.rate, decoded.eta];
+            isProgress = isnumeric(progressValues) && ...
+                isscalar(decoded.n_processed) && isscalar(decoded.n_total) && ...
+                isscalar(decoded.rate) && isscalar(decoded.eta) && ...
+                all(~isnan(progressValues) & ~isinf(progressValues)) && ...
+                decoded.n_processed >= 0 && decoded.n_total > 0 && decoded.rate >= 0;
+        end
+        if isProgress
+            progress = decoded;
+        end
+    catch
+        isProgress = false;
+    end
+end
+
+function tail = getStdoutTail(stdoutText, maxLines)
+    %GETSTDOUTTAIL Return the last maxLines lines of a captured stdout string.
+    lines = strsplit(char(stdoutText), '\n', 'CollapseDelimiters', false);
+    if numel(lines) > maxLines
+        lines = lines(end - maxLines + 1:end);
+    end
+    tail = strjoin(lines, '\n');
+end
+
+function out = indentText(txt, prefix)
+    %INDENTTEXT Prefix every line of txt with prefix.
+    lines = strsplit(char(txt), '\n', 'CollapseDelimiters', false);
+    lines = strcat(prefix, lines);
+    out = strjoin(lines, '\n');
 end
