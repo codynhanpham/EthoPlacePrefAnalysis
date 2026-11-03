@@ -163,6 +163,13 @@ tracking_providers:
     # If you have multiple GPUs, you can specify the device index (e.g., cuda:0, cuda:1) to select which GPU to use
     device: auto
 
+    # Workers for SLEAP predict(). Useful when batch processing multiple videos and
+    # a single sleap-nn predict() call does not fully utilize your compute resources. Default is 1.
+    # Note: this parameter is not a native SLEAP option and won't be passed into SLEAP calls.
+    # Overridden when io.sleap.predict() is called with 'Workers' > 1. Clamped to the number of input videos.
+    # GPU memory usage scales roughly with workers x batch_size, so consider lowering batch_size when raising workers.
+    workers: 1
+
     # Batch size for SLEAP inference. Adjust based on your CPU / GPU memory and model size. Default is 8.
     batch_size: 8
 

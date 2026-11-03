@@ -101,6 +101,9 @@ tracking_providers:
     
     runtime: tensorrt
     device: auto
+
+    workers: 8
+
     batch_size: 16
     tracking: false
     max_instances: 1

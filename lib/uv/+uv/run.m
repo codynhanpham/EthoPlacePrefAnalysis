@@ -8,6 +8,8 @@ function [exitCode, stdout] = run(cmd, kvargs)
     %
     %       UpdateCallbackFcn (function_handle, optional): A callback function that will be called with each line of output from the command. The function should accept a single char array argument (the line of output).
     %
+    %       CancelCheckFcn (function_handle, optional): A zero-argument function polled after each output line; when it returns true, the process tree is killed and run returns exitCode -15 (canceled).
+    %
     %   Outputs:
     %       exitCode (integer): The exit code of the executed command. A value of 0 typically indicates success, while a non-zero value indicates an error.
     %       stdout (string): Collected stdout/stderr output from the executed command.
@@ -17,6 +19,7 @@ function [exitCode, stdout] = run(cmd, kvargs)
         kvargs.Project = []
         kvargs.DebugCommand (1,1) logical = false
         kvargs.UpdateCallbackFcn (1,1) function_handle = @(varargin) []
+        kvargs.CancelCheckFcn (1,1) function_handle = @() false
     end
     uvbin = uv.install();
 
@@ -25,7 +28,7 @@ function [exitCode, stdout] = run(cmd, kvargs)
     if kvargs.DebugCommand
         fprintf('uv.run command: %s\n', fullCmd);
     end
-    [exitCode, stdout] = uv.system.execute(fullCmd, kvargs.UpdateCallbackFcn);
+    [exitCode, stdout] = uv.system.execute(fullCmd, kvargs.UpdateCallbackFcn, kvargs.CancelCheckFcn);
 end
 
 function prefix = buildRunPrefix(projectDir)
