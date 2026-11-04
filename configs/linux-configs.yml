@@ -126,7 +126,7 @@ tracking_providers:
     runtime: tensorrt
     device: auto
 
-    workers: 8
+    workers: 12
 
     batch_size: 16
     tracking: false
