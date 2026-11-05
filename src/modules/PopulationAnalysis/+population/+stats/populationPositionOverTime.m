@@ -11,6 +11,10 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
     %
     %   Name-Value Pair Arguments:
     %       - 'Config': Configuration struct loaded with io.config.loadConfigYaml() to detect the nidaq_audioplayer and/or metadata_extract binary paths.
+    %       - 'GenotypesInfoRules': A path to a genotypes.info.yml-formatted file, a pre-parsed YAML struct, or a rules struct
+    %           from io.metadata.loadGenotypeInfo (default: the bundled genotypes.info.yml). Used to canonicalize
+    %           genotype/sex tokens in the exported animalMetadata (idempotent when the master metadata was already
+    %           normalized at ingestion by io.metadata.loadMasterMetadata).
     %       - 'PreStimDurationSec': Duration (seconds) to include before stimulus onset in each trial's centerpoint output. Default is 480.
     %       - 'PostStimDurationSec': Duration (seconds) to include after stimulus offset in each trial's centerpoint output. Default is 0.
     %       - 'TargetFPS': Target common framerate (in frames per second) to which position data will be interpolated. Default is 30.
@@ -40,6 +44,7 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         masterMetadataTable {validator.mustBeFileOrTable}
 
         kvargs.Config (1,1) struct = struct()
+        kvargs.GenotypesInfoRules {validator.mustBeGenotypeInfoRules} = io.metadata.loadGenotypeInfo()
         kvargs.TrackingProvider (1,1) {validator.mustBeTrackingProviderOrEmpty} = []
         kvargs.PreStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 480;
         kvargs.PostStimDurationSec (1,1) double {mustBeNonnegative, mustBeFinite} = 0;
@@ -57,6 +62,8 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
         error('population:stats:populationPositionOverTime:MissingTrackingProvider', ...
             'TrackingProvider must be provided for population analysis.');
     end
+
+    genotypeRules = io.metadata.loadGenotypeInfo(kvargs.GenotypesInfoRules);
 
     ntrials = length(ethovisionTrials);
 
@@ -124,6 +131,9 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
             TrackingProvider=kvargs.TrackingProvider, ...
             PreStimDurationSec=kvargs.PreStimDurationSec, ...
             PostStimDurationSec=kvargs.PostStimDurationSec);
+        % Canonicalize genotype/sex tokens in the exported animal metadata (idempotent:
+        % no-op when the master metadata was already normalized at ingestion)
+        summary.animalMetadata = canonicalizeAnimalMetadata(summary.animalMetadata, genotypeRules);
         % Regardless of what is in config for refmode, we should prioritize what was used in trialSummary by inferring from the size() of centerpointData.midline_x_px and midline_x_px
         if isfield(centerpointData, 'midline_x_px') && ~isempty(centerpointData.midline_x_px)
             % Assert the size of midline_x_px and midline_y_px is the same
@@ -488,6 +498,25 @@ function standardizedTables = populationPositionOverTime(ethovisionTrials, stimu
 
 
 
+end
+
+
+function animalMetadata = canonicalizeAnimalMetadata(animalMetadata, genotypeRules)
+    %CANONICALIZEANIMALMETADATA Canonicalize genotype/sex tokens of one animalMetadata struct
+    %   Silent on undefined strains / unknown tokens (pass-through); ingestion-time
+    %   io.metadata.normalizeMetadataTable is responsible for user-facing warnings.
+    if ~isstruct(animalMetadata) || ~isfield(animalMetadata, 'genotype') || ~isfield(animalMetadata, 'strain')
+        return;
+    end
+    sexContext = '';
+    if isfield(animalMetadata, 'sex') && ~isempty(animalMetadata.sex)
+        sexContext = animalMetadata.sex;
+        animalMetadata.sex = io.metadata.canonicalSex(animalMetadata.sex);
+    end
+    if ~isempty(animalMetadata.genotype) && ~isempty(animalMetadata.strain)
+        animalMetadata.genotype = io.metadata.canonicalGenotype( ...
+            animalMetadata.genotype, animalMetadata.strain, sexContext, genotypeRules);
+    end
 end
 
 

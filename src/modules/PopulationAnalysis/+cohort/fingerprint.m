@@ -76,7 +76,10 @@ function out = fingerprint(perAnimalLong, kvargs)
 
     strain = string(perAnimalLong.Gene);
     genotype = string(perAnimalLong.('Genotype$'));
-    genoNorm = lower(strtrim(genotype));
+    % Strain-aware canonicalization (case-insensitive; resolves KO/Hom/Hem
+    % variant drift per genotypes.info.yml). Undefined strains fall back to
+    % case-insensitive identity (lower/trim).
+    genoNorm = canonicalGenoNorm(genotype, strain);
     sex = string(perAnimalLong.('Sex$'));
     tier = string(perAnimalLong.Tier);
     protocol = string(perAnimalLong.Protocol);
@@ -137,6 +140,9 @@ function out = fingerprint(perAnimalLong, kvargs)
     refCount = nan(nStrains, nSexes, nContexts);
     for sti = 1:nStrains
         refGenoN = normGeno(referenceGenotypeFor(strainsList(sti), refByStrain, defaultRefGenotype));
+        % Resolve the reference label against the strain's rules too, so a
+        % user-provided variant (e.g. 'KO' for Mecp2) matches the canonical id.
+        refGenoN = canonicalGenoNorm(refGenoN, strainsList(sti));
         rg = find(genoNormList == refGenoN, 1);
         for sei = 1:nSexes
             isRef = keepRows & strainIdx == sti & sexIdx == sei & genoNormIdx == rg;
@@ -234,6 +240,32 @@ end
 
 function g = normGeno(x)
     g = lower(strtrim(string(x)));
+end
+
+
+function genoNorm = canonicalGenoNorm(genotype, strain)
+    %CANONICALGENONORM Strain-aware canonical genotype normalization (silent)
+    %   Resolves variant tokens (e.g. Mecp2 'KO' -> 'Hem') per genotypes.info.yml.
+    %   Undefined strains fall back to case-insensitive identity (lower/trim).
+    %   Silent: ingestion-time io.metadata.normalizeMetadataTable owns warnings.
+    rules = io.metadata.loadGenotypeInfo();
+    genotype = string(genotype);
+    strain = string(strain);
+    genoNorm = strings(size(genotype));
+    for i = 1:numel(genotype)
+        geno = strtrim(genotype(i));
+        strn = strtrim(strain(i));
+        if strlength(geno) == 0 || strlength(strn) == 0
+            genoNorm(i) = lower(geno);
+            continue;
+        end
+        idx = find(strcmpi({rules.byStrain.strain}, strn), 1);
+        if isempty(idx)
+            genoNorm(i) = lower(geno);
+        else
+            genoNorm(i) = string(io.metadata.canonicalGenotype(geno, strn, '', rules));
+        end
+    end
 end
 
 
@@ -397,6 +429,7 @@ function cohortTable = buildCohortTable(genotype, genoNormIdx, genoNormList, sex
                 else
                     sei = find(sexesList == sexIn, 1);
                     refGenoN = normGeno(referenceGenotypeFor(strainsIn, refByStrain, defaultRefGenotype));
+                    refGenoN = canonicalGenoNorm(refGenoN, strainsIn);
                     nRef = refCount(sti, sei, ug(u));
 
                     if nAnimals < minN || nRef < minN

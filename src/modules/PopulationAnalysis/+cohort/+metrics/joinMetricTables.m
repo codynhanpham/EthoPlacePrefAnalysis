@@ -12,6 +12,13 @@ function tJoined = joinMetricTables(metricTables, kvargs)
 	% Name-Value Pair Arguments:
 	%   CommonHeaders - Common key columns used to match rows across metric tables.
 	%                   Defaults to the shared metadata columns emitted by cohort metrics.
+	%   GenotypesInfoRules - A path to a genotypes.info.yml-formatted file, a pre-parsed
+	%                   YAML struct, or a rules struct from io.metadata.loadGenotypeInfo
+	%                   (default: the bundled genotypes.info.yml). When the default
+	%                   CommonHeaders are used, the 'Genotype$' and 'Sex$' key columns of
+	%                   every input table are canonicalized (strain-aware for genotype,
+	%                   using the 'Gene' column as strain context) before joining, so
+	%                   KO/Hom/Hem variant drift cannot fragment the join keys.
 	%
 	% Example:
 	%   tDist = cohort.metrics.distanceTravel(standardizedTables);
@@ -31,6 +38,7 @@ function tJoined = joinMetricTables(metricTables, kvargs)
 			'Mouse_ID', 'Gene', 'Cage #', 'Gene_ID', 'Sex$', 'Genotype$', ...
 			'Litter', 'Toe_ID', 'DOB', 'Age', 'Stimulus Protocol'
 		}
+		kvargs.GenotypesInfoRules {validator.mustBeGenotypeInfoRules} = io.metadata.loadGenotypeInfo()
 	end
 
 	tables = normalizeMetricTables(metricTables);
@@ -51,6 +59,16 @@ function tJoined = joinMetricTables(metricTables, kvargs)
 
 	for i = 1:numel(tables)
 		validateRequiredHeaders(tables{i}, commonHeaders, i);
+	end
+
+	% Canonicalize genotype/sex key columns before joining (only when the
+	% default common-header scheme is in use, so custom key schemes are
+	% left untouched). Strain context comes from the 'Gene' column.
+	if ismember('Genotype$', commonHeaders) && ismember('Gene', commonHeaders)
+		genotypeRules = io.metadata.loadGenotypeInfo(kvargs.GenotypesInfoRules);
+		for i = 1:numel(tables)
+			tables{i} = canonicalizeGenotypeSexColumns(tables{i}, genotypeRules);
+		end
 	end
 
 	tJoined = tables{1};
@@ -175,6 +193,51 @@ function keys = rowKeys(t, commonHeaders)
 			parts(c) = scalarToStableString(v);
 		end
 		keys(r) = strjoin(parts, "||");
+	end
+end
+
+
+function t = canonicalizeGenotypeSexColumns(t, genotypeRules)
+	%CANONICALIZEGENOTYPESEXCOLUMNS Canonicalize 'Genotype$'/'Sex$' columns (strain-aware)
+	%   Strain context comes from the 'Gene' column. Defined strains resolve
+	%   variant tokens via the rules (e.g. Mecp2 'KO' -> 'Hem'); undefined
+	%   strains fall back to case-insensitive identity (lower/trim), matching
+	%   the other genotype consumers. Silent: ingestion-time
+	%   io.metadata.normalizeMetadataTable owns user-facing warnings.
+	n = height(t);
+	genoCol = string(t.('Genotype$'));
+	strainCol = string(t.('Gene'));
+	sexCol = string(t.('Sex$'));
+
+	for r = 1:n
+		strainToken = strtrim(strainCol(r));
+		genoToken = strtrim(genoCol(r));
+		sexToken = strtrim(sexCol(r));
+		if strlength(genoToken) > 0 && strlength(strainToken) > 0
+			idx = find(strcmpi({genotypeRules.byStrain.strain}, strainToken), 1);
+			if isempty(idx)
+				genoCol(r) = lower(genoToken);
+			else
+				genoCol(r) = string(io.metadata.canonicalGenotype(genoToken, strainToken, sexToken, genotypeRules));
+			end
+		end
+		if strlength(sexToken) > 0
+			sexCol(r) = string(io.metadata.canonicalSex(sexToken));
+		end
+	end
+
+	t.('Genotype$') = restoreTextColumn(genoCol, t.('Genotype$'));
+	t.('Sex$') = restoreTextColumn(sexCol, t.('Sex$'));
+end
+
+
+function col = restoreTextColumn(values, template)
+	if iscategorical(template)
+		col = categorical(cellstr(values));
+	elseif iscell(template)
+		col = cellstr(values);
+	else
+		col = values;
 	end
 end
 

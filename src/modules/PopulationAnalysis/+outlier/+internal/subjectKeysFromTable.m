@@ -19,10 +19,23 @@ function keys = subjectKeysFromTable(T, commonHeaders)
 
     n = height(T);
     keys = repmat({''}, n, 1);
+
+    % Pre-resolve the genotype/sex header positions (canonicalized below) so
+    % keys stay consistent with outlier.internal.animalSubjectKey.
+    genoHeader = find(strcmp(commonHeaders, 'Genotype$'), 1);
+    sexHeader = find(strcmp(commonHeaders, 'Sex$'), 1);
+    strainHeader = find(strcmp(commonHeaders, 'Gene'), 1);
+
     for r = 1:n
         parts = cell(1, numel(commonHeaders));
         for h = 1:numel(commonHeaders)
             parts{h} = valueToKeyChar(T.(commonHeaders{h})(r));
+        end
+        % Canonicalize genotype/sex tokens (strain-aware; silent) so variant
+        % drift (KO vs Hom, m vs Male) cannot split keys.
+        if ~isempty(genoHeader) && ~isempty(strainHeader)
+            [parts{genoHeader}, parts{sexHeader}] = outlier.internal.canonicalKeyTokens( ...
+                parts{genoHeader}, parts{sexHeader}, parts{strainHeader});
         end
         keys{r} = strjoin(parts, '|');
     end

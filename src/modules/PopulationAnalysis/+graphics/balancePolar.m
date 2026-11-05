@@ -36,20 +36,22 @@ function balancePolar(ax, metadataTable)
     groupedTable = population.metadata.groupby(metadataTable, groupVars, 'IncludeEmptyGroups', true);
 
     categories = join(string(groupedTable{:, groupVars}), ' - ', 2);
+    % Case-insensitive comparison key: genotype/sex tokens are canonicalized
+    % via the genotypes.info.yml rules (KO/Hom/Hem variant drift is resolved
+    % by io.metadata.canonicalGenotype before comparison).
     catcomptemp = string(groupedTable{:, groupVars});
-    catcomptemp(:, genotypePosition) = strrep(lower(catcomptemp(:, genotypePosition)), 'ko', 'hom');
+    catcomptemp(:, genotypePosition) = canonicalGenoColumn(catcomptemp(:, genotypePosition), groupedTable.ANIMAL_STRAIN);
     catcomptemp = lower(join(catcomptemp, ' - ', 2));
 
     groupedTable = addvars(groupedTable, categories, catcomptemp, 'Before', 'GroupCount', 'NewVariableNames', {'Category', 'catcomp'});
     groupedTable.Category = categorical(groupedTable.Category);
     groupedTable.catcomp = categorical(groupedTable.catcomp);
-    
-    % Compare genotype of "KO" and "Hom" as equivalent
+
+    % Compare against the possible combos (already canonical labels from the info file)
     pgVars = possibleGenotypeCombos.Properties.VariableNames;
     % Reorder possibleGenotypeCombos to match comboVarsOrder
     [~, sortIdx] = ismember(comboVarsOrder, pgVars);
     possibleGenotypeCombos = possibleGenotypeCombos(:, sortIdx);
-    possibleGenotypeCombos(:, genotypePosition) = strrep(lower(cellstr(possibleGenotypeCombos{:, genotypePosition})), 'ko', 'hom');
     possibleGenotypeCombos.catcomp = categorical(lower(join(string(possibleGenotypeCombos{:, :}), ' - ', 2)));
 
     [isPossible, ~] = ismember(groupedTable.catcomp, possibleGenotypeCombos.catcomp);
@@ -110,14 +112,13 @@ function balancePolar(ax, metadataTable)
         lineWidth = 1.5;
         color = graphics.strainColorMap(char(groupedTable.ANIMAL_STRAIN(i)));
         hsl = utils.color.rgb2hsl(color);
-        if strcmpi(char(groupedTable.ANIMAL_GENOTYPE(i)), 'WT') ...
-        || strcmpi(char(groupedTable.ANIMAL_GENOTYPE(i)), 'Control')
-            hsl(3) = 80;
-        elseif strcmpi(char(groupedTable.ANIMAL_GENOTYPE(i)), 'Het')
-            hsl(3) = 60;
-        elseif strcmpi(char(groupedTable.ANIMAL_GENOTYPE(i)), 'KO')...
-        || strcmpi(char(groupedTable.ANIMAL_GENOTYPE(i)), 'Hom')
-            hsl(3) = 40;
+        switch graphics.genotypeClass(groupedTable.ANIMAL_GENOTYPE(i))
+            case "wt"
+                hsl(3) = 80;
+            case "het"
+                hsl(3) = 60;
+            case "hom"
+                hsl(3) = 40;
         end
         color = utils.color.hsl2rgb(hsl);
 
@@ -153,14 +154,13 @@ function balancePolar(ax, metadataTable)
         genotype = char(genotypes{i});
         color = 'k';
         hsl = utils.color.rgb2hsl(color);
-        if strcmpi(char(genotype), 'WT') ...
-        || strcmpi(char(genotype), 'Control')
-            hsl(3) = 80;
-        elseif strcmpi(char(genotype), 'Het')
-            hsl(3) = 60;
-        elseif strcmpi(char(genotype), 'KO')...
-        || strcmpi(char(genotype), 'Hom')
-            hsl(3) = 40;
+        switch graphics.genotypeClass(genotype)
+            case "wt"
+                hsl(3) = 80;
+            case "het"
+                hsl(3) = 60;
+            case "hom"
+                hsl(3) = 40;
         end
         color = utils.color.hsl2rgb(hsl);
         legenddummy{end+1} = scatter(ax, NaN, NaN, 55, 'o', 'MarkerFaceColor', color, 'MarkerEdgeColor', color, 'LineWidth', 0.5, 'Tag', [genotype 'Legend']); %#ok<AGROW>
@@ -178,4 +178,28 @@ function balancePolar(ax, metadataTable)
     legend(ax, [legenddummy{:}], legendLabels, 'Location', 'northeastoutside', 'FontSize', 11);
 
     % assignin("base", "groupedTable", groupedTable);
+end
+
+
+function genoOut = canonicalGenoColumn(genoCol, strainCol)
+    %CANONICALGENOCOLUMN Canonicalize a genotype column (strain-aware, silent)
+    %   Undefined strains / unknown tokens pass through lowercased (case-insensitive
+    %   identity grouping); ingestion-time io.metadata.normalizeMetadataTable owns
+    %   user-facing warnings.
+    rules = io.metadata.loadGenotypeInfo();
+    genoOut = strings(size(genoCol));
+    for i = 1:numel(genoCol)
+        geno = strtrim(string(genoCol(i)));
+        strain = strtrim(string(strainCol(i)));
+        if strlength(geno) == 0 || strlength(strain) == 0
+            genoOut(i) = geno;
+            continue;
+        end
+        idx = find(strcmpi({rules.byStrain.strain}, strain), 1);
+        if isempty(idx)
+            genoOut(i) = lower(geno);
+        else
+            genoOut(i) = string(io.metadata.canonicalGenotype(geno, strain, '', rules));
+        end
+    end
 end

@@ -76,11 +76,14 @@ end
 % Filter MasterMetadata based on provided filters, create a whitelist of valid experiment project dirs + trial numbers
 whitelist = struct('experiment', '', 'arena', '', 'trial', []); % Fields: experiment = ETHOVISION_FILE; arena = ETHOVISION_ARENA; trial = ETHOVISION_TRIAL
 if doFilter
-    % Apply filters
+    % Apply filters (case-insensitive token matching; genotype/sex tokens are
+    % canonicalized at ingestion by io.metadata.loadMasterMetadata, so exact
+    % ismember would already work for ingested tables — ci matching additionally
+    % covers hand-built tables that bypassed ingestion)
     filteredRows = masterMetadata;
-    filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_SEX"), kvargs.Filters.sex), :);
-    filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_STRAIN"), kvargs.Filters.strain), :);
-    filteredRows = filteredRows(ismember(filteredRows.("ANIMAL_GENOTYPE"), kvargs.Filters.genotype), :);
+    filteredRows = filteredRows(ismember(lower(string(filteredRows.("ANIMAL_SEX"))), lower(string(kvargs.Filters.sex))), :);
+    filteredRows = filteredRows(ismember(lower(string(filteredRows.("ANIMAL_STRAIN"))), lower(string(kvargs.Filters.strain))), :);
+    filteredRows = filteredRows(ismember(lower(string(filteredRows.("ANIMAL_GENOTYPE"))), lower(string(kvargs.Filters.genotype))), :);
     % Build whitelist
     if ~isempty(filteredRows)
         projects = unique(filteredRows.("ETHOVISION_FILE"), 'stable');

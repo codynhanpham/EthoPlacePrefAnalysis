@@ -210,8 +210,8 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 			strain = combo{2};
 			genotype = combo{3};
 
-			strainMask = strcmp(columnByStrainOrder, strain);
-			genotypeMask = strcmp(columnByGenotypeOrder, genotype);
+			strainMask = strcmpi(columnByStrainOrder, strain);
+			genotypeMask = strcmpi(columnByGenotypeOrder, genotype);
 
 			a = nexttile(t);
 			hold(a, 'on');
@@ -234,7 +234,7 @@ function f = stateProgressionMetricsByBoutBinned(standardizedTable, kvargs)
 
 			for sexIdx = 1:nsexes
 				sex = animalSexes{sexIdx};
-				sexMask = strcmp(columnBySexOrder, sex);
+				sexMask = strcmpi(columnBySexOrder, sex);
 				combinedMask = strainMask & genotypeMask & sexMask;
 				if ~any(combinedMask)
 					continue;

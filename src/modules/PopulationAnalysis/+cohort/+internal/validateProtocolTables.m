@@ -118,10 +118,16 @@ function keysOut = subjectKeys(stdTable)
     keysOut = strings(n, 1);
     for k = 1:n
         md = mdList(k);
+        strain = cohort.internal.textScalar(getMetaField(md, 'strain'), 'strain');
+        geno = cohort.internal.textScalar(getMetaField(md, 'genotype'), 'genotype');
+        sex = cohort.internal.textScalar(getMetaField(md, 'sex'), 'sex');
+        % Canonicalize genotype/sex (strain-aware, silent) so variant drift
+        % (KO vs Hom, m vs Male) cannot split keys across protocol tables.
+        [geno, sex] = outlier.internal.canonicalKeyTokens(geno, sex, strain);
         parts = [ ...
-            cohort.internal.textScalar(getMetaField(md, 'strain'), 'strain')
-            cohort.internal.textScalar(getMetaField(md, 'genotype'), 'genotype')
-            cohort.internal.textScalar(getMetaField(md, 'sex'), 'sex')
+            strain
+            geno
+            sex
             cohort.internal.textScalar(getMetaField(md, 'cagecode'), 'cagecode')
             cohort.internal.textScalar(getMetaField(md, 'id'), 'id')];
         keysOut(k) = strjoin(parts, "|");

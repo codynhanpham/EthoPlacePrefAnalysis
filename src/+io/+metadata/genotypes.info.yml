@@ -10,6 +10,12 @@
 #       - GENOTYPE_1
 #       - GENOTYPE_2
 #       - ...
+#   normalize:
+#     - GENOTYPE_CANONICAL_NAME_1:
+#       - GENOTYPE_VARIANT_1
+#       - GENOTYPE_VARIANT_2
+#
+#
 # --------------------------------------------------------------
 
 # Each strain must have both male and female in combo
@@ -22,12 +28,21 @@
 #       - GENOTYPE_1
 #       - GENOTYPE_2
 # --------------------------------------------------------------
-
+#
 # Possible genotypes are (case-insensitive): 
 #   - WT
 #   - Het
-#   - KO (or, Hom)
-
+#   - Hem (Hemizygous)
+#   - Hom
+#
+# If your input contains variants of the above genotypes, you can normalize them using the "normalize" field.
+# For example, Mecp2 male "Knockout" is a Hemizygous genotype, but commonly referred to as "KO" in places.
+# To ensure consistency, you can normalize "Knockout" or "KO" to "Hem" using the normalize field:
+#   normalize:
+#     - Hem: ["Knockout", "KO"]
+#
+# A canonical name defined must be one of the possible genotypes for that strain & sex combo. Normalization is case-insensitive.
+#
 
 - strain: C57BL/6J
   combo:
@@ -54,26 +69,31 @@
   combo:
     female:
       - WT
-      - Het
-      - KO
+      - HET
+      - HOM
     male:
       - WT
-      - Het
-      - KO
+      - HET
+      - HOM
+  normalize:
+    - HOM: ["KO", "Knockout"]
 
 - strain: Cntnap2
   combo:
     female:
-      - KO
+      - HOM
     male:
-      - KO
+      - HOM
+  normalize:
+    - HOM: ["KO", "Knockout"]
 
 - strain: Mecp2
   combo:
     female:
       - WT
-      - Het
-      # - KO # Only if breeding as Het x KO
+      - HET
     male:
       - WT
-      - KO # Hemizygous
+      - HEM # Hemizygous, knockout/KO
+  normalize:
+    - HEM: ["KO", "Knockout"]

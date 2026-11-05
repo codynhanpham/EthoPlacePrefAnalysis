@@ -25,6 +25,11 @@ function key = animalSubjectKey(md)
     sex = cohort.metrics.utils.textToChar(cohort.metrics.utils.getFieldOr(md, 'sex', ''));
     geno = cohort.metrics.utils.textToChar(cohort.metrics.utils.getFieldOr(md, 'genotype', ''));
 
+    % Canonicalize genotype/sex so KO/Hom/Hem variant drift cannot split keys.
+    % Silent pass-through for undefined strains / unknown tokens; falls back to
+    % case-insensitive identity (lower/trim) for undefined strains.
+    [geno, sex] = outlier.internal.canonicalKeyTokens(geno, sex, strain);
+
     [geneId, litterId, mouseNumber] = cohort.metrics.utils.parseMouseId(id, strain);
 
     parts = {id, strain, cage, geneId, sex, geno, litterId, mouseNumber};

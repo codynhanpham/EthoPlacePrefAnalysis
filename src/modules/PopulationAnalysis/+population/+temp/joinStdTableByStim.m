@@ -63,10 +63,19 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
         stdTableA struct
         stdTableB struct
         options.EmbeddedNAnimalA (1,1) logical = false
+        options.GenotypesInfoRules {validator.mustBeGenotypeInfoRules} = io.metadata.loadGenotypeInfo()
     end
 
     validateInput(stdTableA, 'stdTableA');
     validateInput(stdTableB, 'stdTableB');
+
+    % Canonicalize genotype/sex tokens in both inputs' animalMetadata so that
+    % KO/Hom/Hem variant drift cannot cause downstream key mismatches.
+    % Idempotent when the inputs were already normalized (e.g. produced by
+    % population.stats.populationPositionOverTime with the same rules).
+    genotypeRules = io.metadata.loadGenotypeInfo(options.GenotypesInfoRules);
+    stdTableA.animalMetadata = canonicalizeAnimalMetadataDict(stdTableA.animalMetadata, genotypeRules);
+    stdTableB.animalMetadata = canonicalizeAnimalMetadataDict(stdTableB.animalMetadata, genotypeRules);
 
     optionalFields = {'fps', 'px2cm', 'bodyparts'};
     for fieldIndex = 1:numel(optionalFields)
@@ -132,6 +141,31 @@ function [joinedStdTable, nAnimalsA] = joinStdTableByStim(stdTableA, stdTableB, 
     if isfield(stdTableA, 'bodyparts')
         joinedStdTable.bodyparts = joinBodypartTables(...
             stdTableA.bodyparts, stdTableB.bodyparts, baseCenterpoint, mapA, mapB);
+    end
+end
+
+function animalMetadataDict = canonicalizeAnimalMetadataDict(animalMetadataDict, genotypeRules)
+    %CANONICALIZEANIMALMETADATADICT Canonicalize genotype/sex of every animalMetadata value
+    %   Silent on undefined strains / unknown tokens (pass-through); ingestion-time
+    %   io.metadata.normalizeMetadataTable is responsible for user-facing warnings.
+    if ~isa(animalMetadataDict, 'dictionary')
+        return;
+    end
+    mdKeys = animalMetadataDict.keys();
+    for i = 1:numel(mdKeys)
+        md = animalMetadataDict(mdKeys(i));
+        if ~isstruct(md) || ~isfield(md, 'genotype') || ~isfield(md, 'strain')
+            continue;
+        end
+        sexContext = '';
+        if isfield(md, 'sex') && ~isempty(md.sex)
+            sexContext = md.sex;
+            md.sex = io.metadata.canonicalSex(md.sex);
+        end
+        if ~isempty(md.genotype) && ~isempty(md.strain)
+            md.genotype = io.metadata.canonicalGenotype(md.genotype, md.strain, sexContext, genotypeRules);
+        end
+        animalMetadataDict(mdKeys(i)) = md;
     end
 end
 

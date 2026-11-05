@@ -203,6 +203,8 @@ end
 %% ------------------------------------------------------------------
 function sk = makeSubjectKey(T, commonVars)
     % Build subject key from the 8 common headers of the exported table.
+    % Genotype/sex tokens are canonicalized (strain-aware, silent) so keys
+    % match outlier.internal.subjectKeysFromTable / animalSubjectKey.
     n = height(T);
     sk = repmat({''}, n, 1);
     for r = 1:n
@@ -215,6 +217,7 @@ function sk = makeSubjectKey(T, commonVars)
             valueToChar(T.(commonVars.Genotype)(r)), ...
             valueToChar(T.(commonVars.Litter)(r)), ...
             valueToChar(T.(commonVars.Toe_ID)(r))};
+        [parts{6}, parts{5}] = outlier.internal.canonicalKeyTokens(parts{6}, parts{5}, parts{2});
         sk{r} = strjoin(parts, '|');
     end
 end
@@ -250,6 +253,8 @@ end
 
 function sk = makeSubjectKeyFromMeta(md)
     % Build the same subject key from animalMetadata struct (mergedTable path).
+    % Genotype/sex tokens are canonicalized (strain-aware, silent) so keys
+    % match outlier.internal.subjectKeysFromTable / animalSubjectKey.
     getf = @(f) valueToChar(cohort.metrics.utils.getFieldOr(md, f, ''));
     parts = { ...
         getf('id'), ...       % Mouse_ID
@@ -267,6 +272,8 @@ function sk = makeSubjectKeyFromMeta(md)
     parts{4} = valueToChar(geneId);
     parts{7} = valueToChar(litterId);
     parts{8} = valueToChar(mouseNumber);
+
+    [parts{6}, parts{5}] = outlier.internal.canonicalKeyTokens(parts{6}, parts{5}, parts{2});
 
     sk = strjoin(parts, '|');
 end

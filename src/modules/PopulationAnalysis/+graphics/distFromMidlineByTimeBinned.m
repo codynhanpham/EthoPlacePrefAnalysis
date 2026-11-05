@@ -48,6 +48,10 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
 
     animalGenotypes = cellfun(@(x) {x.values().genotype}, {standardizedTable.animalMetadata}, 'UniformOutput', false);
     animalGenotypes = unique([animalGenotypes{:}]);
+    % Case-insensitive genotype grouping: collapse case-only duplicates
+    % (e.g. 'KO' vs 'ko'), keeping the first-seen token as display label.
+    [animalGenotypesLower, ~, genoGroupIdx] = unique(lower(cellfun(@strtrim, animalGenotypes, 'UniformOutput', false)));
+    animalGenotypes = animalGenotypes(genoGroupIdx);
     ngenotypes = length(animalGenotypes);
 
 
@@ -108,19 +112,20 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
             end
             strain = combo{2};
 
-            strainMask = strcmp(columnByStrainOrder, strain);
+            strainMask = strcmpi(columnByStrainOrder, strain);
             
             a = nexttile(t);
             hold(a, 'on');
             legendEntries = {};
             for genotypeIdx = 1:ngenotypes
                 genotype = animalGenotypes{genotypeIdx};
-                genotypeMask = strcmp(columnByGenotypeOrder, genotype);
+                % Case-insensitive genotype matching (KO/ko/Hom case drift merges)
+                genotypeMask = strcmpi(columnByGenotypeOrder, genotype);
                 genotypeSexData = struct();
 
                 for sexIdx = 1:nsexes
                     sex = animalSexes{sexIdx};
-                    sexMask = strcmp(columnBySexOrder, sex);
+                    sexMask = strcmpi(columnBySexOrder, sex);
                     combinedMask = strainMask & genotypeMask & sexMask;
                     if ~any(combinedMask)
                         continue;
@@ -215,18 +220,19 @@ function f = distFromMidlineByTimeBinned(standardizedTable,binSizeSec, kvargs)
                     end
 
                     % Plot the binned data
-                    if strcmpi(genotype, 'WT') || strcmpi(genotype, 'wildtype')
-                        lineStyle = '-';
-                        scatterMarker = 'o';
-                    elseif strcmpi(genotype, 'HET') || strcmpi(genotype, 'het')
-                        lineStyle = '-.';
-                        scatterMarker = '^';
-                    elseif strcmpi(genotype, 'HOM') || strcmpi(genotype, 'KO') || strcmpi(genotype, 'knockout')
-                        lineStyle = '--';
-                        scatterMarker = 's';
-                    else
-                        lineStyle = ':';
-                        scatterMarker = 'd';
+                    switch graphics.genotypeClass(genotype)
+                        case "wt"
+                            lineStyle = '-';
+                            scatterMarker = 'o';
+                        case "het"
+                            lineStyle = '-.';
+                            scatterMarker = '^';
+                        case "hom"
+                            lineStyle = '--';
+                            scatterMarker = 's';
+                        otherwise
+                            lineStyle = ':';
+                            scatterMarker = 'd';
                     end
                     plot(a, binCenters, binnedDistance, 'Color', lineColor, 'LineStyle', lineStyle, 'LineWidth', 1.5);
 

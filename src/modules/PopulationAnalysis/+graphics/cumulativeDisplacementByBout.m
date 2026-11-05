@@ -198,8 +198,8 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
             strain = combo{2};
             genotype = combo{3};
 
-            strainMask = strcmp(columnByStrainOrder, strain);
-            genotypeMask = strcmp(columnByGenotypeOrder, genotype);
+            strainMask = strcmpi(columnByStrainOrder, strain);
+            genotypeMask = strcmpi(columnByGenotypeOrder, genotype);
             genotypeSexData = dictionary(); % Use dictionary to handle stimulus names with spaces
 
                 % One tile per StimSet x Strain x Genotype combination.
@@ -208,7 +208,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
 
                 for sexIdx = 1:nsexes
                     sex = animalSexes{sexIdx};
-                    sexMask = strcmp(columnBySexOrder, sex);
+                    sexMask = strcmpi(columnBySexOrder, sex);
                     combinedMask = strainMask & genotypeMask & sexMask;
                     if ~any(combinedMask)
                         continue;
@@ -351,7 +351,7 @@ function f = cumulativeDisplacementByBout(standardizedTable, kvargs)
                 
                 for sexPlotIdx = 1:nsexes
                     sex = animalSexes{sexPlotIdx};
-                    sexMask = strcmp(columnBySexOrder, sex);
+                    sexMask = strcmpi(columnBySexOrder, sex);
                     combinedMask = strainMask & genotypeMask & sexMask;
                     if ~any(combinedMask)
                         continue;

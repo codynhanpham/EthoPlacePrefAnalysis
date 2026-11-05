@@ -237,8 +237,10 @@ function [fig, data] = fingerprintRadar(fp, kvargs)
         genoList = unique(string(rowLabels.Genotype(rowLabels.Strain == strainI)));
         genoList = genoList(lower(strtrim(genoList)) ~= refGenoN);
         % HOM first, then HET, then any other non-reference genotypes.
-        isHom = lower(genoList) == "hom";
-        isHet = lower(genoList) == "het";
+        % Class-based (case-insensitive; KO/Hem/Hom all count as hom).
+        genoClasses = graphics.genotypeClass(genoList);
+        isHom = genoClasses == "hom";
+        isHet = genoClasses == "het";
         orderKey = isHom * 0 + isHet * 1 + (~isHom & ~isHet) * 2;
         [~, genoRank] = sort(orderKey);
         genoList = genoList(genoRank);
@@ -509,8 +511,9 @@ end
 
 function c = genoBaseColor(genoName)
     % Genotype line colors: HOM #7391a7, HET #c6ac76; empty for others
-    % (they fall back to the gray sequence).
-    switch lower(strtrim(string(genoName)))
+    % (they fall back to the gray sequence). Class-based (case-insensitive;
+    % KO/Hem/Hom all count as hom).
+    switch graphics.genotypeClass(genoName)
         case "hom"
             c = [113, 145, 167] / 255;
         case "het"

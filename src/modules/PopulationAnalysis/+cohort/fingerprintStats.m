@@ -38,7 +38,10 @@ function out = fingerprintStats(perAnimalLong, fp, kvargs)
 
     %% Precompute row group indices ONCE (integer ids, no in-loop string work)
     strainS = string(perAnimalLong.Gene);
-    genoNormS = lower(strtrim(string(perAnimalLong.('Genotype$'))));
+    % Strain-aware canonicalization (case-insensitive; resolves KO/Hom/Hem
+    % variant drift per genotypes.info.yml). Undefined strains fall back to
+    % case-insensitive identity (lower/trim).
+    genoNormS = canonicalGenoNorm(string(perAnimalLong.('Genotype$')), strainS);
     sexS = string(perAnimalLong.('Sex$'));
     subjectKey = string(perAnimalLong.SubjectKey);
     values = double(perAnimalLong.Value);
@@ -93,12 +96,12 @@ function out = fingerprintStats(perAnimalLong, fp, kvargs)
         "|" + string(eligibleTable.Stimulus) + "|" + string(eligibleTable.Metric);
 
     stiCol = lookupIds(ctStrain, strainNames);
-    giCol = lookupIds(lower(strtrim(ctGeno)), genoNames);
+    giCol = lookupIds(canonicalGenoNorm(ctGeno, ctStrain), genoNames);
     sxiCol = lookupIds(ctSex, sexNames);
     ciCol = lookupIds(ctCtx, ctxNames);
 
     refDict = dictionary(string(referenceMap.Strain), ...
-        lower(strtrim(string(referenceMap.ReferenceGenotype))));
+        canonicalGenoNorm(string(referenceMap.ReferenceGenotype), string(referenceMap.Strain)));
     rgNCol = refDict(ctStrain);
     rgNCol(ismissing(rgNCol)) = "";
     rgCol = lookupIds(rgNCol, genoNames);
@@ -169,6 +172,32 @@ end
 
 function g = genoNormOf(x)
     g = lower(strtrim(string(x)));
+end
+
+
+function genoNorm = canonicalGenoNorm(genotype, strain)
+    %CANONICALGENONORM Strain-aware canonical genotype normalization (silent)
+    %   Resolves variant tokens (e.g. Mecp2 'KO' -> 'Hem') per genotypes.info.yml.
+    %   Undefined strains fall back to case-insensitive identity (lower/trim).
+    %   Silent: ingestion-time io.metadata.normalizeMetadataTable owns warnings.
+    rules = io.metadata.loadGenotypeInfo();
+    genotype = string(genotype);
+    strain = string(strain);
+    genoNorm = strings(size(genotype));
+    for i = 1:numel(genotype)
+        geno = strtrim(genotype(i));
+        strn = strtrim(strain(i));
+        if strlength(geno) == 0 || strlength(strn) == 0
+            genoNorm(i) = lower(geno);
+            continue;
+        end
+        idx = find(strcmpi({rules.byStrain.strain}, strn), 1);
+        if isempty(idx)
+            genoNorm(i) = lower(geno);
+        else
+            genoNorm(i) = string(io.metadata.canonicalGenotype(geno, strn, '', rules));
+        end
+    end
 end
 
 
@@ -284,7 +313,7 @@ function mahalTable = mahalanobisByCohort(fp, referenceMap, minCohortN)
     Z = double(perAnimalZ{:, zCols});
     strain = string(perAnimalZ.Gene);
     genotypeRaw = string(perAnimalZ.('Genotype$'));
-    genotype = lower(strtrim(genotypeRaw));
+    genotype = canonicalGenoNorm(genotypeRaw, strain);
     sex = string(perAnimalZ.('Sex$'));
 
     triples = [strain(:), genotype(:), sex(:)];
