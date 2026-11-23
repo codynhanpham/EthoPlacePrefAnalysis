@@ -46,7 +46,7 @@ function [status, message] = audio2hdf5(audioFiles, hdf5File, kvargs)
     %       status: A logical indicating whether the conversion was successful.
     %       message: A string containing a message about the operation.
     %
-    %   See also: io.stimuli.extractMetadata, io.stimuli.metadata2stimsamples, io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.exportHdf5
+    %   See also: io.stimuli.extractMetadata, io.stimuli.metadata2stimsamples, io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.exportHdf5, io.stimuli.spectrogram.importHdf5
 
     arguments
         audioFiles {mustBeNonempty}

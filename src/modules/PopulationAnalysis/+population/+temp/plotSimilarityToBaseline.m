@@ -183,6 +183,7 @@ function renderRankTab(parent, rankedTbl, ~, info, ~, kvargs)
     title(ax, sprintf('Similarity rank relative to the aggregate baseline; ordered by %s D^2', ...
         kvargs.D2RankLayer));
         colormap(ax, parula(256));
+    set(ax,'TickLabelInterpreter','none');
     cb = colorbar(ax);
     cb.Label.String = sprintf('%s empirical P', primaryLabel);
     legend(ax, 'Location', 'eastoutside');
@@ -248,6 +249,7 @@ function renderHeatmapTab(parent, rankedTbl, componentsLongTbl, info, baselineDa
     ylabel(axSpread, 'Baseline robust z');
     xlabel(axSpread, 'Feature');
     title(axSpread, 'Baseline feature spread used as the reference');
+    set(axSpread, 'TickLabelInterpreter', 'none');
     legend(axSpread, 'Location', 'eastoutside');
     grid(axSpread, 'on');
     hold(axSpread, 'off');
@@ -312,6 +314,7 @@ function renderPcaTab(parent, rankedTbl, componentsLongTbl, info, baselineData, 
     xlabel(ax, sprintf('PC1 (%.1f%%)', explainedVariance(combined, v, 1)));
     ylabel(ax, sprintf('PC2 (%.1f%%)', explainedVariance(combined, v, 2)));
     title(ax, sprintf('Combined baseline/test PCA (%d features)', numel(featureNames)));
+    set(ax,'TickLabelInterpreter','none');
     subtitle(ax, 'Baseline is gray context; test subjects are colored and labeled by ID');
     colormap(ax, parula(256));
     cb = colorbar(ax);
@@ -363,6 +366,7 @@ function renderProfileTab(parent, rankedTbl, componentsLongTbl, info, baselineDa
         xtickangle(ax, 35);
         title(ax, labels(i), 'Interpreter', 'none');
         ylabel(ax, 'Robust z');
+        set(ax,'TickLabelInterpreter','none');
         grid(ax, 'on');
         hold(ax, 'off');
     end

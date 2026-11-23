@@ -59,7 +59,7 @@ function handles = plot(spectrogramDb, kvargs)
     %           readoutLabel: uilabel showing the cursor's time/frequency position
     %               (standalone figures only; empty when embedded).
     %
-    %   See also: io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.validateDatabase, io.stimuli.spectrogram.exportHdf5
+    %   See also: io.stimuli.spectrogram.importHdf5, io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.validateDatabase, io.stimuli.spectrogram.exportHdf5
 
     arguments
         spectrogramDb (1,1) struct

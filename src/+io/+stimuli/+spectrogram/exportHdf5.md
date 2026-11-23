@@ -122,6 +122,16 @@ chapter fields are warned about and not stored.
 
 ## MATLAB reading example
 
+`io.stimuli.spectrogram.importHdf5` reads the file back into precompute-shaped database
+structs, e.g. for `io.stimuli.spectrogram.plot`:
+
+```matlab
+databases = io.stimuli.spectrogram.importHdf5('spectrograms.hdf5');
+io.stimuli.spectrogram.plot(databases(1));
+```
+
+Or read the datasets manually:
+
 ```matlab
 filePath = 'spectrograms.hdf5';
 time = h5read(filePath, '/<stimfileName>/<title>/time');          % 1×F -> F×1

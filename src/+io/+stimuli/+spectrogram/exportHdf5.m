@@ -47,7 +47,7 @@ function [status, message] = exportHdf5(spectrogramDb, outputFilePath, kvargs)
     %       status: logical indicating success.
     %       message: string message about the operation.
     %
-    %   See also: io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.validateDatabase, sdTable.makeSingleSubjectHdf5
+    %   See also: io.stimuli.spectrogram.importHdf5, io.stimuli.spectrogram.precompute, io.stimuli.spectrogram.validateDatabase, sdTable.makeSingleSubjectHdf5
 
     arguments
         spectrogramDb {mustBeNonempty}
