@@ -19,9 +19,9 @@ function t = binnedProgression(standardizedTables, kvargs)
 	%       'MetricType'  - 'distance' (default) or 'state'. Selects the metric
 	%                       column: 'Distance from Midline' or 'Arena Grid Score'.
 	%       'BinWidth'    - Number of consecutive bouts grouped into one time bin
-	%                       (default 1).
+	%                       (default 6).
 	%       'MeanWindowFrames' - Number of frames averaged at the start and end of
-	%                       each bout to compute per-bout progression (default 15).
+	%                       each bout to compute per-bout progression (default 30).
 	%       'StimuliSortedColumnNameDisplayOverride' - Optional display-name
 	%                       override for stimuli (see sdTable.mustBeStimuliSortedDisplayOverride).
 	%
